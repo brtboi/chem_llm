@@ -5,26 +5,17 @@ import numpy as np
 from pymatgen.core import Structure, Lattice
 from pymatgen.io.cif import CifWriter
 
-# ============================================================
 # SETTINGS
-# ============================================================
-
 N_STRUCTURES = 50
 
 BOHR_TO_ANG = 0.52917721092
 
 os.makedirs("structures", exist_ok=True)
 
-# ============================================================
 # REFERENCE INTERPOLATION
-# ============================================================
-
 def build_structure(par):
 
-    # --------------------------------------------------------
     # lattice interpolation (CsPbBr3, from bromideMixBuild.py)
-    # --------------------------------------------------------
-
     cubicScale = 11.09269 * math.sqrt(2)
 
     cubicA = 1.0
@@ -43,10 +34,7 @@ def build_structure(par):
     parB = cubicB*(1-par) + orthoB*par
     parC = cubicC*(1-par) + orthoC*par
 
-    # --------------------------------------------------------
     # internal distortion interpolation
-    # --------------------------------------------------------
-
     d1 = (0.25-0.19462)*par
     d2 = (0.25-0.19731)*par
     d3 = 0.03577*par
@@ -55,10 +43,7 @@ def build_structure(par):
     d6 = 0.04005*par
     d7 = 0.00509*par
 
-    # --------------------------------------------------------
     # lattice vectors
-    # --------------------------------------------------------
-
     basis_vectors = parScale * np.array([
         [ parA/math.sqrt(2), -parA/math.sqrt(2), 0 ],
         [ parB/math.sqrt(2),  parB/math.sqrt(2), 0 ],
@@ -67,10 +52,7 @@ def build_structure(par):
 
     basis_vectors *= BOHR_TO_ANG
 
-    # --------------------------------------------------------
     # species
-    # --------------------------------------------------------
-
     atoms = [
         "Cs","Cs","Cs","Cs",
         "Pb","Pb","Pb","Pb",
@@ -79,10 +61,7 @@ def build_structure(par):
         "Br","Br","Br","Br"
     ]
 
-    # --------------------------------------------------------
     # fractional coordinates
-    # --------------------------------------------------------
-
     coords = np.array([
 
         [0.50-d6, 0.5+d7, 0.25000],
@@ -125,10 +104,7 @@ def build_structure(par):
 
     return structure
 
-# ============================================================
 # RANDOM DISTORTIONS
-# ============================================================
-
 def randomize_structure(s):
 
     s = s.copy()
@@ -166,123 +142,7 @@ def randomize_structure(s):
 
 ANG_TO_BOHR = 1.889726125
 
-def write_qe_input(structure, n):
-
-    # --------------------------------------------------------
-    # lattice parameters
-    # --------------------------------------------------------
-
-    a, b, c = structure.lattice.abc
-
-    # QE celldm uses BOHR
-
-    a_bohr = a * ANG_TO_BOHR
-    b_bohr = b * ANG_TO_BOHR
-    c_bohr = c * ANG_TO_BOHR
-
-    celldm1 = a_bohr
-    celldm2 = b_bohr / a_bohr
-    celldm3 = c_bohr / a_bohr
-
-    # --------------------------------------------------------
-    # filename
-    # --------------------------------------------------------
-
-    filename = f"structures/{n:05d}.in"
-
-    with open(filename, "w") as f:
-
-        # ----------------------------------------------------
-        # CONTROL
-        # ----------------------------------------------------
-
-        f.write("&CONTROL\n")
-        f.write(f"   prefix = '{n:05d}'\n")
-        f.write("   calculation = 'scf'\n")
-        f.write("   restart_mode = 'from_scratch'\n")
-        f.write("   outdir = './'\n")
-        f.write("   wfcdir = './'\n")
-        f.write("   pseudo_dir = './'\n")
-        f.write("   verbosity = 'high'\n")
-        f.write("/\n")
-
-        # ----------------------------------------------------
-        # SYSTEM
-        # ----------------------------------------------------
-
-        f.write("&SYSTEM\n")
-        f.write("   ibrav = 8\n")
-        f.write(f"   celldm(1) = {celldm1:.6f}\n")
-        f.write(f"   celldm(2) = {celldm2:.6f}\n")
-        f.write(f"   celldm(3) = {celldm3:.6f}\n")
-        f.write("   nat = 20\n")
-        f.write("   ntyp = 3\n")
-        f.write("   ecutwfc = 56.0\n")
-        f.write("   ecutrho = 290.0\n")
-        f.write("   tot_charge = 0.0\n")
-        f.write("   nosym = .false.\n")
-        f.write("   occupations = 'fixed'\n")
-        f.write("   nspin = 4\n")
-        f.write("   noncolin = .true.\n")
-        f.write("   lspinorb = .true.\n")
-        f.write("/\n")
-
-        # ----------------------------------------------------
-        # ELECTRONS
-        # ----------------------------------------------------
-
-        f.write("&electrons\n")
-        f.write("   electron_maxstep = 100\n")
-        f.write("   conv_thr = 1.0d-8\n")
-        f.write("   mixing_mode = 'plain'\n")
-        f.write("   mixing_beta = 0.3\n")
-        f.write("   mixing_ndim = 8\n")
-        f.write("   diagonalization = 'david'\n")
-        f.write("   diago_david_ndim = 4\n")
-        f.write("   diago_full_acc = .false.\n")
-        f.write("/\n")
-
-        # ----------------------------------------------------
-        # SPECIES
-        # ----------------------------------------------------
-
-        f.write("ATOMIC_SPECIES\n")
-        f.write("Cs 132.90545 Cs.rel-pbe-spn-rrkjus_psl.1.0.0.UPF\n")
-        f.write("Pb 207.20000 Pb.rel-pbe-dn-rrkjus_psl.1.0.0.UPF\n")
-        f.write("Br 79.90400 Br.USPP.FR.PBE.3.4.UPF\n")
-        f.write("\n")
-
-        # ----------------------------------------------------
-        # POSITIONS
-        # ----------------------------------------------------
-
-        f.write("ATOMIC_POSITIONS crystal\n")
-
-        frac = structure.frac_coords % 1.0
-
-        for specie, pos in zip(structure.species, frac):
-
-            f.write(
-                f"{specie.symbol:<2} "
-                f"{pos[0]:.6f} "
-                f"{pos[1]:.6f} "
-                f"{pos[2]:.6f}\n"
-            )
-
-        f.write("\n")
-
-        # ----------------------------------------------------
-        # KPOINTS
-        # ----------------------------------------------------
-
-        f.write("K_POINTS automatic\n")
-        f.write("6 6 6 0 0 0\n")
-
-    print("Wrote", filename)
-
-# ============================================================
 # GENERATE DATASET
-# ============================================================
 all_scale_pars = []
 for n in range(N_STRUCTURES):
 
