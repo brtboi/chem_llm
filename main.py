@@ -24,8 +24,28 @@ from agent_core import run_agent
 #     In the final step, please provide a concise summary of the changes made, any assumptions made, and any remaining uncertainties requiring domain expertise
 # """
 
+# TASK = """
+#     Your task is to use the generate cif file to generate a cif file for Cs4Pb4Br12 with space group Pnma. Then, read the cif file and confirm that it makes sense scientifically.
+# """
+
+# TASK = """
+#     Your task is to create a version of the existing workflow in the ../example/ directory for a CsPbCl3 while preserving overall functionality
+#     Please open and creafully read ../example/setup_jobs.py.
+#     Directories ./calculations and ./template has already been made for you.
+#     Write in a note the function of each constant, function, randomization, including whether it is specific for CsPbBr3 or generic,
+#     determine which parts must be rewritten for the new target compound listed above.
+#     Then, write to a new file a python script that follows the same workflow structure but for the new target compound.
+#     Please use the generate cif tool to generate a cif file for CsPbCl3 at ./structures/structure_000.cif and NOT a python script.
+#     When writing setup_jobs.py, please use brent.hu@yale.edu as the email and m4735 as the iris slurm account.
+#     Please review to make sure it works and then run setup_jobs.py
+#     In the final step, please provide a concise summary of the changes made, any assumptions made, and any remaining uncertainties requiring domain expertise.
+# """
+
 TASK = """
-    Your task is to use the generate cif file to generate a cif file for CsPbBr3. Then, read the cif file and confirm that it makes sense scientifically.
+    Your task is to generate a .cif file for CsPbBr3. Do NOT use the generate cif file tool. Simply write to a new file.
+    The crystal should be of the space group Pnma with corner sharing octohedra and a unit cell of Cs4Pb4Br12.
+    Call the file CsPbBr3_model.cif.
+    After writing, please review the file to make sure all numbers look scientifically correct, and write a note with any assumptions made.
 """
 
 
