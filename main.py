@@ -41,12 +41,14 @@ from agent_core import run_agent
 #     In the final step, please provide a concise summary of the changes made, any assumptions made, and any remaining uncertainties requiring domain expertise.
 # """
 
-TASK = """
-    Your task is to generate a .cif file for CsPbBr3. Do NOT use the generate cif file tool. Simply write to a new file.
-    The crystal should be of the space group Pnma with corner sharing octohedra and a unit cell of Cs4Pb4Br12.
-    Call the file CsPbBr3_model.cif.
-    After writing, please review the file to make sure all numbers look scientifically correct, and write a note with any assumptions made.
-"""
+# TASK = """
+#     Your task is to generate a .cif file for CsPbBr3. Do NOT use the generate cif file tool. Simply write to a new file.
+#     The crystal should be of the space group Pnma with corner sharing octohedra and a unit cell of Cs4Pb4Br12.
+#     Call the file CsPbBr3_model.cif.
+#     After writing, please review the file to make sure all numbers look scientifically correct, and write a note with any assumptions made.
+# """
+
+
 
 
 def load_model():

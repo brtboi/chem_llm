@@ -4,8 +4,9 @@ import subprocess
 import sys
 import shutil
 import tempfile
+from mp_api.client import MPRester
 
-from config import READ_MAX_CHARS, CRYSTALLM_DIR, CRYSTALLM_PYTHON, CRYSTALLM_MODEL_DIR
+from config import READ_MAX_CHARS, CRYSTALLM_DIR, CRYSTALLM_PYTHON, CRYSTALLM_MODEL_DIR, MP_API_KEY
 
 TOOLS: list[dict] = []
 TOOL_DISPATCH: dict[str, callable] = {}
@@ -64,112 +65,67 @@ def run_python(path: str):
 
 @register_tool(
     "generate_cif",
-    "Generate a crystal structure CIF file for a given composition (and optional space group) using CrystaLLM. Please given composition in order of increasing electronegativity and of lowest subscripts.",
-    {"composition": "string", "space_group": "string (optional)", "output_path": "string"},
+    "Download a crystal structure CIF from the Materials Project. If multiple structures exist, the first matching result is used.",
+    {
+        "composition": "string",
+        "output_path": "string",
+        "space_group": "string (optional)",
+    },
 )
-def generate_cif(composition: str, output_path: str, space_group: str | None = None):
-    
+def generate_cif(
+    composition: str,
+    output_path: str,
+    space_group: str | None = None,
+):
     output_path = os.path.abspath(output_path)
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
-    with tempfile.TemporaryDirectory() as tmpdir:
+    try:
+        with MPRester(MP_API_KEY) as mpr:
+            docs = mpr.materials.summary.search(
+                formula=composition,
+                fields=["material_id", "structure", "symmetry"],
+            )
 
-        prompt_path = os.path.join(tmpdir, "prompt.txt")
+        if space_group is not None:
+            docs = [
+                d
+                for d in docs
+                if d.symmetry is not None
+                and (
+                    str(d.symmetry.number) == str(space_group)
+                    or d.symmetry.symbol.lower() == str(space_group).lower()
+                )
+            ]
 
-        # Step 1: create prompt
-        make_prompt_cmd = [
-            CRYSTALLM_PYTHON,
-            os.path.join(CRYSTALLM_DIR, "bin", "make_prompt_file.py"),
-            composition,
-            prompt_path,
-        ]
+        if not docs:
+            return {
+                "success": False,
+                "stderr": f"No Materials Project entries found for {composition}"
+                + (
+                    f" with space group {space_group}"
+                    if space_group is not None
+                    else ""
+                ),
+            }
 
-        if space_group:
-            make_prompt_cmd.extend(["--spacegroup", space_group])
+        doc = docs[0]
 
-        r1 = subprocess.run(
-            make_prompt_cmd,
-            capture_output=True,
-            text=True,
+        doc.structure.to(
+            filename=output_path,
+            fmt="cif",
         )
-
-        if r1.returncode != 0:
-            return {
-                "success": False,
-                "stage": "make_prompt",
-                "stdout": r1.stdout,
-                "stderr": r1.stderr,
-            }
-
-        # Step 2: Sample raw CIF
-        sample_cmd = [
-            CRYSTALLM_PYTHON,
-            os.path.join(CRYSTALLM_DIR, "bin", "sample.py"),
-            f"out_dir={CRYSTALLM_MODEL_DIR}",
-            f"start=FILE:{prompt_path}",
-            "num_samples=1",
-            "target=file",
-        ]
-
-        r2 = subprocess.run(
-            sample_cmd,
-            capture_output=True,
-            text=True,
-            cwd=tmpdir,      # sample_1.cif will be written here
-        )
-
-        if r2.returncode != 0:
-            return {
-                "success": False,
-                "stage": "sample",
-                "stdout": r2.stdout,
-                "stderr": r2.stderr,
-            }
-
-        # Step 3: Postprocess
-        processed_dir = os.path.join(tmpdir, "processed")
-
-        post_cmd = [
-            CRYSTALLM_PYTHON,
-            os.path.join(CRYSTALLM_DIR, "bin", "postprocess.py"),
-            tmpdir,
-            processed_dir,
-        ]
-
-        r3 = subprocess.run(
-            post_cmd,
-            capture_output=True,
-            text=True,
-        )
-
-        if r3.returncode != 0:
-            return {
-                "success": False,
-                "stage": "postprocess",
-                "stdout": r3.stdout,
-                "stderr": r3.stderr,
-            }
-
-        # Step 4: Find processed CIF
-        cifs = [
-            f for f in os.listdir(processed_dir)
-            if f.endswith(".cif")
-        ]
-
-        if len(cifs) == 0:
-            return {
-                "success": False,
-                "stage": "postprocess",
-                "stderr": "No processed CIF produced.",
-            }
-
-        src = os.path.join(processed_dir, cifs[0])
-
-        shutil.move(src, output_path)
 
         return {
             "success": True,
+            "material_id": str(doc.material_id),
             "output_path": output_path,
+        }
+
+    except Exception as e:
+        return {
+            "success": False,
+            "stderr": str(e),
         }
 
 # --- State-mutating tools (schemas only; behavior lives in agent_core) ---

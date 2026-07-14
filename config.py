@@ -1,5 +1,8 @@
 import os
+from dotenv import load_dotenv
 from pathlib import Path
+
+load_dotenv()
 
 # --- Model ---
 HF_TOKEN = os.environ.get("HF_TOKEN")
@@ -16,11 +19,14 @@ MAX_AGENT_STEPS = 4
 
 # --- Tool settings ---
 READ_MAX_CHARS = 10000
+
 CRYSTALLM_DIR = Path("tools/CrystaLLM").resolve()
 CRYSTALLM_PYTHON = CRYSTALLM_DIR / ".venv" / "bin" / "python"
 CRYSTALLM_MODEL_DIR = CRYSTALLM_DIR / "crystallm_v1_large"
 
+MP_API_KEY = os.environ.get("MP_API_KEY")
+
 # --- Working directory ---
 # The directory the agent operates in (contains ./calculations, ./template,
 # and the example scripts it reads/writes). Override with MATAGENT_WORK_DIR.
-WORK_DIR = os.environ.get("MATAGENT_WORK_DIR", "test3")
+WORK_DIR = Path(os.environ.get("MATAGENT_WORK_DIR", "test3")).resolve()
