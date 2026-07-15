@@ -6,8 +6,9 @@ this module has no import-time side effects and can be reused/tested with a
 different model or a mock.
 """
 import json
+import datetime
 
-from config import MAX_AGENT_STEPS, MAX_NEW_TOKENS, TEMPERATURE, DO_SAMPLE
+from config import MAX_AGENT_STEPS, MAX_NEW_TOKENS, TEMPERATURE, DO_SAMPLE, WORK_DIR, LOG_FILE
 from state import AgentState
 from tools import TOOLS, TOOL_DISPATCH
 
@@ -102,7 +103,8 @@ def generate(prompt: str, model, tokenizer, remove_prompt_from_output=True, prin
     return decoded.strip()
 
 
-def run_agent(task: str, model, tokenizer, max_steps: int = MAX_AGENT_STEPS, verbose: bool = True) -> AgentState:
+def run_agent(task: str, model, tokenizer, max_steps: int = MAX_AGENT_STEPS, verbose: bool = True, log_file = LOG_FILE) -> AgentState:
+    start_time = time.perf_counter()
     state = AgentState(task)
 
     for step in range(1, max_steps + 1):
@@ -137,5 +139,22 @@ def run_agent(task: str, model, tokenizer, max_steps: int = MAX_AGENT_STEPS, ver
             break
     else:
         state.add_note("Max steps reached without explicit 'done' call.")
-
+        
+    if log_file:
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+    
+        log = {
+            "timestamp": datetime.now().isoformat(),
+            "model": config.MODEL_NAME,
+            "work_dir": str(config.WORK_DIR),
+            "runtime": time.perf_counter() - start_time,
+            "num_steps": len(state.history),
+            "completed": state.done,
+            "final_state": state.to_dict(),
+        }
+    
+        with log_file.open("a", encoding="utf-8") as f:
+            f.write(json.dump(log, f))
+            f.write("\n")
+    
     return state

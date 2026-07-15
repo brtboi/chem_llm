@@ -15,7 +15,7 @@ MAX_NEW_TOKENS = 5000
 TEMPERATURE = 0.0
 DO_SAMPLE = False
 
-MAX_AGENT_STEPS = 16
+MAX_AGENT_STEPS = 24
 
 # --- Tool settings ---
 READ_MAX_CHARS = 10000
@@ -26,7 +26,9 @@ CRYSTALLM_MODEL_DIR = CRYSTALLM_DIR / "crystallm_v1_large"
 
 MP_API_KEY = os.environ.get("MP_API_KEY")
 
+LOG_FILE = Path("logs/log.jsonl").resolve()
+
 # --- Working directory ---
 # The directory the agent operates in (contains ./calculations, ./template,
 # and the example scripts it reads/writes). Override with MATAGENT_WORK_DIR.
-WORK_DIR = Path(os.environ.get("MATAGENT_WORK_DIR", "test4")).resolve()
+WORK_DIR = Path(os.environ.get("MATAGENT_WORK_DIR", "test5")).resolve()
