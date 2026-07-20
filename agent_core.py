@@ -6,7 +6,8 @@ this module has no import-time side effects and can be reused/tested with a
 different model or a mock.
 """
 import json
-import datetime
+from datetime import datetime
+import time
 
 from config import MAX_AGENT_STEPS, MAX_NEW_TOKENS, TEMPERATURE, DO_SAMPLE, WORK_DIR, LOG_FILE
 from state import AgentState
@@ -14,7 +15,7 @@ from tools import TOOLS, TOOL_DISPATCH
 
 SYSTEM_PROMPT_TEMPLATE = (
     "You are a tool-using coding agent that solves tasks step by step.\n"
-    Your objective is to complete the task using the fewest necessary tool calls. Once the task is complete and verified, immediately call the \'done\' tool.
+    "Your objective is to complete the task using the fewest necessary tool calls. Once the task is complete and verified, immediately call the \'done\' tool."
     "You MUST respond ONLY in valid JSON, one tool call per response.\n"
     "No markdown. No explanations outside the JSON.\n"
     "Output format:\n"
