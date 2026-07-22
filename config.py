@@ -7,6 +7,8 @@ load_dotenv()
 # --- Model ---
 HF_TOKEN = os.environ.get("HF_TOKEN")
 HF_HOME = os.environ.get("HF_HOME", "/pscratch/sd/b/brenthu/huggingface")
+print("HF_TOKEN: ", HF_TOKEN)
+print("HF_HOME: ", HF_HOME)
 
 MODEL_NAME = "Qwen/Qwen3-30B-A3B-Instruct-2507"
 
@@ -31,4 +33,4 @@ LOG_FILE = Path("logs/log.jsonl").resolve()
 # --- Working directory ---
 # The directory the agent operates in (contains ./calculations, ./template,
 # and the example scripts it reads/writes). Override with MATAGENT_WORK_DIR.
-WORK_DIR = Path(os.environ.get("MATAGENT_WORK_DIR", "test5")).resolve()
+WORK_DIR = Path(os.environ.get("MATAGENT_WORK_DIR", "test7")).resolve()
