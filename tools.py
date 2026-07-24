@@ -65,17 +65,38 @@ def run_python(path: str):
 
 @register_tool(
     "generate_cif",
-    "Download a crystal structure CIF from the Materials Project. If multiple structures exist, the first matching result is used.",
+    (
+        "Download a crystal structure CIF from the Materials Project. "
+        "If multiple structures match, the first matching result is selected. "
+        "Space group can be specified using spacegroup_symbol and/or "
+        "spacegroup_number. If both are provided, they must refer to the same "
+        "space group. Space group symbols must use Materials Project Hermann-Mauguin "
+        "format with underscores for subscripts (e.g. P4_2/mnm). "
+        "Note: the CIF file metadata may sometimes report an incorrect or lower "
+        "symmetry space group (for example P1 or P4) even when the atomic structure "
+        "itself corresponds to the requested space group. Do not reject or modify "
+        "the CIF solely because the space group label inside the file differs from "
+        "the requested space group. Use the Materials Project symmetry information "
+        "returned by this tool as the authoritative source."
+    ),
     {
         "composition": "string",
         "output_path": "string",
-        "space_group": "string (optional)",
+        "spacegroup_symbol": (
+            "string (optional). Hermann-Mauguin space group symbol in Materials "
+            "Project format, using underscores for subscripts "
+            "(e.g. P4_2/mnm)."
+        ),
+        "spacegroup_number": (
+            "int (optional). International Tables space group number (1-230)."
+        ),
     },
 )
 def generate_cif(
     composition: str,
     output_path: str,
-    space_group: str | None = None,
+    spacegroup_symbol: str | None = None,
+    spacegroup_number: int | None = None,
 ):
     output_path = os.path.abspath(output_path)
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -87,41 +108,85 @@ def generate_cif(
                 fields=["material_id", "structure", "symmetry"],
             )
 
-        if space_group is not None:
-            docs = [
-                d
-                for d in docs
-                if d.symmetry is not None
-                and (
-                    str(d.symmetry.number) == str(space_group)
-                    or d.symmetry.symbol.lower() == str(space_group).lower()
+        if not docs:
+            return {
+                "success": False,
+                "stderr": f"No Materials Project entries found for {composition}.",
+            }
+
+        # Filter candidates by supplied space group information
+        filtered_docs = []
+
+        for doc in docs:
+            if doc.symmetry is None:
+                continue
+
+            matches = True
+
+            if spacegroup_number is not None:
+                matches &= doc.symmetry.number == spacegroup_number
+
+            if spacegroup_symbol is not None:
+                matches &= (
+                    doc.symmetry.symbol.lower()
+                    == spacegroup_symbol.lower()
                 )
-            ]
+
+            if matches:
+                filtered_docs.append(doc)
+
+        docs = filtered_docs
 
         if not docs:
             return {
                 "success": False,
-                "stderr": f"No Materials Project entries found for {composition}"
-                + (
-                    f" with space group {space_group}"
-                    if space_group is not None
-                    else ""
+                "stderr": (
+                    f"No Materials Project entries found for {composition} "
+                    f"matching space group "
+                    f"{spacegroup_symbol if spacegroup_symbol else ''} "
+                    f"{spacegroup_number if spacegroup_number else ''}."
                 ),
             }
 
-        candidate_material_ids = [str(d.material_id) for d in docs]
+        # Verify symbol and number consistency if both were supplied
+        selected_doc = docs[0]
 
-        doc = docs[0]
+        if (
+            spacegroup_symbol is not None
+            and spacegroup_number is not None
+        ):
+            if (
+                selected_doc.symmetry.symbol != spacegroup_symbol
+                or selected_doc.symmetry.number != spacegroup_number
+            ):
+                return {
+                    "success": False,
+                    "stderr": (
+                        "Space group mismatch: "
+                        f"provided ({spacegroup_symbol}, {spacegroup_number}), "
+                        f"but Materials Project returned "
+                        f"({selected_doc.symmetry.symbol}, "
+                        f"{selected_doc.symmetry.number})."
+                    ),
+                }
 
-        doc.structure.to(
+        candidate_material_ids = [
+            str(d.material_id) for d in docs
+        ]
+
+        selected_doc.structure.to(
             filename=output_path,
             fmt="cif",
         )
 
         return {
             "success": True,
-            "selected_material_id": str(doc.material_id),
+            "selected_material_id": str(selected_doc.material_id),
             "candidate_material_ids": candidate_material_ids,
+            "space_group": {
+                "symbol": selected_doc.symmetry.symbol,
+                "number": selected_doc.symmetry.number,
+            },
             "output_path": output_path,
         }
 

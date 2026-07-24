@@ -33,4 +33,4 @@ LOG_FILE = Path("logs/log.jsonl").resolve()
 # --- Working directory ---
 # The directory the agent operates in (contains ./calculations, ./template,
 # and the example scripts it reads/writes). Override with MATAGENT_WORK_DIR.
-WORK_DIR = Path(os.environ.get("MATAGENT_WORK_DIR", "test7")).resolve()
+WORK_DIR = Path(os.environ.get("MATAGENT_WORK_DIR", "test8")).resolve()
