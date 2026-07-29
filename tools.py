@@ -6,7 +6,7 @@ import shutil
 import tempfile
 from mp_api.client import MPRester
 
-from config import READ_MAX_CHARS, CRYSTALLM_DIR, CRYSTALLM_PYTHON, CRYSTALLM_MODEL_DIR, MP_API_KEY
+from config import READ_MAX_CHARS, PSEUDOS_DIR, MP_API_KEY
 
 TOOLS: list[dict] = []
 TOOL_DISPATCH: dict[str, callable] = {}
@@ -195,6 +195,48 @@ def generate_cif(
             "success": False,
             "stderr": str(e),
         }
+
+@register_tool(
+    "fetch_pseudopotential",
+    (
+        "Fetch a pseudopotential (.upf) file for a given element "
+        "and copy it to output_path."
+    ),
+    {
+        "element": "string (e.g. 'Br', 'Cs', 'Pb')",
+        "output_path": "string",
+    },
+)
+def fetch_pseudopotential(element: str, output_path: str):
+    element = element.strip()
+    src_path = Path(PSEUDOS_DIR) / f"{element}.upf"
+
+    if not src_path.exists():
+        candidates = [
+            p for p in Path(PSEUDOS_DIR).glob("*.upf")
+            if p.stem.lower() == element.lower()
+        ]
+        if not candidates:
+            return {
+                "success": False,
+                "stderr": f"No pseudopotential found for element '{element}' in {PSEUDOS_DIR}",
+            }
+        src_path = candidates[0]
+
+    output_path = Path(output_path).expanduser().resolve()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        shutil.copy2(src_path, output_path)
+    except Exception as e:
+        return {"success": False, "stderr": str(e)}
+
+    return {
+        "success": True,
+        "element": element,
+        "source_path": str(src_path),
+        "output_path": str(output_path),
+    }
 
 # --- State-mutating tools (schemas only; behavior lives in agent_core) ---
 TOOLS.append({

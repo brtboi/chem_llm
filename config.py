@@ -26,6 +26,8 @@ CRYSTALLM_DIR = Path("tools/CrystaLLM").resolve()
 CRYSTALLM_PYTHON = CRYSTALLM_DIR / ".venv" / "bin" / "python"
 CRYSTALLM_MODEL_DIR = CRYSTALLM_DIR / "crystallm_v1_large"
 
+PSEUDOS_DIR = Path("pseudos").resolve()
+
 MP_API_KEY = os.environ.get("MP_API_KEY")
 
 LOG_FILE = Path("logs/log.jsonl").resolve()
