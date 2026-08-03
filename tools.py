@@ -5,8 +5,10 @@ import sys
 import shutil
 import tempfile
 from mp_api.client import MPRester
+from pseudohub import get_pseudo, get_hints
+from pseudohub.exceptions import InvalidParameterError
 
-from config import READ_MAX_CHARS, PSEUDOS_DIR, MP_API_KEY
+from config import READ_MAX_CHARS, MP_API_KEY
 
 TOOLS: list[dict] = []
 TOOL_DISPATCH: dict[str, callable] = {}
@@ -68,10 +70,11 @@ def run_python(path: str):
     (
         "Download a crystal structure CIF from the Materials Project. "
         "If multiple structures match, the first matching result is selected. "
-        "Space group can be specified using spacegroup_symbol and/or "
+        "Space group must be specified using spacegroup_symbol and/or "
         "spacegroup_number. If both are provided, they must refer to the same "
         "space group. Space group symbols must use Materials Project Hermann-Mauguin "
-        "format with underscores for subscripts (e.g. P4_2/mnm). "
+        "format with underscores for subscripts and dashes for inversion bars (e.g. P4_2/mnm, Fd-3m). "
+        "Do NOT use tool without specifying space group with either number or symbol"
         "Note: the CIF file metadata may sometimes report an incorrect or lower "
         "symmetry space group (for example P1 or P4) even when the atomic structure "
         "itself corresponds to the requested space group. Do not reject or modify "
@@ -84,8 +87,8 @@ def run_python(path: str):
         "output_path": "string",
         "spacegroup_symbol": (
             "string (optional). Hermann-Mauguin space group symbol in Materials "
-            "Project format, using underscores for subscripts "
-            "(e.g. P4_2/mnm)."
+            "Project format, using underscores for subscripts and dashes for inversion bars"
+            "(e.g. P4_2/mnm, Fd-3m)."
         ),
         "spacegroup_number": (
             "int (optional). International Tables space group number (1-230)."
@@ -196,47 +199,106 @@ def generate_cif(
             "stderr": str(e),
         }
 
+
 @register_tool(
-    "fetch_pseudopotential",
+    "get_pseudopotential",
     (
-        "Fetch a pseudopotential (.upf) file for a given element "
-        "and copy it to output_path."
+        "Fetch a pseudopotential file for an element from Pseudo-Dojo (via the "
+        "pseudohub package) and save it to disk. Also returns the recommended "
+        "plane-wave energy cutoff (ecut, in Ha) for the requested accuracy level, "
+        "which should be used when building the Quantum ESPRESSO input file. "
+        "kind must be 'nc' (norm-conserving) or 'paw'. relativity must be 'sr' "
+        "(scalar-relativistic) or 'fr' (fully-relativistic, required for spin-orbit "
+        "coupling calculations). generator is the DFT functional the pseudopotential "
+        "was generated with (e.g. 'pbe', 'pbesol', 'pw'). accuracy must be "
+        "'standard' or 'stringent'. format must be a valid pseudopotential file "
+        "format (e.g. 'upf', 'psp8'); Quantum ESPRESSO requires 'upf'. "
+        "Not every (kind, relativity, generator, accuracy) combination has a "
+        "corresponding Pseudo-Dojo table -- if the call fails, check the error "
+        "message's suggestions and retry with a valid combination."
     ),
     {
-        "element": "string (e.g. 'Br', 'Cs', 'Pb')",
-        "output_path": "string",
+        "element": (
+            "string or int. Element symbol (e.g. 'Si') or atomic number (e.g. 14)."
+        ),
+        "output_path": "string. Path (file or directory) to save the pseudopotential to.",
+        "kind": "string (optional, default 'nc'). 'nc' or 'paw'.",
+        "relativity": (
+            "string (optional, default 'sr'). 'sr' (scalar-relativistic) or "
+            "'fr' (fully-relativistic; required for spin-orbit coupling)."
+        ),
+        "generator": (
+            "string (optional, default 'pbe'). DFT functional used to generate "
+            "the pseudopotential, e.g. 'pbe', 'pbesol', 'pw'."
+        ),
+        "accuracy": (
+            "string (optional, default 'standard'). 'standard' or 'stringent'."
+        ),
+        "format": (
+            "string (optional, default 'upf'). Pseudopotential file format, "
+            "e.g. 'upf', 'psp8'. Use 'upf' for Quantum ESPRESSO."
+        ),
+        "hint_level": (
+            "string (optional, default 'normal'). Accuracy level used to look up "
+            "the recommended ecut: 'low', 'normal', or 'high'."
+        ),
     },
 )
-def fetch_pseudopotential(element: str, output_path: str):
-    element = element.strip()
-    src_path = Path(PSEUDOS_DIR) / f"{element}.upf"
-
-    if not src_path.exists():
-        candidates = [
-            p for p in Path(PSEUDOS_DIR).glob("*.upf")
-            if p.stem.lower() == element.lower()
-        ]
-        if not candidates:
-            return {
-                "success": False,
-                "stderr": f"No pseudopotential found for element '{element}' in {PSEUDOS_DIR}",
-            }
-        src_path = candidates[0]
-
-    output_path = Path(output_path).expanduser().resolve()
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+def get_pseudopotential(
+    element: str | int,
+    output_path: str,
+    kind: str = "nc",
+    relativity: str = "sr",
+    generator: str = "pbe",
+    accuracy: str = "standard",
+    format: str = "upf",
+    hint_level: str = "normal",
+):
+    output_path = os.path.abspath(output_path)
+    os.makedirs(
+        output_path if os.path.isdir(output_path) or output_path.endswith(os.sep)
+        else os.path.dirname(output_path),
+        exist_ok=True,
+    )
 
     try:
-        shutil.copy2(src_path, output_path)
-    except Exception as e:
-        return {"success": False, "stderr": str(e)}
+        saved_path = get_pseudo(
+            element,
+            kind=kind,
+            relativity=relativity,
+            generator=generator,
+            accuracy=accuracy,
+            format=format,
+            output=output_path,
+        )
 
-    return {
-        "success": True,
-        "element": element,
-        "source_path": str(src_path),
-        "output_path": str(output_path),
-    }
+        try:
+            hints = get_hints(element, level=hint_level)
+        except Exception:
+            hints = None
+
+        return {
+            "success": True,
+            "element": element,
+            "kind": kind,
+            "relativity": relativity,
+            "generator": generator,
+            "accuracy": accuracy,
+            "format": format,
+            "output_path": str(saved_path),
+            "hints": hints,
+        }
+
+    except InvalidParameterError as e:
+        return {
+            "success": False,
+            "stderr": str(e),
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "stderr": str(e),
+        }
 
 # --- State-mutating tools (schemas only; behavior lives in agent_core) ---
 TOOLS.append({

@@ -9,18 +9,16 @@ N_STRUCTURES = 50
 # Output directory
 os.makedirs("structures", exist_ok=True)
 
-# Base structure from Materials Project (mp-2657, rutile TiO2, P4_2/mnm)
+# Base structure from Materials Project (mp-66, diamond, Fd-3m space group)
 # Read the CIF file to get the base structure
-base_structure = Structure.from_file("rutile_TiO2.cif")
+base_structure = Structure.from_file("diamond.cif")
 
 # Define Debye-Waller-like thermal displacement parameters (in Angstroms) at room temperature
-# Based on experimental and DFT studies of rutile TiO2:
-# - Ti: ~0.05–0.1 Å
-# - O: ~0.1–0.15 Å
-# We use a slightly conservative average: Ti = 0.075 Å, O = 0.125 Å
+# For diamond (C atoms), based on experimental and DFT studies:
+# - Carbon: ~0.03–0.06 Å at room temperature
+# We use a conservative average: 0.05 Å
 DISPLACEMENT_MAP = {
-    "Ti": 0.075,
-    "O": 0.125
+    "C": 0.05
 }
 
 # Function to generate a perturbed structure from the base structure
@@ -55,7 +53,7 @@ def perturb_structure(structure, seed=None):
     return s
 
 # Generate 50 perturbed structures (51 total including base)
-print("Generating 51 TiO2 structures (1 base + 50 perturbed)...")
+print("Generating 51 diamond structures (1 base + 50 perturbed)...")
 
 # Write the base structure first
 base_filename = "structures/structure_000.cif"
