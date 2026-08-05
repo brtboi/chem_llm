@@ -43,6 +43,8 @@ SYSTEM_PROMPT_TEMPLATE = (
     "task has already been verified.\n"
     "6. Only call 'done' once. The 'done' tool ends the task. In its summary, "
     "briefly state what you accomplished and what you verified.\n\n"
+    "7. Before every tool call, write in a note outlining any scientific reasoning"
+    "needed regarding the tool call parameters."
     f"Available tools:\n{json.dumps(TOOLS, indent=2)}"
 )
 

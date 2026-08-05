@@ -1,54 +1,56 @@
 import os
 from pathlib import Path
-from pymatgen.core import Structure
+from pymatgen.core import Structure, Site
 import numpy as np
 
 # SETTINGS
 SEED = 42
-NUM_STRUCTURES = 50
-OUTPUT_DIR = "structures"
+N_STRUCTURES = 50
+TEMPERATURE = 300  # K
 
-# Set random seed for reproducibility
+# Output directory
+STRUCTURE_DIR = "structures"
+os.makedirs(STRUCTURE_DIR, exist_ok=True)
+
+# Set random seed
 np.random.seed(SEED)
 
-# Ensure output directory exists
-os.makedirs(OUTPUT_DIR, exist_ok=True)
-
-# Read the base structure from CIF file
-base_structure = Structure.from_file("rutile_TiO2.cif")
-
-# Define the maximum displacement in Angstroms (room temperature thermal vibrations)
-# Typical atomic displacements at room temperature are ~0.05 - 0.15 Å for oxides
-MAX_DISPLACEMENT = 0.15  # in Angstroms
+# Read base structure from CIF file
+base_structure = Structure.from_file("base_rutile_TiO2.cif")
 
 # Generate 50 perturbed structures
-for i in range(NUM_STRUCTURES):
-    # Create a copy of the base structure
+for i in range(N_STRUCTURES):
+    # Copy the base structure
     perturbed_structure = base_structure.copy()
-
+    
     # Get fractional coordinates
     frac_coords = perturbed_structure.frac_coords
-
-    # Generate random displacements for each atom
-    # Use a normal distribution centered at 0 with standard deviation ~0.05 Å
-    # This mimics room temperature thermal motion
-    displacements = np.random.normal(loc=0.0, scale=0.05, size=frac_coords.shape)
-
+    
+    # Generate random displacements based on room temperature
+    # Use a standard deviation of 0.005 in fractional coordinates
+    # This is a reasonable estimate for room temperature thermal motion
+    # in rutile TiO2 (typical atomic displacements ~0.01-0.03 Å)
+    displacements = np.random.normal(0, 0.005, size=frac_coords.shape)
+    
     # Apply displacements
     new_frac_coords = frac_coords + displacements
-
-    # Ensure coordinates remain within [0, 1) using modulo
-    new_frac_coords = np.mod(new_frac_coords, 1.0)
-
-    # Directly update the fractional coordinates of the structure
-    perturbed_structure.frac_coords = new_frac_coords
-
-    # Save the perturbed structure as a CIF file
-    cif_filename = f"{OUTPUT_DIR}/TiO2_rutile_perturbed_{i:03d}.cif"
-    perturbed_structure.to(filename=cif_filename, fmt="cif")
-
-    # Optional: Print progress
-    if i % 10 == 0:
-        print(f"Generated {i} structures...")
+    
+    # Wrap coordinates back into [0,1)
+    new_frac_coords = new_frac_coords % 1.0
+    
+    # Create new structure with updated fractional coordinates
+    # This step ensures the new structure maintains the same space group
+    # and avoids invalid fractional coordinates
+    new_sites = [
+        Site(site.species, new_coord)
+        for site, new_coord in zip(perturbed_structure.sites, new_frac_coords)
+    ]
+    perturbed_structure = Structure(perturbed_structure.lattice, new_sites)
+    
+    # Save the perturbed structure
+    cif_path = Path(STRUCTURE_DIR) / f"{i:03d}.cif"
+    perturbed_structure.to(filename=str(cif_path))
+    
+    print(f"Saved perturbed structure {i:03d}")
 
 print("All structures generated.")

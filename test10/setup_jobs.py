@@ -123,7 +123,7 @@ def structure_to_qe(structure, prefix, calculation):
 
 def write_submit_script(calc_path, prefix):
     submit_text = f"""#!/bin/bash
-#SBATCH -A m4868
+#SBATCH -A 
 #SBATCH -J ti2_{prefix}
 #SBATCH -C gpu
 #SBATCH --qos=regular
@@ -131,7 +131,7 @@ def write_submit_script(calc_path, prefix):
 #SBATCH --ntasks-per-node=4
 #SBATCH --time 03:00:00
 #SBATCH --mail-type=ALL
-#SBATCH --mail-user=daniel_chabeda@berkeley.edu
+#SBATCH --mail-user=
 
 module load espresso
 
