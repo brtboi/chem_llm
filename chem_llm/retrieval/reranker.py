@@ -4,8 +4,8 @@ calls `.predict()` on an off-the-shelf sentence-transformers CrossEncoder
 DOC_RERANKER_MODEL. Loading is deferred to first use for the same reason
 as EmbeddingModel.
 """
-from retrieval import config
-from retrieval.models import ScoredChunk
+from . import config
+from .models import ScoredChunk
 
 
 class Reranker:

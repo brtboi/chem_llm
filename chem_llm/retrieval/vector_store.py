@@ -11,10 +11,11 @@ else in retrieval/ depends on how similarity search is implemented
 internally.
 """
 import json
+from pathlib import Path
 
 import numpy as np
 
-from retrieval import config
+from . import config
 
 
 class VectorStore:
@@ -37,14 +38,14 @@ class VectorStore:
         top_idx = top_idx[np.argsort(-scores[top_idx])]
         return [(self.ids[i], float(scores[i])) for i in top_idx]
 
-    def save(self, path=None) -> None:
+    def save(self, path: Path | None = None) -> None:
         path = path or config.VECTOR_INDEX_DIR
         path.mkdir(parents=True, exist_ok=True)
         np.save(path / "vectors.npy", self.vectors)
         (path / "ids.json").write_text(json.dumps(self.ids))
 
     @classmethod
-    def load(cls, path=None) -> "VectorStore":
+    def load(cls, path: Path | None = None) -> "VectorStore":
         path = path or config.VECTOR_INDEX_DIR
         store = cls()
         store.vectors = np.load(path / "vectors.npy")
@@ -52,6 +53,6 @@ class VectorStore:
         return store
 
     @classmethod
-    def exists(cls, path=None) -> bool:
+    def exists(cls, path: Path | None = None) -> bool:
         path = path or config.VECTOR_INDEX_DIR
         return (path / "vectors.npy").exists() and (path / "ids.json").exists()

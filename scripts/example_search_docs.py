@@ -1,15 +1,12 @@
 #!/usr/bin/env python3
 """Example usage of the documentation retrieval system.
 
-Run after building the index (see scripts/build_doc_index.py):
+Run after building the index (see scripts/build_doc_index.py). Requires
+chem_llm to be installed (`uv sync`, from the repo root):
 
     python scripts/example_search_docs.py
 """
 import json
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 EXAMPLE_QUERIES = [
     "How do I create a pymatgen Structure from a CIF?",
@@ -26,7 +23,7 @@ def via_agent_tool():
     exactly as agent_core.execute_tool() would for a `search_docs` tool
     call emitted by the model.
     """
-    from tools import TOOL_DISPATCH
+    from chem_llm.tools import TOOL_DISPATCH
 
     print("=== via the search_docs agent tool ===\n")
     for query in EXAMPLE_QUERIES:
@@ -45,9 +42,9 @@ def via_retriever_directly():
     """Lower-level usage, e.g. for evaluation/debugging outside the agent
     loop -- construct a DocRetriever once and reuse it.
     """
-    from retrieval.hybrid_search import DocRetriever
+    from chem_llm.retrieval.hybrid_search import DocRetriever
 
-    print("=== via retrieval.hybrid_search.DocRetriever directly ===\n")
+    print("=== via chem_llm.retrieval.hybrid_search.DocRetriever directly ===\n")
     retriever = DocRetriever()
 
     query = "How do I set smearing parameters?"

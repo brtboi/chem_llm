@@ -9,9 +9,9 @@ import json
 from datetime import datetime
 import time
 
-from config import MAX_AGENT_STEPS, MAX_NEW_TOKENS, TEMPERATURE, DO_SAMPLE, WORK_DIR, LOG_FILE, MODEL_NAME
-from state import AgentState
-from tools import TOOLS, TOOL_DISPATCH
+from .config import MAX_AGENT_STEPS, MAX_NEW_TOKENS, TEMPERATURE, DO_SAMPLE, WORK_DIR, LOG_FILE, MODEL_NAME
+from .state import AgentState
+from .tools import TOOLS, TOOL_DISPATCH
 
 SYSTEM_PROMPT_TEMPLATE = (
     "You are a tool-using coding agent that solves tasks step by step.\n"

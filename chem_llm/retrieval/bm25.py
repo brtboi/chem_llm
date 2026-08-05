@@ -11,11 +11,12 @@ member/variable name.
 """
 import pickle
 import re
+from pathlib import Path
 
 from rank_bm25 import BM25Okapi
 
-from retrieval import config
-from retrieval.models import Chunk
+from . import config
+from .models import Chunk
 
 _TOKEN_RE = re.compile(r"[A-Za-z0-9]+(?:[._][A-Za-z0-9]+)*")
 
@@ -49,23 +50,23 @@ class BM25Index:
         ranked = sorted(range(len(self.ids)), key=lambda i: scores[i], reverse=True)[:top_k]
         return [(self.ids[i], float(scores[i])) for i in ranked if scores[i] > 0]
 
-    def save(self, path=None) -> None:
+    def save(self, path: Path | None = None) -> None:
         path = path or config.BM25_INDEX_PATH
         path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "wb") as f:
+        with path.open("wb") as f:
             pickle.dump({"ids": self.ids, "bm25": self._bm25}, f)
 
     @classmethod
-    def load(cls, path=None) -> "BM25Index":
+    def load(cls, path: Path | None = None) -> "BM25Index":
         path = path or config.BM25_INDEX_PATH
         index = cls()
-        with open(path, "rb") as f:
+        with path.open("rb") as f:
             data = pickle.load(f)
         index.ids = data["ids"]
         index._bm25 = data["bm25"]
         return index
 
     @classmethod
-    def exists(cls, path=None) -> bool:
+    def exists(cls, path: Path | None = None) -> bool:
         path = path or config.BM25_INDEX_PATH
         return path.exists()

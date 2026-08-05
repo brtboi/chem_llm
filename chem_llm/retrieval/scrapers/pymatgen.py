@@ -20,8 +20,8 @@ import re
 import requests
 from bs4 import BeautifulSoup, NavigableString, Tag
 
-from retrieval import config
-from retrieval.models import Document
+from .. import config
+from ..models import Document
 
 logger = logging.getLogger(__name__)
 

@@ -7,8 +7,10 @@
 
 Pipeline: scrape -> chunk -> write chunks.jsonl -> embed chunks -> save
 vector index -> build+save BM25 index. Document embeddings are computed
-here, once; search-time code (retrieval/hybrid_search.py) only ever
-embeds the query.
+here, once; search-time code (chem_llm/retrieval/hybrid_search.py) only
+ever embeds the query.
+
+Requires chem_llm to be installed (`uv sync`, from the repo root).
 """
 import argparse
 import json
@@ -17,16 +19,14 @@ import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-from retrieval import config
-from retrieval.bm25 import BM25Index
-from retrieval.chunking import chunk_documents
-from retrieval.embeddings import EmbeddingModel
-from retrieval.models import Chunk, Document
-from retrieval.scrapers.pymatgen import scrape_pymatgen
-from retrieval.scrapers.quantum_espresso import scrape_quantum_espresso
-from retrieval.vector_store import VectorStore
+from chem_llm.retrieval import config
+from chem_llm.retrieval.bm25 import BM25Index
+from chem_llm.retrieval.chunking import chunk_documents
+from chem_llm.retrieval.embeddings import EmbeddingModel
+from chem_llm.retrieval.models import Chunk, Document
+from chem_llm.retrieval.scrapers.pymatgen import scrape_pymatgen
+from chem_llm.retrieval.scrapers.quantum_espresso import scrape_quantum_espresso
+from chem_llm.retrieval.vector_store import VectorStore
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("build_doc_index")

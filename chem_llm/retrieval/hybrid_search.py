@@ -21,18 +21,19 @@ the standard choice for this kind of fusion.
 """
 import json
 import logging
+from pathlib import Path
 
-from retrieval import config
-from retrieval.bm25 import BM25Index
-from retrieval.embeddings import EmbeddingModel
-from retrieval.models import Chunk, ScoredChunk
-from retrieval.reranker import Reranker
-from retrieval.vector_store import VectorStore
+from . import config
+from .bm25 import BM25Index
+from .embeddings import EmbeddingModel
+from .models import Chunk, ScoredChunk
+from .reranker import Reranker
+from .vector_store import VectorStore
 
 logger = logging.getLogger(__name__)
 
 
-def _load_chunks(path=None) -> dict[str, Chunk]:
+def _load_chunks(path: Path | None = None) -> dict[str, Chunk]:
     path = path or config.CHUNKS_PATH
     if not path.exists():
         raise FileNotFoundError(
@@ -99,7 +100,7 @@ class DocRetriever:
 
     def __init__(
         self,
-        index_dir=None,
+        index_dir: Path | None = None,
         embedding_model: str | None = None,
         reranker_model: str | None = None,
     ):

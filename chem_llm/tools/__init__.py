@@ -1,14 +1,11 @@
-import os
 from pathlib import Path
 import subprocess
 import sys
-import shutil
-import tempfile
 from mp_api.client import MPRester
 from pseudohub import get_pseudo, get_hints
 from pseudohub.exceptions import InvalidParameterError
 
-from config import READ_MAX_CHARS, MP_API_KEY
+from ..config import READ_MAX_CHARS, MP_API_KEY
 
 TOOLS: list[dict] = []
 TOOL_DISPATCH: dict[str, callable] = {}
@@ -28,8 +25,7 @@ def register_tool(name: str, description: str, parameters: dict):
     {"path": "string", "content": "string"},
 )
 def write_file(path: str, content: str):
-    with open(path, "w") as f:
-        f.write(content)
+    Path(path).write_text(content)
     return f"Wrote {path}"
 
 
@@ -39,10 +35,10 @@ def write_file(path: str, content: str):
     {"path": "string"},
 )
 def read_file(path: str, max_chars: int = READ_MAX_CHARS):
-    if not os.path.exists(path):
+    file_path = Path(path)
+    if not file_path.exists():
         return f"ERROR: {path} does not exist"
-    with open(path, "r", errors="replace") as f:
-        content = f.read()
+    content = file_path.read_text(errors="replace")
     truncated = len(content) > max_chars
     return {
         "path": path,
@@ -101,8 +97,8 @@ def generate_cif(
     spacegroup_symbol: str | None = None,
     spacegroup_number: int | None = None,
 ):
-    output_path = os.path.abspath(output_path)
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    output_path = Path(output_path).resolve()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
 
     try:
         with MPRester(MP_API_KEY) as mpr:
@@ -178,7 +174,7 @@ def generate_cif(
         ]
 
         selected_doc.structure.to(
-            filename=output_path,
+            filename=str(output_path),
             fmt="cif",
         )
 
@@ -190,7 +186,7 @@ def generate_cif(
                 "symbol": selected_doc.symmetry.symbol,
                 "number": selected_doc.symmetry.number,
             },
-            "output_path": output_path,
+            "output_path": str(output_path),
         }
 
     except Exception as e:
@@ -254,12 +250,9 @@ def get_pseudopotential(
     format: str = "upf",
     hint_level: str = "normal",
 ):
-    output_path = os.path.abspath(output_path)
-    os.makedirs(
-        output_path if os.path.isdir(output_path) or output_path.endswith(os.sep)
-        else os.path.dirname(output_path),
-        exist_ok=True,
-    )
+    output_path = Path(output_path).resolve()
+    target_dir = output_path if output_path.is_dir() else output_path.parent
+    target_dir.mkdir(parents=True, exist_ok=True)
 
     try:
         saved_path = get_pseudo(
@@ -269,7 +262,7 @@ def get_pseudopotential(
             generator=generator,
             accuracy=accuracy,
             format=format,
-            output=output_path,
+            output=str(output_path),
         )
 
         try:

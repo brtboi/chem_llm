@@ -2,6 +2,8 @@ import os
 from dotenv import load_dotenv
 from pathlib import Path
 
+from . import REPO_ROOT
+
 load_dotenv()
 
 # --- Model ---
@@ -21,16 +23,16 @@ MAX_AGENT_STEPS = 24
 # --- Tool settings ---
 READ_MAX_CHARS = 10000
 
-CRYSTALLM_DIR = Path("tools/CrystaLLM").resolve()
-CRYSTALLM_PYTHON = CRYSTALLM_DIR / ".venv" / "bin" / "python"
-CRYSTALLM_MODEL_DIR = CRYSTALLM_DIR / "crystallm_v1_large"
-
 MP_API_KEY = os.environ.get("MP_API_KEY")
 
-LOG_FILE = Path("logs/log.jsonl").resolve()
+LOG_FILE = REPO_ROOT / "logs" / "log.jsonl"
 
 # --- Working directory ---
 # The directory the agent operates in (contains ./calculations, ./template,
-# and the example scripts it reads/writes). Override with MATAGENT_WORK_DIR.
-WORK_DIR = Path(os.environ.get("MATAGENT_WORK_DIR", "test10")).resolve()
-PROJECT_ROOT = "/nfs/roberts/project/pi_vsb4/byh2/chem_llm"
+# and the example scripts it reads/writes). Anchored to REPO_ROOT rather
+# than cwd, so it resolves the same regardless of where a script/notebook
+# was launched from. MATAGENT_WORK_DIR may still override it with either a
+# path relative to REPO_ROOT or an absolute path -- an absolute value on
+# the right of `/` replaces the left side entirely, per pathlib semantics,
+# so no separate branch is needed for the two cases.
+WORK_DIR = (REPO_ROOT / os.environ.get("MATAGENT_WORK_DIR", "sandbox/test10")).resolve()

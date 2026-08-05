@@ -1,6 +1,6 @@
 """Agent tool wrapping the hybrid documentation retrieval system in
-retrieval/. Registers `search_docs` against the same TOOLS/TOOL_DISPATCH
-registry as every other tool in tools/__init__.py.
+chem_llm/retrieval/. Registers `search_docs` against the same
+TOOLS/TOOL_DISPATCH registry as every other tool in tools/__init__.py.
 
 The retriever (and the embedding/reranker models it lazily owns) is
 built once per process on first call and reused after that -- loading a
@@ -8,9 +8,9 @@ DocRetriever is index-load-only (cheap); the actual models only load on
 the first `search_docs` call, not at import time, so importing tools
 doesn't require a GPU or network access.
 """
-from retrieval import config as retrieval_config
-from retrieval.hybrid_search import DocRetriever
-from tools import register_tool
+from ..retrieval import config as retrieval_config
+from ..retrieval.hybrid_search import DocRetriever
+from . import register_tool
 
 _retriever: DocRetriever | None = None
 

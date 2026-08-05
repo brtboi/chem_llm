@@ -3,14 +3,13 @@
 Everything a build/query run needs to know -- which models to use, how big
 chunks are, how many candidates to pull at each stage, where the index
 lives on disk, and which URLs to scrape -- lives here so nothing else in
-retrieval/ hardcodes it. All paths are resolved to absolute paths at import
-time (mirroring config.py's LOG_FILE pattern) so behavior doesn't change if
-the caller later os.chdir()s, which main.py does.
+retrieval/ hardcodes it. Paths are anchored to REPO_ROOT (see chem_llm/
+__init__.py), not cwd, so behavior doesn't depend on where the caller was
+launched from.
 """
 import os
-from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+from .. import REPO_ROOT
 
 # --- Models (pretrained only -- nothing here is trained/fine-tuned) ---
 # Both are swappable via env var without touching code. Defaults are small
@@ -43,7 +42,10 @@ RRF_K = 60  # standard reciprocal-rank-fusion damping constant
 MAX_CHUNKS_PER_DOCUMENT = int(os.environ.get("DOC_MAX_CHUNKS_PER_DOCUMENT", 2))
 
 # --- Index location ---
-INDEX_DIR = Path(os.environ.get("DOC_INDEX_DIR", REPO_ROOT / "retrieval_index")).resolve()
+# DOC_INDEX_DIR may override with either a path relative to REPO_ROOT or an
+# absolute path -- see the WORK_DIR comment in chem_llm/config.py for why a
+# single `/` handles both cases.
+INDEX_DIR = (REPO_ROOT / os.environ.get("DOC_INDEX_DIR", "retrieval_index")).resolve()
 CHUNKS_PATH = INDEX_DIR / "chunks.jsonl"
 VECTOR_INDEX_DIR = INDEX_DIR / "vector"
 BM25_INDEX_PATH = INDEX_DIR / "bm25.pkl"

@@ -15,8 +15,8 @@ findable in the first place.
 """
 import re
 
-from retrieval import config
-from retrieval.models import Chunk, Document
+from . import config
+from .models import Chunk, Document
 
 _PARA_SPLIT_RE = re.compile(r"\n\s*\n")
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")

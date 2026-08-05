@@ -10,7 +10,7 @@ callers (like tools/docs.py) that may not need it on every process.
 """
 import numpy as np
 
-from retrieval import config
+from . import config
 
 
 class EmbeddingModel:
