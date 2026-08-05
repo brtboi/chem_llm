@@ -7,8 +7,11 @@ different model or a mock.
 """
 import json
 from datetime import datetime
+from pathlib import Path
+import shutil
 import time
 
+from . import REPO_ROOT
 from .config import MAX_AGENT_STEPS, MAX_NEW_TOKENS, TEMPERATURE, DO_SAMPLE, WORK_DIR, LOG_FILE, MODEL_NAME
 from .state import AgentState
 from .tools import TOOLS, TOOL_DISPATCH
@@ -115,7 +118,62 @@ def generate(prompt: str, model, tokenizer, remove_prompt_from_output=True, prin
     return decoded.strip()
 
 
-def run_agent(task: str, model, tokenizer, max_steps: int = MAX_AGENT_STEPS, verbose: bool = True, log_file = WORK_DIR / "log.jsonl") -> AgentState:
+# Directories clear_dir refuses to touch: the target itself, or the target
+# being an ancestor of any of these (which would mean clearing it wipes out
+# the filesystem root, the user's home directory, or the whole repo).
+_DANGEROUS_CLEAR_ANCESTORS = (Path("/"), Path.home().resolve(), REPO_ROOT)
+
+
+def _guard_clear_target(directory: Path) -> None:
+    directory = directory.resolve()
+    if any(directory == root or root.is_relative_to(directory) for root in _DANGEROUS_CLEAR_ANCESTORS):
+        raise RuntimeError(
+            f"Refusing clear_dir on {directory}: it is, or contains, the "
+            "filesystem root / your home directory / the repo root. "
+            "clear_dir is meant for an agent scratch directory (e.g. "
+            "sandbox/testN), not this."
+        )
+
+
+def _confirm_clear_dir(directory: Path) -> bool:
+    response = input(
+        f"clear_dir=True: about to permanently delete everything in "
+        f"{directory} except *.jsonl log files. Type 'yes' to continue: "
+    )
+    return response.strip().lower() == "yes"
+
+
+def clear_directory(directory: Path) -> None:
+    """Delete every top-level entry in `directory` except *.jsonl log
+    files, after an interactive stdin confirmation. Raises RuntimeError if
+    the user declines, or if `directory` fails the dangerous-target guard.
+    """
+    _guard_clear_target(directory)
+
+    if not _confirm_clear_dir(directory):
+        raise RuntimeError(f"clear_dir cancelled by user for {directory}")
+
+    for entry in directory.iterdir():
+        if entry.is_file() and entry.suffix == ".jsonl":
+            continue
+        if entry.is_dir():
+            shutil.rmtree(entry)
+        else:
+            entry.unlink()
+
+
+def run_agent(
+    task: str,
+    model,
+    tokenizer,
+    max_steps: int = MAX_AGENT_STEPS,
+    verbose: bool = True,
+    log_file = WORK_DIR / "log.jsonl",
+    clear_dir: bool = False,
+) -> AgentState:
+    if clear_dir:
+        clear_directory(Path.cwd())
+
     start_time = time.perf_counter()
     state = AgentState(task)
 
