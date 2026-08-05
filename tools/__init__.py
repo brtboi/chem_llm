@@ -7,7 +7,6 @@ import tempfile
 from mp_api.client import MPRester
 from pseudohub import get_pseudo, get_hints
 from pseudohub.exceptions import InvalidParameterError
-from tool_modules.pymatgen_docs import scan_pymatgen_docs
 
 from config import READ_MAX_CHARS, MP_API_KEY
 
@@ -65,45 +64,6 @@ def run_python(path: str):
         text=True,
     )
     return {"stdout": result.stdout, "stderr": result.stderr}
-
-@register_tool(
-    "scan_pymatgen_docs",
-    (
-        "Look up official pymatgen documentation for a function, class, method, "
-        "or property by name, scraped live from https://pymatgen.org. Accepts a "
-        "bare name ('Structure', 'get_space_group_info'), a 'Class.method' pair "
-        "('Structure.get_space_group_info'), or a property name -- properties "
-        "(e.g. getters exposed via @property, like Composition.reduced_formula) "
-        "are included, unlike a plain source-code introspection would give. "
-        "Returns the exact signature, full docstring, and a doc URL for each "
-        "match. If no exact match is found, returns nearest-name suggestions -- "
-        "retry with one of those. Use this before calling an unfamiliar pymatgen "
-        "member to confirm its signature and behavior rather than guessing."
-    ),
-    {
-        "query": (
-            "string. Name to look up: a bare identifier ('Structure', "
-            "'get_space_group_info'), or 'Class.method' / 'Class.property' "
-            "(e.g. 'Composition.reduced_formula')."
-        ),
-        "class_hint": (
-            "string (optional). When query is a bare method/property name that "
-            "exists on multiple classes (e.g. 'get_nn_info' appears on several "
-            "neighbor-finder classes), narrow to matches whose containing class "
-            "name matches this hint."
-        ),
-        "max_results": (
-            "int (optional, default 5). Maximum number of matches to return "
-            "details for."
-        ),
-    },
-)
-def get_pymatgen_docs(
-    query: str,
-    class_hint: str | None = None,
-    max_results: int = 5,
-):
-    return scan_pymatgen_docs(query, class_hint=class_hint, max_results=max_results)
 
 @register_tool(
     "generate_cif",
@@ -351,3 +311,7 @@ TOOLS.append({
     "description": "Call this when the task is fully complete. Provide a summary.",
     "parameters": {"summary": "string"},
 })
+
+# tools/docs.py registers itself against TOOLS/TOOL_DISPATCH above via
+# `from tools import register_tool`; import it for that side effect.
+from . import docs  # noqa: E402,F401
