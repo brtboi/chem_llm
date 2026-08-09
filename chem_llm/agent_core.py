@@ -161,6 +161,21 @@ def clear_directory(directory: Path) -> None:
         else:
             entry.unlink()
 
+def copy_to_cwd(load_path) -> None:
+    if load_path is None:
+        return
+
+    src = Path(load_path)
+    dst = Path.cwd() / src.name
+
+    if src.is_dir():
+        if dst.exists():
+            shutil.rmtree(dst)
+        shutil.copytree(src, dst)
+    else:
+        if dst.exists():
+            dst.unlink()
+        shutil.copy2(src, dst)
 
 def run_agent(
     task: str,
@@ -170,9 +185,12 @@ def run_agent(
     verbose: bool = True,
     log_file = WORK_DIR / "log.jsonl",
     clear_dir: bool = False,
+    load_path=None,
 ) -> AgentState:
     if clear_dir:
         clear_directory(Path.cwd())
+
+    copy_to_cwd(load_path)
 
     start_time = time.perf_counter()
     state = AgentState(task)
@@ -218,6 +236,8 @@ def run_agent(
             "timestamp": datetime.now().isoformat(),
             "model": MODEL_NAME,
             "work_dir": str(WORK_DIR),
+            "clear_dir": clear_dir,
+            "load_path": bool(load_path),
             "runtime": time.perf_counter() - start_time,
             "num_steps": len(state.history),
             "completed": state.done,
