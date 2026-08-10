@@ -30,6 +30,17 @@ def write_file(path: str, content: str):
 
 
 @register_tool(
+    "make_dir",
+    "Create a directory (and any missing parent directories) on disk",
+    {"path": "string"},
+)
+def make_dir(path: str):
+    dir_path = Path(path)
+    dir_path.mkdir(parents=True, exist_ok=True)
+    return f"Created directory {path}"
+
+
+@register_tool(
     "read_file",
     "Read a file from disk (truncated if very large)",
     {"path": "string"},
