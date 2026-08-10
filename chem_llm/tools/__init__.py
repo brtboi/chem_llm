@@ -10,11 +10,29 @@ from ..config import READ_MAX_CHARS, MP_API_KEY
 TOOLS: list[dict] = []
 TOOL_DISPATCH: dict[str, callable] = {}
 
+# tool name -> arg names that define a call's identity. Populated by
+# register_tool(..., remember_on=...). AgentState uses this to remember
+# successful calls for the whole task (surviving history truncation) so the
+# agent recognizes it already e.g. fetched a given composition/element (and
+# where the result was saved), regardless of how many steps have passed
+# since.
+REMEMBER_FIELDS: dict[str, tuple[str, ...]] = {}
 
-def register_tool(name: str, description: str, parameters: dict):
+
+def register_tool(name: str, description: str, parameters: dict, remember_on: tuple[str, ...] | None = None):
+    """Register a tool.
+
+    remember_on: optional tuple of arg names whose values define this call's
+    identity (e.g. ("composition", "spacegroup_symbol")). If given,
+    AgentState will remember successful calls with matching args -- including
+    where their output was written -- for the rest of the task, and warn the
+    model not to repeat them.
+    """
     def decorator(func):
         TOOLS.append({"name": name, "description": description, "parameters": parameters})
         TOOL_DISPATCH[name] = func
+        if remember_on is not None:
+            REMEMBER_FIELDS[name] = remember_on
         return func
     return decorator
 
@@ -33,11 +51,15 @@ def write_file(path: str, content: str):
     "make_dir",
     "Create a directory (and any missing parent directories) on disk",
     {"path": "string"},
+    remember_on=("path",),
 )
 def make_dir(path: str):
-    dir_path = Path(path)
-    dir_path.mkdir(parents=True, exist_ok=True)
-    return f"Created directory {path}"
+    dir_path = Path(path).resolve()
+    try:
+        dir_path.mkdir(parents=True, exist_ok=True)
+        return {"success": True, "path": str(dir_path)}
+    except OSError as e:
+        return {"success": False, "stderr": str(e)}
 
 
 @register_tool(
@@ -101,6 +123,7 @@ def run_python(path: str):
             "int (optional). International Tables space group number (1-230)."
         ),
     },
+    remember_on=("composition", "spacegroup_symbol", "spacegroup_number"),
 )
 def generate_cif(
     composition: str,
@@ -250,6 +273,7 @@ def generate_cif(
             "the recommended ecut: 'low', 'normal', or 'high'."
         ),
     },
+    remember_on=("element", "kind", "relativity", "generator", "accuracy", "format"),
 )
 def get_pseudopotential(
     element: str | int,
