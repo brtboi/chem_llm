@@ -192,6 +192,14 @@ def run_agent(
     clear_dir: bool = False,
     load_path=None,
 ) -> AgentState:
+    if not WORK_DIR.exists():
+        print(f"Work directory {WORK_DIR} does not exist yet -- creating it.")
+    WORK_DIR.mkdir(parents=True, exist_ok=True)
+
+    if log_file:
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        log_file.touch(exist_ok=True)
+
     if clear_dir:
         clear_directory(Path.cwd())
 
