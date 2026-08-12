@@ -12,7 +12,7 @@ import shutil
 import time
 
 from . import REPO_ROOT
-from .config import MAX_AGENT_STEPS, MAX_NEW_TOKENS, TEMPERATURE, DO_SAMPLE, WORK_DIR, LOG_FILE, MODEL_NAME
+from .config import MAX_AGENT_STEPS, MAX_HISTORY, MAX_NEW_TOKENS, TEMPERATURE, DO_SAMPLE, WORK_DIR, LOG_FILE, MODEL_NAME
 from .state import AgentState
 from .tools import TOOLS, TOOL_DISPATCH
 
@@ -46,15 +46,17 @@ SYSTEM_PROMPT_TEMPLATE = (
     "error, write the error and solution in a note, fix the underlying "
     "script with write_file, and re-run it. Do not call 'done' while any "
     "known error is unresolved.\n"
-    "4. Do not call 'note' more than once in a row. If you already have a "
+    "4. Once a python runs without errors, note that it has been done successfully "
+    "and avoid repeating tasks."
+    "5. Do not call 'note' more than once in a row. If you already have a "
     "plan, act on it instead of restating it.\n"
-    "5. As soon as the task has been completed and all required verification "
+    "6. As soon as the task has been completed and all required verification "
     "has succeeded, your VERY NEXT tool call MUST be 'done'. Do not perform "
     "additional tool calls, extra checks, or exploratory actions after the "
     "task has already been verified.\n"
-    "6. Only call 'done' once. The 'done' tool ends the task. In its summary, "
+    "7. Only call 'done' once. The 'done' tool ends the task. In its summary, "
     "briefly state what you accomplished and what you verified.\n\n"
-    "7. Before every tool call, write in a note outlining any scientific reasoning"
+    "8. Before every tool call, write in a note outlining any scientific reasoning"
     "needed regarding the tool call parameters."
     f"Available tools:\n{json.dumps(TOOLS, indent=2)}"
 )
@@ -63,7 +65,7 @@ SYSTEM_PROMPT_TEMPLATE = (
 def build_prompt(state: AgentState, tokenizer):
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT_TEMPLATE},
-        {"role": "user", "content": state.context_summary()},
+        {"role": "user", "content": state.context_summary(max_history = MAX_HISTORY)},
     ]
     return tokenizer.apply_chat_template(
         messages,

@@ -11,26 +11,42 @@ TEMPLATE_DIR = "template"
 STRUCTURE_DIR = "structures"
 CALC_DIR = "calculations"
 
-# Pseudopotential paths
-PSEUDO_DIR = "pseudos"
-PSEUDO_FILES = {
-    "Ti": "Ti.upf",
-    "O": "O.upf"
-}
-
-# Quantum ESPRESSO parameters
-ECUTWFC = 42.0  # From pseudopotential hints (in Ha)
-ECUTRHO = 4 * ECUTWFC  # Standard rule of thumb
-
 os.makedirs(CALC_DIR, exist_ok=True)
 os.makedirs(STRUCTURE_DIR, exist_ok=True)
-os.makedirs(PSEUDO_DIR, exist_ok=True)
 
 # HELPERS
 ANG_TO_BOHR = 1.889726125
 
+# Pseudopotential filenames (from get_pseudopotential)
+TI_PSP = "Ti.psp8"
+O_PSP = "O.psp8"
+
+# Recommended ecutwfc from pseudopotential hints (in Ha)
+# Ti: 42.0 Ha, O: 42.0 Ha → use 42.0 Ha for both
+ECUTWFC = 42.0  # Ha
+ECUTRHO = 4 * ECUTWFC  # Standard rule: ecutrho = 4 * ecutwfc
+
+# K-point grid (8x8x8) and bands path (same as original)
+K_POINTS_GRID = "8 8 8 0 0 0"
+BANDS_KPOINTS = "5\n0.5 0.5 0.5 10\n0.0 0.0 0.0 10\n0.5 0.0 0.0 10\n0.5 0.5 0.0 10\n0.0 0.0 0.0 1"
+
+# Number of atoms and types for TiO2 (2 Ti, 4 O → 6 atoms, 2 types)
+NAT = 6
+NTYP = 2
+
+# Function to convert pymatgen Structure to Quantum ESPRESSO input
 def structure_to_qe(structure, prefix, calculation):
-    
+    """
+    Convert a pymatgen Structure to a Quantum ESPRESSO input file.
+
+    Args:
+        structure: pymatgen Structure object
+        prefix: string prefix for output files
+        calculation: string, either 'scf' or 'bands'
+
+    Returns:
+        string containing the full input file content
+    """
     a, b, c = structure.lattice.abc
     a_bohr = a * ANG_TO_BOHR
     b_bohr = b * ANG_TO_BOHR
@@ -49,15 +65,15 @@ def structure_to_qe(structure, prefix, calculation):
     lines.append("   restart_mode = 'from_scratch'")
     lines.append("   outdir = './'")
     lines.append("   wfcdir = './'")
-    lines.append(f"   pseudo_dir = '{PSEUDO_DIR}'")
+    lines.append("   pseudo_dir = './'")
     lines.append("   verbosity = 'high'")
     lines.append("/")
 
     # SYSTEM
     lines.append("&SYSTEM")
     lines.append("   ibrav = 0")
-    lines.append(f"   nat = {len(structure)}")
-    lines.append(f"   ntyp = {len(set(site.species_string for site in structure.sites))}")
+    lines.append(f"   nat = {NAT}")
+    lines.append(f"   ntyp = {NTYP}")
     lines.append(f"   ecutwfc = {ECUTWFC}")
     lines.append(f"   ecutrho = {ECUTRHO}")
     lines.append("   tot_charge = 0.0")
@@ -69,7 +85,7 @@ def structure_to_qe(structure, prefix, calculation):
     lines.append("   lspinorb = .false.")
 
     if calculation == "bands":
-        lines.append("   nbnd = 200")
+        lines.append("   nbnd = 20")
 
     lines.append("/")
 
@@ -87,8 +103,8 @@ def structure_to_qe(structure, prefix, calculation):
 
     # SPECIES
     lines.append("ATOMIC_SPECIES")
-    for element, pseudo_file in PSEUDO_FILES.items():
-        lines.append(f"{element} 0.0 {pseudo_file}")
+    lines.append(f"Ti {47.867} {TI_PSP}")
+    lines.append(f"O  15.999 {O_PSP}")
     lines.append("")
 
     # CELL PARAMETERS
@@ -107,22 +123,17 @@ def structure_to_qe(structure, prefix, calculation):
     # KPOINTS
     if calculation == "scf":
         lines.append("K_POINTS automatic")
-        lines.append("8 8 8 0 0 0")
+        lines.append(K_POINTS_GRID)
     elif calculation == "bands":
         lines.append("K_POINTS crystal_b")
-        lines.append("5")
-        lines.append("0.5 0.5 0.5 10")
-        lines.append("0.0 0.0 0.0 10")
-        lines.append("0.5 0.0 0.0 10")
-        lines.append("0.5 0.5 0.0 10")
-        lines.append("0.0 0.0 0.0 1")
+        lines.append(BANDS_KPOINTS)
 
     return "\n".join(lines)
 
+# Function to write SLURM submit script (with blank account, email, GPU)
 def write_submit_script(calc_path, prefix):
     submit_text = f"""#!/bin/bash
-#SBATCH -A 
-#SBATCH -J ti2_{prefix}
+#SBATCH -J {prefix}
 #SBATCH -C gpu
 #SBATCH --qos=regular
 #SBATCH --nodes=2
@@ -171,9 +182,9 @@ for n, cif_file in enumerate(cif_files):
     prefix = f"{n:03d}"
     calc_path = Path(CALC_DIR) / prefix
 
-    print("Setting up", calc_path)
+    print(f"Setting up {calc_path}")
 
-    # copy template
+    # Copy template
     if calc_path.exists():
         if OVERWRITE:
             print(f"Overwriting {calc_path}")
@@ -181,33 +192,30 @@ for n, cif_file in enumerate(cif_files):
         else:
             print(f"Skipping existing directory: {calc_path}")
             continue
-    
     shutil.copytree(TEMPLATE_DIR, calc_path)
 
-    # load structure
+    # Load structure
     structure = Structure.from_file(cif_file)
 
-    # write pw.in
+    # Write pw.in
     pw_text = structure_to_qe(
         structure,
         prefix,
         calculation="scf"
     )
-
     with open(calc_path / "pw.in", "w") as f:
         f.write(pw_text)
 
-    # write bands.in
+    # Write bands.in
     bands_text = structure_to_qe(
         structure,
         prefix,
         calculation="bands"
     )
-
     with open(calc_path / "bands.in", "w") as f:
         f.write(bands_text)
 
-    # write bands_post.in
+    # Write bands_post.in
     bands_post = f"""&BANDS
     prefix  = '{prefix}'
     outdir  = './'
@@ -215,11 +223,10 @@ for n, cif_file in enumerate(cif_files):
     lsym = .true.,
     /
 """
-
     with open(calc_path / "bands_post.in", "w") as f:
         f.write(bands_post)
 
-    # write submit.sh
+    # Write submit.sh
     write_submit_script(calc_path, prefix)
 
 print("Done.")
