@@ -44,18 +44,18 @@ def structure_to_qe(structure, prefix, calculation):
 
     # SYSTEM
     lines.append("&SYSTEM")
-    lines.append(f"   ibrav = 0")
+    lines.append("   ibrav = 0")
     lines.append(f"   nat = {len(structure)}")
-    lines.append(f"   ntyp = {len(structure.composition.elements)}")
-    lines.append(f"   ecutwfc = 42.0")  # From pseudopotential hints
-    lines.append(f"   ecutrho = 168.0")  # 4 * ecutwfc for PBEsol
+    lines.append(f"   ntyp = {len(set(site.specie.symbol for site in structure))}")
+    lines.append("   ecutwfc = 42.0")
+    lines.append("   ecutrho = 168.0")
     lines.append("   tot_charge = 0.0")
     lines.append("   nosym = .true.")
     lines.append("   noinv = .true.")
     lines.append("   occupations = 'fixed'")
-    lines.append("   nspin = 4")
-    lines.append("   noncolin = .true.")
-    lines.append("   lspinorb = .true.")
+    lines.append("   nspin = 1")
+    lines.append("   noncolin = .false.")
+    lines.append("   lspinorb = .false.")
 
     if calculation == "bands":
         lines.append("   nbnd = 200")
@@ -76,9 +76,8 @@ def structure_to_qe(structure, prefix, calculation):
 
     # SPECIES
     lines.append("ATOMIC_SPECIES")
-    # Use the actual pseudopotential filenames from template
-    lines.append("Ti  47.867  Ti.rel-pbesol-spn-rrkjus_psl.1.0.0.UPF")
-    lines.append("O   15.999  O.rel-pbesol-spn-rrkjus_psl.1.0.0.UPF")
+    lines.append("Ti  47.867  Ti.rel-pbesol-fr-stringent.upf")
+    lines.append("O   15.999  O.rel-pbesol-fr-stringent.upf")
     lines.append("")
 
     # CELL PARAMETERS
@@ -125,8 +124,8 @@ def structure_to_qe(structure, prefix, calculation):
 
 def write_submit_script(calc_path, prefix):
     submit_text = f"""#!/bin/bash
-#SBATCH -A m4868
-#SBATCH -J ti2_{prefix}
+#SBATCH -A m4735
+#SBATCH -J ti_{prefix}
 #SBATCH -C gpu
 #SBATCH --qos=regular
 #SBATCH --nodes=2
@@ -177,7 +176,7 @@ for n, cif_file in enumerate(cif_files):
 
     print("Setting up", calc_path)
 
-    # Copy template
+    # copy template
     if calc_path.exists():
         if OVERWRITE:
             print(f"Overwriting {calc_path}")
@@ -188,10 +187,10 @@ for n, cif_file in enumerate(cif_files):
     
     shutil.copytree(TEMPLATE_DIR, calc_path)
 
-    # Load structure
+    # load structure
     structure = Structure.from_file(cif_file)
 
-    # Write pw.in
+    # write pw.in
     pw_text = structure_to_qe(
         structure,
         prefix,
@@ -201,7 +200,7 @@ for n, cif_file in enumerate(cif_files):
     with open(calc_path / "pw.in", "w") as f:
         f.write(pw_text)
 
-    # Write bands.in
+    # write bands.in
     bands_text = structure_to_qe(
         structure,
         prefix,
@@ -211,19 +210,19 @@ for n, cif_file in enumerate(cif_files):
     with open(calc_path / "bands.in", "w") as f:
         f.write(bands_text)
 
-    # Write bands_post.in
+    # write bands_post.in
     bands_post = f"""&BANDS
     prefix  = '{prefix}'
     outdir  = './'
     filband = '{prefix}.bands.dat'
     lsym = .true.,
     /
-"""
+    """
 
     with open(calc_path / "bands_post.in", "w") as f:
         f.write(bands_post)
 
-    # Write submit.sh
+    # write submit.sh
     write_submit_script(calc_path, prefix)
 
 print("Done.")

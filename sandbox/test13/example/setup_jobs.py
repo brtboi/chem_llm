@@ -44,11 +44,11 @@ def structure_to_qe(structure, prefix, calculation):
 
     # SYSTEM
     lines.append("&SYSTEM")
-    lines.append(f"   ibrav = 0")
-    lines.append(f"   nat = {len(structure)}")
-    lines.append(f"   ntyp = {len(structure.composition.elements)}")
-    lines.append(f"   ecutwfc = 42.0")  # From pseudopotential hints
-    lines.append(f"   ecutrho = 168.0")  # 4 * ecutwfc for PBEsol
+    lines.append("   ibrav = 0")
+    lines.append("   nat = 20")
+    lines.append("   ntyp = 3")
+    lines.append("   ecutwfc = 50.0")
+    lines.append("   ecutrho = 250.0")
     lines.append("   tot_charge = 0.0")
     lines.append("   nosym = .true.")
     lines.append("   noinv = .true.")
@@ -76,15 +76,16 @@ def structure_to_qe(structure, prefix, calculation):
 
     # SPECIES
     lines.append("ATOMIC_SPECIES")
-    # Use the actual pseudopotential filenames from template
-    lines.append("Ti  47.867  Ti.rel-pbesol-spn-rrkjus_psl.1.0.0.UPF")
-    lines.append("O   15.999  O.rel-pbesol-spn-rrkjus_psl.1.0.0.UPF")
+    lines.append("Cs 132.90545 Cs.rel-pbe-spn-rrkjus_psl.1.0.0.UPF")
+    lines.append("Pb 207.20000 Pb.rel-pbe-dn-rrkjus_psl.1.0.0.UPF")
+    lines.append("Br 79.90400 Br.USPP.FR.PBE.3.4.UPF")
     lines.append("")
 
     # CELL PARAMETERS
     lines.append("CELL_PARAMETERS angstrom")
 
     for vec in structure.lattice.matrix:
+
         lines.append(
             f"{vec[0]:.10f} "
             f"{vec[1]:.10f} "
@@ -99,6 +100,7 @@ def structure_to_qe(structure, prefix, calculation):
     frac = structure.frac_coords % 1.0
 
     for specie, pos in zip(structure.species, frac):
+
         lines.append(
             f"{specie.symbol:<2} "
             f"{pos[0]:.6f} "
@@ -110,9 +112,12 @@ def structure_to_qe(structure, prefix, calculation):
 
     # KPOINTS
     if calculation == "scf":
+
         lines.append("K_POINTS automatic")
         lines.append("8 8 8 0 0 0")
+
     elif calculation == "bands":
+
         lines.append("K_POINTS crystal_b")
         lines.append("5")
         lines.append("0.5 0.5 0.5 10")
@@ -124,16 +129,17 @@ def structure_to_qe(structure, prefix, calculation):
     return "\n".join(lines)
 
 def write_submit_script(calc_path, prefix):
+
     submit_text = f"""#!/bin/bash
 #SBATCH -A m4868
-#SBATCH -J ti2_{prefix}
+#SBATCH -J cs_{prefix}
 #SBATCH -C gpu
 #SBATCH --qos=regular
 #SBATCH --nodes=2
 #SBATCH --ntasks-per-node=4
 #SBATCH --time 03:00:00
 #SBATCH --mail-type=ALL
-#SBATCH --mail-user=
+#SBATCH --mail-user=daniel_chabeda@berkeley.edu
 
 module load espresso
 
@@ -172,12 +178,14 @@ echo "Finished {prefix}"
 cif_files = sorted(Path(STRUCTURE_DIR).glob("*.cif"))
 
 for n, cif_file in enumerate(cif_files):
+
     prefix = f"{n:03d}"
+
     calc_path = Path(CALC_DIR) / prefix
 
     print("Setting up", calc_path)
 
-    # Copy template
+    # copy template
     if calc_path.exists():
         if OVERWRITE:
             print(f"Overwriting {calc_path}")
@@ -185,13 +193,13 @@ for n, cif_file in enumerate(cif_files):
         else:
             print(f"Skipping existing directory: {calc_path}")
             continue
-    
+        
     shutil.copytree(TEMPLATE_DIR, calc_path)
 
-    # Load structure
+    # load structure
     structure = Structure.from_file(cif_file)
 
-    # Write pw.in
+    # write pw.in
     pw_text = structure_to_qe(
         structure,
         prefix,
@@ -201,7 +209,7 @@ for n, cif_file in enumerate(cif_files):
     with open(calc_path / "pw.in", "w") as f:
         f.write(pw_text)
 
-    # Write bands.in
+    # write bands.in
     bands_text = structure_to_qe(
         structure,
         prefix,
@@ -211,19 +219,20 @@ for n, cif_file in enumerate(cif_files):
     with open(calc_path / "bands.in", "w") as f:
         f.write(bands_text)
 
-    # Write bands_post.in
+    # write bands_post.in
     bands_post = f"""&BANDS
     prefix  = '{prefix}'
     outdir  = './'
     filband = '{prefix}.bands.dat'
     lsym = .true.,
     /
-"""
+    """
 
     with open(calc_path / "bands_post.in", "w") as f:
         f.write(bands_post)
 
-    # Write submit.sh
+    # write submit.sh
     write_submit_script(calc_path, prefix)
+
 
 print("Done.")

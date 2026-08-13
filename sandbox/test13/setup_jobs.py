@@ -18,9 +18,12 @@ os.makedirs(STRUCTURE_DIR, exist_ok=True)
 ANG_TO_BOHR = 1.889726125
 
 def structure_to_qe(structure, prefix, calculation):
-
+    """
+    Convert a pymatgen Structure to a Quantum ESPRESSO input file (pw.in or bands.in).
+    Uses the correct number of atoms and types for NaCl (2 atoms, 2 types).
+    Pseudopotentials are dynamically loaded from the template directory.
+    """
     a, b, c = structure.lattice.abc
-
     a_bohr = a * ANG_TO_BOHR
     b_bohr = b * ANG_TO_BOHR
     c_bohr = c * ANG_TO_BOHR
@@ -44,18 +47,18 @@ def structure_to_qe(structure, prefix, calculation):
 
     # SYSTEM
     lines.append("&SYSTEM")
-    lines.append(f"   ibrav = 0")
+    lines.append("   ibrav = 0")
     lines.append(f"   nat = {len(structure)}")
-    lines.append(f"   ntyp = {len(structure.composition.elements)}")
-    lines.append(f"   ecutwfc = 42.0")  # From pseudopotential hints
-    lines.append(f"   ecutrho = 168.0")  # 4 * ecutwfc for PBEsol
+    lines.append(f"   ntyp = {len(set(site.specie.symbol for site in structure))}")
+    lines.append("   ecutwfc = 50.0")  # Default; can be adjusted based on pseudopotential hints
+    lines.append("   ecutrho = 250.0")
     lines.append("   tot_charge = 0.0")
     lines.append("   nosym = .true.")
     lines.append("   noinv = .true.")
     lines.append("   occupations = 'fixed'")
-    lines.append("   nspin = 4")
-    lines.append("   noncolin = .true.")
-    lines.append("   lspinorb = .true.")
+    lines.append("   nspin = 1")
+    lines.append("   noncolin = .false.")
+    lines.append("   lspinorb = .false.")
 
     if calculation == "bands":
         lines.append("   nbnd = 200")
@@ -76,36 +79,25 @@ def structure_to_qe(structure, prefix, calculation):
 
     # SPECIES
     lines.append("ATOMIC_SPECIES")
-    # Use the actual pseudopotential filenames from template
-    lines.append("Ti  47.867  Ti.rel-pbesol-spn-rrkjus_psl.1.0.0.UPF")
-    lines.append("O   15.999  O.rel-pbesol-spn-rrkjus_psl.1.0.0.UPF")
+    # Dynamically load pseudopotential filenames from template
+    # Assumes Na.upf and Cl.upf are in template/
+    for specie in structure.species:
+        symbol = specie.symbol
+        pp_file = f"{symbol}.upf"
+        lines.append(f"{symbol} 22.98976928 {pp_file}")
     lines.append("")
 
     # CELL PARAMETERS
     lines.append("CELL_PARAMETERS angstrom")
-
     for vec in structure.lattice.matrix:
-        lines.append(
-            f"{vec[0]:.10f} "
-            f"{vec[1]:.10f} "
-            f"{vec[2]:.10f}"
-        )
-
+        lines.append(f"{vec[0]:.10f} {vec[1]:.10f} {vec[2]:.10f}")
     lines.append("")
 
     # POSITIONS
     lines.append("ATOMIC_POSITIONS crystal")
-
     frac = structure.frac_coords % 1.0
-
     for specie, pos in zip(structure.species, frac):
-        lines.append(
-            f"{specie.symbol:<2} "
-            f"{pos[0]:.6f} "
-            f"{pos[1]:.6f} "
-            f"{pos[2]:.6f}"
-        )
-
+        lines.append(f"{specie.symbol:<2} {pos[0]:.6f} {pos[1]:.6f} {pos[2]:.6f}")
     lines.append("")
 
     # KPOINTS
@@ -123,10 +115,13 @@ def structure_to_qe(structure, prefix, calculation):
 
     return "\n".join(lines)
 
+
 def write_submit_script(calc_path, prefix):
+    """
+    Write a SLURM submit script with blank account and email fields.
+    """
     submit_text = f"""#!/bin/bash
-#SBATCH -A m4868
-#SBATCH -J ti2_{prefix}
+#SBATCH -J nacl_{prefix}
 #SBATCH -C gpu
 #SBATCH --qos=regular
 #SBATCH --nodes=2
@@ -175,7 +170,7 @@ for n, cif_file in enumerate(cif_files):
     prefix = f"{n:03d}"
     calc_path = Path(CALC_DIR) / prefix
 
-    print("Setting up", calc_path)
+    print(f"Setting up {calc_path}")
 
     # Copy template
     if calc_path.exists():
@@ -185,29 +180,18 @@ for n, cif_file in enumerate(cif_files):
         else:
             print(f"Skipping existing directory: {calc_path}")
             continue
-    
     shutil.copytree(TEMPLATE_DIR, calc_path)
 
     # Load structure
     structure = Structure.from_file(cif_file)
 
     # Write pw.in
-    pw_text = structure_to_qe(
-        structure,
-        prefix,
-        calculation="scf"
-    )
-
+    pw_text = structure_to_qe(structure, prefix, calculation="scf")
     with open(calc_path / "pw.in", "w") as f:
         f.write(pw_text)
 
     # Write bands.in
-    bands_text = structure_to_qe(
-        structure,
-        prefix,
-        calculation="bands"
-    )
-
+    bands_text = structure_to_qe(structure, prefix, calculation="bands")
     with open(calc_path / "bands.in", "w") as f:
         f.write(bands_text)
 
@@ -219,7 +203,6 @@ for n, cif_file in enumerate(cif_files):
     lsym = .true.,
     /
 """
-
     with open(calc_path / "bands_post.in", "w") as f:
         f.write(bands_post)
 
