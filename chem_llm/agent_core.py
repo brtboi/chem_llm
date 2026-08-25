@@ -4,15 +4,23 @@ execution, and the step loop itself.
 Model loading lives in main.py (the entry point) and is passed in here so
 this module has no import-time side effects and can be reused/tested with a
 different model or a mock.
+
+The step loop (`run_step_loop`) is decoupled from *where* each tool call
+comes from: `run_agent` below drives it with an LLM-backed source, while
+`chem_llm.replay` drives the exact same loop with a source that reads
+recorded calls out of a past run's log.jsonl instead. Both share the same
+tool execution/logging code path, so a replay is a real re-run of the
+recorded tools (not a replay of their recorded results).
 """
 import json
+import os
 from datetime import datetime
 from pathlib import Path
 import shutil
 import time
 
 from . import REPO_ROOT
-from .config import MAX_AGENT_STEPS, MAX_HISTORY, MAX_NEW_TOKENS, TEMPERATURE, DO_SAMPLE, WORK_DIR, LOG_FILE, MODEL_NAME
+from .config import MAX_AGENT_STEPS, MAX_HISTORY, MAX_NEW_TOKENS, TEMPERATURE, DO_SAMPLE, WORK_DIR, MODEL_NAME
 from .state import AgentState
 from .tools import TOOLS, TOOL_DISPATCH
 
@@ -125,6 +133,68 @@ def generate(prompt: str, model, tokenizer, remove_prompt_from_output=True, prin
     return decoded.strip()
 
 
+def make_llm_step_source(model, tokenizer, verbose: bool = True):
+    """Build a `next_tool_call(state, step)` source for `run_step_loop` that
+    asks the model to generate each step, same as the original inline
+    run_agent loop. A JSON parse failure is logged as a 'parse_error' step
+    (fed back as a note so the model can self-correct) and reported to the
+    loop as a no-op step rather than a tool call.
+    """
+    def next_tool_call(state: AgentState, step: int):
+        prompt = build_prompt(state, tokenizer)
+        output = generate(prompt, model, tokenizer)
+        if verbose:
+            print("RAW MODEL OUTPUT:\n", output)
+        try:
+            return parse_tool_call(output)
+        except (json.JSONDecodeError, ValueError) as e:
+            state.add_note(f"Step {step}: failed to parse model output as JSON: {e}")
+            state.log("parse_error", {"raw_output": output[:500]}, str(e))
+            return None
+
+    return next_tool_call
+
+
+def run_step_loop(state: AgentState, next_tool_call, max_steps: int, verbose: bool = True) -> None:
+    """Drive `state` through up to `max_steps` tool calls, one per step,
+    obtained from `next_tool_call(state, step)`. Mutates `state` in place.
+
+    `next_tool_call` should return a `{"tool": ..., "args": ...}` dict for
+    the step, `None` if it already handled the step itself (e.g. logged a
+    parse failure as a note) and no tool should be executed, or raise
+    `StopIteration` to end the loop early (a replay source runs out of
+    recorded calls before `max_steps`).
+    """
+    for step in range(1, max_steps + 1):
+        if verbose:
+            print(f"\n=== STEP {step} ===")
+
+        try:
+            tool_call = next_tool_call(state, step)
+        except StopIteration:
+            break
+
+        if tool_call is None:
+            continue
+
+        if verbose:
+            print("TOOL CALL:\n", tool_call)
+
+        try:
+            result = execute_tool(tool_call, state)
+        except Exception as e:
+            result = f"ERROR executing {tool_call.get('tool')}: {e}"
+            state.log(tool_call.get("tool", "unknown"), tool_call.get("args", {}), result)
+
+        if verbose:
+            print("TOOL RESULT:\n", result)
+
+        if state.done:
+            break
+    else:
+        state.add_note("Max steps reached without explicit 'done' call.")
+
+
 # Directories clear_dir refuses to touch: the target itself, or the target
 # being an ancestor of any of these (which would mean clearing it wipes out
 # the filesystem root, the user's home directory, or the whole repo).
@@ -184,83 +254,84 @@ def copy_to_cwd(load_path) -> None:
             dst.unlink()
         shutil.copy2(src, dst)
 
-def run_agent(
-    task: str,
-    model,
-    tokenizer,
-    max_steps: int = MAX_AGENT_STEPS,
-    verbose: bool = True,
-    log_file = WORK_DIR / "log.jsonl",
-    clear_dir: bool = False,
-    load_path=None,
-) -> AgentState:
-    if not WORK_DIR.exists():
-        print(f"Work directory {WORK_DIR} does not exist yet -- creating it.")
-    WORK_DIR.mkdir(parents=True, exist_ok=True)
 
-    if log_file:
-        log_file.parent.mkdir(parents=True, exist_ok=True)
-        log_file.touch(exist_ok=True)
+def prepare_work_dir(work_dir: Path, clear_dir: bool = False, load_path=None) -> None:
+    """Ensure `work_dir` exists and make it the current directory -- every
+    tool (write_file, run_python, generate_cif, ...) resolves its paths
+    against cwd, so this is the one place that contract is established,
+    rather than every entry point (run_agent, replay) chdir'ing on its own.
+    Optionally clears it first and/or seeds it from `load_path`.
+    """
+    if not work_dir.exists():
+        print(f"Work directory {work_dir} does not exist yet -- creating it.")
+    work_dir.mkdir(parents=True, exist_ok=True)
+    os.chdir(work_dir)
 
     if clear_dir:
         clear_directory(Path.cwd())
 
     copy_to_cwd(load_path)
 
+
+def build_log_entry(state: AgentState, start_time: float, work_dir: Path, clear_dir: bool, load_path, model_name: str, extra: dict | None = None) -> dict:
+    entry = {
+        "timestamp": datetime.now().isoformat(),
+        "model": model_name,
+        "work_dir": str(work_dir),
+        "clear_dir": clear_dir,
+        "load_path": bool(load_path),
+        "runtime": time.perf_counter() - start_time,
+        "num_steps": len(state.history),
+        "completed": state.done,
+        "final_state": state.to_dict(),
+    }
+    if extra:
+        entry.update(extra)
+    return entry
+
+
+def append_log(log_file: Path, entry: dict) -> None:
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+    with log_file.open("a", encoding="utf-8") as f:
+        json.dump(entry, f)
+        f.write("\n")
+
+
+_UNSET = object()
+
+
+def run_agent(
+    task: str,
+    model,
+    tokenizer,
+    max_steps: int = MAX_AGENT_STEPS,
+    verbose: bool = True,
+    work_dir: Path = WORK_DIR,
+    log_file=_UNSET,
+    clear_dir: bool = False,
+    load_path=None,
+) -> AgentState:
+    """Run the agent live: the model generates each tool call. Executes in
+    `work_dir` (defaults to config.WORK_DIR) and appends a run record to
+    `log_file` (defaults to `work_dir / "log.jsonl"`; pass `log_file=None`
+    to skip logging).
+    """
+    if log_file is _UNSET:
+        log_file = work_dir / "log.jsonl"
+
+    prepare_work_dir(work_dir, clear_dir, load_path)
+
+    if log_file:
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        log_file.touch(exist_ok=True)
+
     start_time = time.perf_counter()
     state = AgentState(task)
 
-    for step in range(1, max_steps + 1):
-        prompt = build_prompt(state, tokenizer)
-        output = generate(prompt, model, tokenizer)
+    run_step_loop(state, make_llm_step_source(model, tokenizer, verbose), max_steps, verbose)
 
-        if verbose:
-            print(f"\n=== STEP {step} ===")
-            print("RAW MODEL OUTPUT:\n", output)
-
-        try:
-            tool_call = parse_tool_call(output)
-        except (json.JSONDecodeError, ValueError) as e:
-            # feed the parse failure back in as a note so the model can self-correct
-            state.add_note(f"Step {step}: failed to parse model output as JSON: {e}")
-            state.log("parse_error", {"raw_output": output[:500]}, str(e))
-            continue
-
-        if verbose:
-            print("PARSED TOOL CALL:\n", tool_call)
-
-        try:
-            result = execute_tool(tool_call, state)
-        except Exception as e:
-            result = f"ERROR executing {tool_call.get('tool')}: {e}"
-            state.log(tool_call.get("tool", "unknown"), tool_call.get("args", {}), result)
-
-        if verbose:
-            print("TOOL RESULT:\n", result)
-
-        if state.done:
-            break
-    else:
-        state.add_note("Max steps reached without explicit 'done' call.")
-        
     if log_file:
         print("logging to...", log_file)
-        log_file.parent.mkdir(parents=True, exist_ok=True)
-    
-        log = {
-            "timestamp": datetime.now().isoformat(),
-            "model": MODEL_NAME,
-            "work_dir": str(WORK_DIR),
-            "clear_dir": clear_dir,
-            "load_path": bool(load_path),
-            "runtime": time.perf_counter() - start_time,
-            "num_steps": len(state.history),
-            "completed": state.done,
-            "final_state": state.to_dict(),
-        }
-    
-        with log_file.open("a", encoding="utf-8") as f:
-            json.dump(log, f)
-            f.write("\n")
-    
+        append_log(log_file, build_log_entry(state, start_time, work_dir, clear_dir, load_path, MODEL_NAME))
+
     return state
