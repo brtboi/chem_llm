@@ -410,6 +410,8 @@ TOOLS.append({
     "parameters": {"summary": "string"},
 })
 
-# tools/docs.py registers itself against TOOLS/TOOL_DISPATCH above via
-# `from tools import register_tool`; import it for that side effect.
+# tools/docs.py and tools/qe_validate.py register themselves against
+# TOOLS/TOOL_DISPATCH above via `from tools import register_tool`; import
+# them for that side effect.
 from . import docs  # noqa: E402,F401
+from . import qe_validate  # noqa: E402,F401

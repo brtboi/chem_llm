@@ -45,8 +45,12 @@ def structure_to_qe(structure, prefix, calculation):
     # SYSTEM
     lines.append("&SYSTEM")
     lines.append("   ibrav = 0")
-    lines.append("   nat = 20")
-    lines.append("   ntyp = 3")
+    # nat/ntyp MUST be computed from the `structure` object actually being
+    # written below, never hardcoded -- a fixed number silently drifts out
+    # of sync with ATOMIC_POSITIONS/ATOMIC_SPECIES the moment the structure
+    # changes (different compound, supercell, or perturbed copy).
+    lines.append(f"   nat = {len(structure)}")
+    lines.append(f"   ntyp = {len(structure.symbol_set)}")
     lines.append("   ecutwfc = 50.0")
     lines.append("   ecutrho = 250.0")
     lines.append("   tot_charge = 0.0")
