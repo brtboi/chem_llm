@@ -146,8 +146,8 @@ def run_espresso_workflow(
                 "completed_steps": completed,
             }
 
-        command = f"module load espresso && {exe} -in {in_file} > {out_file} 2>&1"
-        result = subprocess.run(["bash", "-c", command], cwd=work_dir)
+        command = f"module load QuantumESPRESSO/7.5-foss-2024a && {exe} -in {in_file} > {out_file} 2>&1"
+        result = subprocess.run(["bash", "-c", command], cwd=work_dir, capture_output=True, text=True)
         outputs[name] = str(work_dir / out_file)
 
         if result.returncode != 0:
@@ -159,6 +159,12 @@ def run_espresso_workflow(
                 "completed_steps": completed,
                 "outputs": outputs,
                 "output_tail": tail,
+                # module-load / shell-level errors (e.g. Lmod failures) never
+                # reach out_file since they occur before the redirection's
+                # right-hand side runs -- without these, a shell-level
+                # failure is invisible to the agent.
+                "shell_stdout": result.stdout[-2000:],
+                "shell_stderr": result.stderr[-2000:],
             }
 
         completed.append(name)
