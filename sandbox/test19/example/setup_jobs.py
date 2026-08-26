@@ -17,38 +17,14 @@ os.makedirs(STRUCTURE_DIR, exist_ok=True)
 # HELPERS
 ANG_TO_BOHR = 1.889726125
 
-# Pseudopotential file names
-TI_PSP = "Ti.psp8"
-O_PSP = "O.psp8"
-
-# Recommended ecutwfc from pseudopotential (in Ha)
-# Convert to Ry: 1 Ha = 2 Ry
-ECUTWFC_RY = 42.0 * 2  # 84.0 Ry
-ECUTRHO_RY = 4 * ECUTWFC_RY  # 336.0 Ry
-
-# High-symmetry k-point path for rutile TiO2 (P4_2/mnm)
-# Γ → X → M → Γ → R → X → M → R
-# Using crystal_b kpoint_type
-BANDS_KPATH = """5
-0.0 0.0 0.0 10
-0.5 0.0 0.0 10
-0.5 0.5 0.0 10
-0.0 0.0 0.0 10
-0.5 0.5 0.5 10
-0.5 0.0 0.0 10
-0.5 0.5 0.0 10
-0.0 0.0 0.0 1
-"""
-
-
 def structure_to_qe(structure, prefix, calculation):
-    """Generate Quantum ESPRESSO input file (pw.in or bands.in) from a structure."""
+
     a, b, c = structure.lattice.abc
+
     a_bohr = a * ANG_TO_BOHR
     b_bohr = b * ANG_TO_BOHR
     c_bohr = c * ANG_TO_BOHR
 
-    # For general lattice (ibrav=0), use celldm1, celldm2, celldm3
     celldm1 = a_bohr
     celldm2 = b_bohr / a_bohr
     celldm3 = c_bohr / a_bohr
@@ -69,17 +45,17 @@ def structure_to_qe(structure, prefix, calculation):
     # SYSTEM
     lines.append("&SYSTEM")
     lines.append("   ibrav = 0")
-    lines.append(f"   nat = {len(structure)}")
-    lines.append(f"   ntyp = 2")
-    lines.append(f"   ecutwfc = {ECUTWFC_RY:.2f}")
-    lines.append(f"   ecutrho = {ECUTRHO_RY:.2f}")
+    lines.append("   nat = 20")
+    lines.append("   ntyp = 3")
+    lines.append("   ecutwfc = 50.0")
+    lines.append("   ecutrho = 250.0")
     lines.append("   tot_charge = 0.0")
     lines.append("   nosym = .true.")
     lines.append("   noinv = .true.")
     lines.append("   occupations = 'fixed'")
-    lines.append("   nspin = 1")
-    lines.append("   noncolin = .false.")
-    lines.append("   lspinorb = .false.")
+    lines.append("   nspin = 4")
+    lines.append("   noncolin = .true.")
+    lines.append("   lspinorb = .true.")
 
     if calculation == "bands":
         lines.append("   nbnd = 200")
@@ -98,48 +74,72 @@ def structure_to_qe(structure, prefix, calculation):
     lines.append("   diago_full_acc = .false.")
     lines.append("/")
 
-    # ATOMIC_SPECIES
+    # SPECIES
     lines.append("ATOMIC_SPECIES")
-    lines.append(f"Ti {structure.composition['Ti'].mass:8.3f} {TI_PSP}")
-    lines.append(f"O  {structure.composition['O'].mass:8.3f} {O_PSP}")
+    lines.append("Cs 132.90545 Cs.rel-pbe-spn-rrkjus_psl.1.0.0.UPF")
+    lines.append("Pb 207.20000 Pb.rel-pbe-dn-rrkjus_psl.1.0.0.UPF")
+    lines.append("Br 79.90400 Br.USPP.FR.PBE.3.4.UPF")
     lines.append("")
 
-    # CELL_PARAMETERS
+    # CELL PARAMETERS
     lines.append("CELL_PARAMETERS angstrom")
+
     for vec in structure.lattice.matrix:
-        lines.append(f"{vec[0]:.10f} {vec[1]:.10f} {vec[2]:.10f}")
+
+        lines.append(
+            f"{vec[0]:.10f} "
+            f"{vec[1]:.10f} "
+            f"{vec[2]:.10f}"
+        )
+
     lines.append("")
 
-    # ATOMIC_POSITIONS
+    # POSITIONS
     lines.append("ATOMIC_POSITIONS crystal")
+
     frac = structure.frac_coords % 1.0
+
     for specie, pos in zip(structure.species, frac):
-        lines.append(f"{specie.symbol:<2} {pos[0]:.6f} {pos[1]:.6f} {pos[2]:.6f}")
+
+        lines.append(
+            f"{specie.symbol:<2} "
+            f"{pos[0]:.6f} "
+            f"{pos[1]:.6f} "
+            f"{pos[2]:.6f}"
+        )
+
     lines.append("")
 
-    # K_POINTS
+    # KPOINTS
     if calculation == "scf":
+
         lines.append("K_POINTS automatic")
         lines.append("8 8 8 0 0 0")
+
     elif calculation == "bands":
+
         lines.append("K_POINTS crystal_b")
-        lines.append(BANDS_KPATH)
+        lines.append("5")
+        lines.append("0.5 0.5 0.5 10")
+        lines.append("0.0 0.0 0.0 10")
+        lines.append("0.5 0.0 0.0 10")
+        lines.append("0.5 0.5 0.0 10")
+        lines.append("0.0 0.0 0.0 1")
 
     return "\n".join(lines)
 
-
 def write_submit_script(calc_path, prefix):
-    """Write a SLURM submit script with account m4735 and email brent.hu@yale.edu."""
+
     submit_text = f"""#!/bin/bash
-#SBATCH -A m4735
-#SBATCH -J ti_{prefix}
+#SBATCH -A m4868
+#SBATCH -J cs_{prefix}
 #SBATCH -C gpu
 #SBATCH --qos=regular
 #SBATCH --nodes=2
 #SBATCH --ntasks-per-node=4
 #SBATCH --time 03:00:00
 #SBATCH --mail-type=ALL
-#SBATCH --mail-user=brent.hu@yale.edu
+#SBATCH --mail-user=daniel_chabeda@berkeley.edu
 
 module load espresso
 
@@ -178,12 +178,14 @@ echo "Finished {prefix}"
 cif_files = sorted(Path(STRUCTURE_DIR).glob("*.cif"))
 
 for n, cif_file in enumerate(cif_files):
+
     prefix = f"{n:03d}"
+
     calc_path = Path(CALC_DIR) / prefix
 
-    print(f"Setting up {calc_path}")
+    print("Setting up", calc_path)
 
-    # Copy template
+    # copy template
     if calc_path.exists():
         if OVERWRITE:
             print(f"Overwriting {calc_path}")
@@ -191,42 +193,46 @@ for n, cif_file in enumerate(cif_files):
         else:
             print(f"Skipping existing directory: {calc_path}")
             continue
-    
+        
     shutil.copytree(TEMPLATE_DIR, calc_path)
 
-    # Load structure
+    # load structure
     structure = Structure.from_file(cif_file)
 
-    # Write pw.in
+    # write pw.in
     pw_text = structure_to_qe(
         structure,
         prefix,
         calculation="scf"
     )
+
     with open(calc_path / "pw.in", "w") as f:
         f.write(pw_text)
 
-    # Write bands.in
+    # write bands.in
     bands_text = structure_to_qe(
         structure,
         prefix,
         calculation="bands"
     )
+
     with open(calc_path / "bands.in", "w") as f:
         f.write(bands_text)
 
-    # Write bands_post.in
+    # write bands_post.in
     bands_post = f"""&BANDS
     prefix  = '{prefix}'
     outdir  = './'
     filband = '{prefix}.bands.dat'
     lsym = .true.,
     /
-"""
+    """
+
     with open(calc_path / "bands_post.in", "w") as f:
         f.write(bands_post)
 
-    # Write submit.sh
+    # write submit.sh
     write_submit_script(calc_path, prefix)
+
 
 print("Done.")

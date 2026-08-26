@@ -95,6 +95,82 @@ def run_python(path: str):
     return {"stdout": result.stdout, "stderr": result.stderr}
 
 @register_tool(
+    "run_espresso_workflow",
+    (
+        "Run the Quantum ESPRESSO SCF + bands workflow for one calculation "
+        "directory directly on the current node (module-loads 'espresso', then "
+        "runs pw.x for the SCF step, pw.x for the bands step, and bands.x for "
+        "the bands post-processing step, in that order -- three commands total, "
+        "matching the pw.x/pw.x/bands.x sequence in submit.sh). Does NOT use "
+        "srun or sbatch: this assumes the calling process is already running on "
+        "an allocated compute node (e.g. inside the pipeline's own GPU job), so "
+        "the three commands run in-process one after another. Stops and reports "
+        "failure at the first step that errors, without running later steps. "
+        "The SCF, bands, and bands-post-processing input files must already "
+        "exist in `directory` (as written by setup_jobs.py)."
+    ),
+    {
+        "directory": "string. Directory containing the QE input files, e.g. a calculations/NNN folder.",
+        "pw_input": "string (optional, default 'pw.in'). SCF pw.x input filename, relative to directory.",
+        "bands_input": "string (optional, default 'bands.in'). Bands pw.x input filename, relative to directory.",
+        "bands_post_input": (
+            "string (optional, default 'bands_post.in'). bands.x post-processing "
+            "input filename, relative to directory."
+        ),
+    },
+    remember_on=("directory",),
+)
+def run_espresso_workflow(
+    directory: str,
+    pw_input: str = "pw.in",
+    bands_input: str = "bands.in",
+    bands_post_input: str = "bands_post.in",
+):
+    work_dir = Path(directory).resolve()
+    if not work_dir.is_dir():
+        return {"success": False, "stderr": f"{work_dir} is not a directory"}
+
+    steps = [
+        ("scf", "pw.x", pw_input, "pw.out"),
+        ("bands_scf", "pw.x", bands_input, "bands_pw.out"),
+        ("bands_post", "bands.x", bands_post_input, "bands_post.out"),
+    ]
+
+    completed = []
+    outputs = {}
+    for name, exe, in_file, out_file in steps:
+        if not (work_dir / in_file).exists():
+            return {
+                "success": False,
+                "stderr": f"{name} failed: input file {in_file} not found in {work_dir}",
+                "completed_steps": completed,
+            }
+
+        command = f"module load espresso && {exe} -in {in_file} > {out_file} 2>&1"
+        result = subprocess.run(["bash", "-c", command], cwd=work_dir)
+        outputs[name] = str(work_dir / out_file)
+
+        if result.returncode != 0:
+            out_path = work_dir / out_file
+            tail = out_path.read_text(errors="replace")[-2000:] if out_path.exists() else ""
+            return {
+                "success": False,
+                "stderr": f"{name} ({exe} -in {in_file}) exited with code {result.returncode}",
+                "completed_steps": completed,
+                "outputs": outputs,
+                "output_tail": tail,
+            }
+
+        completed.append(name)
+
+    return {
+        "success": True,
+        "directory": str(work_dir),
+        "completed_steps": completed,
+        "outputs": outputs,
+    }
+
+@register_tool(
     "generate_cif",
     (
         "Download a crystal structure CIF from the Materials Project. "
@@ -237,12 +313,6 @@ def generate_cif(
         "pseudohub package) and save it to disk. Also returns the recommended "
         "plane-wave energy cutoff (ecut, in Ha) for the requested accuracy level, "
         "which should be used when building the Quantum ESPRESSO input file. "
-        "kind must be 'nc' (norm-conserving) or 'paw'. relativity must be 'sr' "
-        "(scalar-relativistic) or 'fr' (fully-relativistic, required for spin-orbit "
-        "coupling calculations). generator is the DFT functional the pseudopotential "
-        "was generated with (e.g. 'pbe', 'pbesol', 'pw'). accuracy must be "
-        "'standard' or 'stringent'. format must be a valid pseudopotential file "
-        "format (e.g. 'upf', 'psp8'); Quantum ESPRESSO requires 'upf'. "
         "Not every (kind, relativity, generator, accuracy) combination has a "
         "corresponding Pseudo-Dojo table -- if the call fails, check the error "
         "message's suggestions and retry with a valid combination."
@@ -251,7 +321,7 @@ def generate_cif(
         "element": (
             "string or int. Element symbol (e.g. 'Si') or atomic number (e.g. 14)."
         ),
-        "output_path": "string. Path (file or directory) to save the pseudopotential to.",
+        "output_path": "string. Path (file or directory) to save the pseudopotential to. File type must match specified file format.",
         "kind": "string (optional, default 'nc'). 'nc' or 'paw'.",
         "relativity": (
             "string (optional, default 'sr'). 'sr' (scalar-relativistic) or "
