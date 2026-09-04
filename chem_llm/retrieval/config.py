@@ -78,5 +78,32 @@ PYMATGEN_MODULES = [
 
 QE_PW_DOC_URL = "https://www.quantum-espresso.org/Doc/INPUT_PW.html"
 
+# ASE's Sphinx docs are nested by sub-module (ase/atoms.html,
+# ase/dft/kpoints.html, ...) rather than one page per top-level subpackage
+# like pymatgen, so discovery is a curated allowlist (checked against the
+# live py-modindex.html, see scrapers/ase_docs.py) instead of a page-name
+# pattern -- ASE also documents dozens of third-party calculator backends
+# (abinit, castep, gaussian, ...) this pipeline never touches, which would
+# otherwise dilute the index.
+ASE_BASE_URL = "https://docs.ase-lib.org/"
+ASE_MODINDEX_URL = ASE_BASE_URL + "py-modindex.html"
+ASE_PAGE_ALLOWLIST = [
+    "ase/ase.html",
+    "ase/atoms.html",
+    "ase/atom.html",
+    "ase/cell.html",
+    "ase/units.html",
+    "ase/symbols.html",
+    "ase/geometry.html",
+    "ase/io/io.html",
+    "ase/dft/kpoints.html",
+    "ase/dft/bandgap.html",
+    "ase/spacegroup/spacegroup.html",
+    "ase/build/build.html",
+    "ase/build/tools.html",
+    "ase/calculators/espresso.html",
+    "ase/calculators/calculators.html",
+]
+
 HTTP_TIMEOUT = 30
 HTTP_USER_AGENT = "chem_llm-doc-retrieval/1.0 (+https://github.com)"

@@ -2,10 +2,13 @@ import os
 import shutil
 from pathlib import Path
 
-from pymatgen.core import Structure
+import numpy as np
+import seekpath
+from ase.io import read
 
 # SETTINGS
 OVERWRITE = False
+BANDS_POINTS_PER_SEGMENT = 10
 
 TEMPLATE_DIR = "template"
 STRUCTURE_DIR = "structures"
@@ -17,17 +20,79 @@ os.makedirs(STRUCTURE_DIR, exist_ok=True)
 # HELPERS
 ANG_TO_BOHR = 1.889726125
 
-def structure_to_qe(structure, prefix, calculation):
 
-    a, b, c = structure.lattice.abc
+def compute_band_path(structure, points_per_segment=BANDS_POINTS_PER_SEGMENT):
+    """Derive the high-symmetry bands path from THIS structure's actual
+    symmetry (lattice + basis together) via seekpath, then reproject it
+    onto the actual cell (not the primitive cell seekpath may report if
+    `structure`'s cell isn't already primitive) through Cartesian
+    coordinates.
 
-    a_bohr = a * ANG_TO_BOHR
-    b_bohr = b * ANG_TO_BOHR
-    c_bohr = c * ANG_TO_BOHR
+    NEVER type high-symmetry fractional coordinates from a textbook
+    space-group convention, and NEVER use ASE's `atoms.cell.bandpath()`
+    for this: that method classifies the Bravais lattice from the cell
+    vectors ALONE, so it never inspects the atomic basis and cannot detect
+    symmetry lowered by the actual atomic arrangement (e.g. a randomly
+    perturbed structure, exactly what this pipeline generates, is
+    generically NOT exactly on the ideal high-symmetry point and can have
+    a lower true space group than its lattice shape alone would suggest).
+    seekpath uses spglib on the full (lattice + basis) structure, so it
+    reflects the structure's real symmetry.
 
-    celldm1 = a_bohr
-    celldm2 = b_bohr / a_bohr
-    celldm3 = c_bohr / a_bohr
+    Returns (kpts, labels) where kpts is an (N, 4) array of fractional
+    k-points (in the ACTUAL cell's reciprocal lattice) with a constant
+    weight column, and labels is a list of (label, cumulative_index) for
+    every named point on the path, in order (for plot x-axis ticks).
+    """
+    cell_tuple = (
+        structure.cell[:],
+        structure.get_scaled_positions(),
+        structure.get_atomic_numbers(),
+    )
+    # symprec=0.01 (not seekpath/spglib's tight 1e-5 default) matches
+    # pymatgen's SpacegroupAnalyzer default tolerance -- CIF-round-tripped
+    # coordinates carry enough numerical noise that the tight default can
+    # silently under-detect symmetry (e.g. this exact rutile TiO2 cell from
+    # Materials Project reads back as spglib-P1 at 1e-5, but the true,
+    # MP-declared space group P4_2/mnm #136 is only recovered at 0.01+).
+    res = seekpath.get_path(cell_tuple, symprec=0.01)
+
+    # Both reciprocal lattices must use the same (2*pi) convention before
+    # any Cartesian round-trip: seekpath's reciprocal_primitive_lattice
+    # already includes the 2*pi factor, but ASE's Cell.reciprocal() does
+    # NOT -- so it must be added explicitly here.
+    recip_prim = np.array(res["reciprocal_primitive_lattice"])
+    recip_actual = 2 * np.pi * np.array(structure.cell.reciprocal()[:])
+    recip_actual_inv = np.linalg.inv(recip_actual)
+
+    def prim_frac_to_actual_frac(frac_prim):
+        cart = np.array(frac_prim) @ recip_prim
+        return cart @ recip_actual_inv
+
+    point_coords_actual = {
+        label: prim_frac_to_actual_frac(coords)
+        for label, coords in res["point_coords"].items()
+    }
+
+    kpts = []
+    labels = []
+    for seg_from, seg_to in res["path"]:
+        start = point_coords_actual[seg_from]
+        end = point_coords_actual[seg_to]
+        labels.append((seg_from, len(kpts)))
+        for i in range(points_per_segment):
+            frac = i / points_per_segment
+            kpts.append(start * (1 - frac) + end * frac)
+    # Final point of the last segment.
+    labels.append((res["path"][-1][1], len(kpts)))
+    kpts.append(point_coords_actual[res["path"][-1][1]])
+
+    kpts = np.array(kpts)
+    weights = np.ones((len(kpts), 1))
+    return np.hstack([kpts, weights]), labels
+
+
+def structure_to_qe(structure, prefix, calculation, band_kpts=None):
 
     lines = []
 
@@ -50,7 +115,7 @@ def structure_to_qe(structure, prefix, calculation):
     # of sync with ATOMIC_POSITIONS/ATOMIC_SPECIES the moment the structure
     # changes (different compound, supercell, or perturbed copy).
     lines.append(f"   nat = {len(structure)}")
-    lines.append(f"   ntyp = {len(structure.symbol_set)}")
+    lines.append(f"   ntyp = {len(set(structure.get_chemical_symbols()))}")
     lines.append("   ecutwfc = 50.0")
     lines.append("   ecutrho = 250.0")
     lines.append("   tot_charge = 0.0")
@@ -88,7 +153,7 @@ def structure_to_qe(structure, prefix, calculation):
     # CELL PARAMETERS
     lines.append("CELL_PARAMETERS angstrom")
 
-    for vec in structure.lattice.matrix:
+    for vec in structure.cell[:]:
 
         lines.append(
             f"{vec[0]:.10f} "
@@ -101,12 +166,12 @@ def structure_to_qe(structure, prefix, calculation):
     # POSITIONS
     lines.append("ATOMIC_POSITIONS crystal")
 
-    frac = structure.frac_coords % 1.0
+    frac = structure.get_scaled_positions() % 1.0
 
-    for specie, pos in zip(structure.species, frac):
+    for symbol, pos in zip(structure.get_chemical_symbols(), frac):
 
         lines.append(
-            f"{specie.symbol:<2} "
+            f"{symbol:<2} "
             f"{pos[0]:.6f} "
             f"{pos[1]:.6f} "
             f"{pos[2]:.6f}"
@@ -122,13 +187,18 @@ def structure_to_qe(structure, prefix, calculation):
 
     elif calculation == "bands":
 
-        lines.append("K_POINTS crystal_b")
-        lines.append("5")
-        lines.append("0.5 0.5 0.5 10")
-        lines.append("0.0 0.0 0.0 10")
-        lines.append("0.5 0.0 0.0 10")
-        lines.append("0.5 0.5 0.0 10")
-        lines.append("0.0 0.0 0.0 1")
+        # Explicit, pre-interpolated k-point list (one line per point, a
+        # constant placeholder weight) under the plain "crystal" card --
+        # physically identical to "crystal_b" (which asks pw.x to do the
+        # interpolation itself from a few vertices): the interpolation
+        # already happened in compute_band_path, in the ACTUAL cell's
+        # fractional coordinates, from a symmetry analysis of the actual
+        # structure (see compute_band_path's docstring for why that
+        # matters).
+        lines.append("K_POINTS crystal")
+        lines.append(str(len(band_kpts)))
+        for kx, ky, kz, w in band_kpts:
+            lines.append(f"{kx:.10f} {ky:.10f} {kz:.10f} {w:.6f}")
 
     return "\n".join(lines)
 
@@ -197,11 +267,11 @@ for n, cif_file in enumerate(cif_files):
         else:
             print(f"Skipping existing directory: {calc_path}")
             continue
-        
+
     shutil.copytree(TEMPLATE_DIR, calc_path)
 
     # load structure
-    structure = Structure.from_file(cif_file)
+    structure = read(cif_file)
 
     # write pw.in
     pw_text = structure_to_qe(
@@ -213,15 +283,26 @@ for n, cif_file in enumerate(cif_files):
     with open(calc_path / "pw.in", "w") as f:
         f.write(pw_text)
 
+    # derive this structure's own bands path (never reuse another
+    # structure's path -- symmetry can break under perturbation)
+    band_kpts, band_labels = compute_band_path(structure)
+
     # write bands.in
     bands_text = structure_to_qe(
         structure,
         prefix,
-        calculation="bands"
+        calculation="bands",
+        band_kpts=band_kpts,
     )
 
     with open(calc_path / "bands.in", "w") as f:
         f.write(bands_text)
+
+    # record the labels/positions plot_bands.py needs for x-axis ticks, so
+    # it never has to re-derive (or worse, re-hardcode) the path itself.
+    with open(calc_path / "band_labels.dat", "w") as f:
+        for label, idx in band_labels:
+            f.write(f"{label} {idx}\n")
 
     # write bands_post.in
     bands_post = f"""&BANDS

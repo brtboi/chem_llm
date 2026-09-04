@@ -64,6 +64,27 @@ def compute_vbm(bands):
 
     return vbm_ry
 
+# HIGH-SYMMETRY LABELS
+# setup_jobs.py derives the bands path per-structure (via seekpath, from
+# that structure's own symmetry) and records the labels it used alongside
+# their index into the explicit k-point list it wrote -- read those back
+# instead of hardcoding a path/label sequence here, which would silently
+# mismatch any structure with different symmetry (see setup_jobs.py's
+# compute_band_path docstring).
+def read_band_labels(filename):
+    labels = []
+    with open(filename) as f:
+        for line in f:
+            parts = line.split()
+            if len(parts) == 2:
+                labels.append((parts[0], int(parts[1])))
+    return labels
+
+_LATEX_LABELS = {"GAMMA": r"$\Gamma$", "SIGMA": r"$\Sigma$", "DELTA": r"$\Delta$"}
+
+def label_to_latex(label):
+    return _LATEX_LABELS.get(label.upper(), label)
+
 # PLOT
 def plot_bands(calc_dir):
 
@@ -71,8 +92,10 @@ def plot_bands(calc_dir):
     prefix = calc_dir.name
     bands_file = calc_dir / f"{prefix}.bands.dat.gnu"
     symm_file = calc_dir / "bands_post.out"
+    labels_file = calc_dir / "band_labels.dat"
     bands = read_bands(bands_file)
     xcoords = read_symmetry_points(symm_file)
+    band_labels = read_band_labels(labels_file)
 
     # VBM alignment
     vbm_eV = compute_vbm(bands)
@@ -109,8 +132,9 @@ def plot_bands(calc_dir):
         color="black"
     )
 
-    # labels
-    labels = ["R", r"$\Gamma$", "X" , "M", r"$\Gamma$"]
+    # labels -- one per vertex bands.x reports, in the same order
+    # compute_band_path wrote them in setup_jobs.py.
+    labels = [label_to_latex(label) for label, _ in band_labels]
 
     ax.set_xticks(xcoords)
     ax.set_xticklabels(labels)

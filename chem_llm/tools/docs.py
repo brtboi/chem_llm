@@ -25,16 +25,16 @@ def _get_retriever() -> DocRetriever:
 @register_tool(
     "search_docs",
     (
-        "Search indexed technical documentation (pymatgen API reference and "
-        "Quantum ESPRESSO pw.x input variables) for text relevant to a "
-        "natural-language question or an exact API identifier. Combines "
-        "keyword (BM25) and semantic (embedding) search, then reranks with a "
-        "cross-encoder. Does not call an LLM -- results are retrieved "
-        "documentation chunks, not generated answers. Use this before "
-        "guessing pymatgen class/method signatures or Quantum ESPRESSO "
-        "namelist variable names/units. Examples of good queries: "
-        "'How do I create a pymatgen Structure from a CIF?', 'ecutwfc', "
-        "'How do I set smearing parameters?', 'Structure.from_file'."
+        "Search indexed technical documentation (ASE -- Atomic Simulation "
+        "Environment -- API reference and Quantum ESPRESSO pw.x input "
+        "variables) for text relevant to a natural-language question or an "
+        "exact API identifier. Combines keyword (BM25) and semantic "
+        "(embedding) search, then reranks with a cross-encoder. Does not "
+        "call an LLM -- results are retrieved documentation chunks, not "
+        "generated answers. Use this before guessing ASE class/method "
+        "signatures or Quantum ESPRESSO namelist variable names/units. "
+        "Examples of good queries: 'How do I read a CIF file with ASE?', "
+        "'ecutwfc', 'How do I set smearing parameters?', 'Atoms.get_scaled_positions'."
     ),
     {
         "query": "string. Natural-language question or exact identifier to search for.",
@@ -44,7 +44,7 @@ def _get_retriever() -> DocRetriever:
         ),
         "sources": (
             "list[string] (optional). Restrict results to these sources: "
-            "'pymatgen', 'quantum_espresso'. Default: search both."
+            "'ase', 'quantum_espresso'. Default: search both."
         ),
     },
 )

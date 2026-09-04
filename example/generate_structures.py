@@ -2,8 +2,8 @@ import os
 import math
 import numpy as np
 
-from pymatgen.core import Structure, Lattice
-from pymatgen.io.cif import CifWriter
+from ase import Atoms
+from ase.io import write
 
 # SETTINGS
 N_STRUCTURES = 50
@@ -93,13 +93,11 @@ def build_structure(par):
 
     coords %= 1.0
 
-    lattice = Lattice(basis_vectors)
-
-    structure = Structure(
-        lattice=lattice,
-        species=atoms,
-        coords=coords,
-        coords_are_cartesian=False
+    structure = Atoms(
+        symbols=atoms,
+        cell=basis_vectors,
+        scaled_positions=coords,
+        pbc=True,
     )
 
     return structure
@@ -115,13 +113,16 @@ def randomize_structure(s):
         "Br": 0.18
     }
 
-    for i, site in enumerate(s):
+    # Cartesian (Angstrom) per-atom displacement, drawn per-species -- ASE
+    # positions are Cartesian by default, so this translates each atom
+    # directly (equivalent to the old translate_sites(..., frac_coords=False)).
+    for i, symbol in enumerate(s.get_chemical_symbols()):
 
-        sigma = displacement_map[site.specie.symbol]
+        sigma = displacement_map[symbol]
 
         dr = np.random.normal(scale=sigma, size=3)
 
-        s.translate_sites(i, dr, frac_coords=False)
+        s.positions[i] += dr
 
     # small random strain
 
@@ -129,14 +130,12 @@ def randomize_structure(s):
 
     strain = np.diag(1 + eps)
 
-    new_matrix = strain @ s.lattice.matrix
+    new_cell = strain @ s.cell[:]
 
-    s = Structure(
-        lattice=Lattice(new_matrix),
-        species=s.species,
-        coords=s.cart_coords,
-        coords_are_cartesian=True
-    )
+    # scale_atoms=False keeps the just-applied Cartesian positions fixed and
+    # only changes the cell -- matches rebuilding the old Structure with the
+    # same cart_coords under a strained lattice.
+    s.set_cell(new_cell, scale_atoms=False)
 
     return s
 
@@ -158,7 +157,7 @@ for n in range(N_STRUCTURES):
     filename = f"structures/structure_{n:03d}.cif"
 
     # Geometry
-    CifWriter(s).write_file(filename, mode='wt')
+    write(filename, s, format="cif")
 
     print("Wrote", filename)
 
