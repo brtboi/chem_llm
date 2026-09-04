@@ -21,7 +21,7 @@ import json
 import time
 from pathlib import Path
 
-from . import config
+from . import REPO_ROOT, config
 from .agent_core import append_log, build_log_entry, prepare_work_dir, run_step_loop
 from .state import AgentState
 
@@ -124,6 +124,70 @@ def replay_run(
     append_log(log_file, log_entry)
 
     return state
+
+
+def sandbox_dir(n: int) -> Path:
+    """Resolve an integer to its sandbox/testN directory, anchored to
+    REPO_ROOT so this works regardless of cwd (e.g. 17 -> sandbox/test17)."""
+    return REPO_ROOT / "sandbox" / f"test{n}"
+
+
+def copy_parse_args(argv=None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Replay a recorded run from one sandbox/testN directory into "
+            "another, creating the destination directory if it doesn't exist."
+        ),
+    )
+    parser.add_argument(
+        "from_dir", type=int,
+        help="Source sandbox test number to replay from, e.g. 17 for sandbox/test17.",
+    )
+    parser.add_argument(
+        "to_dir", type=int,
+        help="Destination sandbox test number to replay into, e.g. 25 for "
+             "sandbox/test25. Created if it doesn't already exist.",
+    )
+    parser.add_argument(
+        "-i", "--index",
+        type=int,
+        default=-1,
+        help="Which recorded run in the source log.jsonl to replay: a 0-based line "
+             "number, negative counts from the end. Default: -1 (most recent).",
+    )
+    parser.add_argument(
+        "--clear-dir",
+        action="store_true",
+        help="Clear the destination directory before replaying. Off by default.",
+    )
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Suppress per-step console output.",
+    )
+    return parser.parse_args(argv)
+
+
+def copy_main(argv=None) -> None:
+    args = copy_parse_args(argv)
+
+    source_dir = sandbox_dir(args.from_dir)
+    dest_dir = sandbox_dir(args.to_dir)
+    log_file = resolve_log_file(source_dir)
+    entry = load_run(log_file, args.index)
+
+    print(f"Replaying run {args.index} from {log_file} into {dest_dir}")
+
+    state = replay_run(
+        entry,
+        work_dir=dest_dir,
+        verbose=not args.quiet,
+        clear_dir=args.clear_dir,
+        source_log_file=log_file,
+        source_index=args.index,
+    )
+
+    print("\nFINAL STATE:\n", json.dumps(state.to_dict(), indent=2))
 
 
 def parse_args(argv=None) -> argparse.Namespace:

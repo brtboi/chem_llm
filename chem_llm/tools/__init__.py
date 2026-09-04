@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -107,7 +108,24 @@ def run_python(path: str):
         "the three commands run in-process one after another. Stops and reports "
         "failure at the first step that errors, without running later steps. "
         "The SCF, bands, and bands-post-processing input files must already "
-        "exist in `directory` (as written by setup_jobs.py)."
+        "exist in `directory` (as written by setup_jobs.py).\n"
+        "You MUST check the returned `success` boolean before treating this "
+        "workflow as having done anything -- do not infer success from the "
+        "presence of an `outputs` entry, from stdout being non-empty, or from "
+        "an output file existing on disk: this tool always attempts to write "
+        "the step's output file (via shell redirection) even when that step's "
+        "command fails, so a failed run still leaves a real .out file behind. "
+        "`completed_steps` lists ONLY the steps (by name: scf, bands_scf, "
+        "bands_post) that actually finished with exit code 0, in order -- "
+        "when `success` is false, the failed step itself is NOT in that list "
+        "even if its `outputs` entry is present, and none of the steps after "
+        "it ran at all. When `success` is false, `stderr` (and, for a "
+        "module-load/shell-level failure, `shell_stderr`) names exactly which "
+        "step failed and why; treat that like a run_python error under rule 3 "
+        "of the system prompt -- do not write a note claiming the workflow "
+        "(or any of its steps) succeeded, and do not proceed to later steps "
+        "or plotting/analysis of that directory's outputs until it is fixed "
+        "and re-run with success: true."
     ),
     {
         "directory": "string. Directory containing the QE input files, e.g. a calculations/NNN folder.",
@@ -146,8 +164,17 @@ def run_espresso_workflow(
                 "completed_steps": completed,
             }
 
-        command = f"module load QuantumESPRESSO/7.5-foss-2024a && {exe} -in {in_file} > {out_file} 2>&1"
-        result = subprocess.run(["bash", "-c", command], cwd=work_dir, capture_output=True, text=True)
+        command = f"module load espresso/7.5-libxc-7.0.0-cpu && {exe} -in {in_file} > {out_file} 2>&1"
+        # Without OMP_NUM_THREADS pinned, pw.x/bands.x default to one OpenMP
+        # thread per core on the node (128 here) for every k-point's serial
+        # diagonalization -- for a small unit cell that's massive
+        # oversubscription (~118 threads thrashing on a tiny matrix) that
+        # made even a single SCF iteration take many minutes. Since this
+        # tool deliberately runs without srun/MPI (see docstring), there is
+        # no k-point-level parallelism to hand those cores to, so pin to 1
+        # thread and let each k-point's diagonalization run efficiently.
+        env = {**os.environ, "OMP_NUM_THREADS": "1"}
+        result = subprocess.run(["bash", "-c", command], cwd=work_dir, capture_output=True, text=True, env=env)
         outputs[name] = str(work_dir / out_file)
 
         if result.returncode != 0:
@@ -416,8 +443,9 @@ TOOLS.append({
     "parameters": {"summary": "string"},
 })
 
-# tools/docs.py and tools/qe_validate.py register themselves against
-# TOOLS/TOOL_DISPATCH above via `from tools import register_tool`; import
-# them for that side effect.
+# tools/docs.py, tools/qe_validate.py, and tools/deepseudopot.py register
+# themselves against TOOLS/TOOL_DISPATCH above via `from tools import
+# register_tool`; import them for that side effect.
 from . import docs  # noqa: E402,F401
 from . import qe_validate  # noqa: E402,F401
+from . import deepseudopot  # noqa: E402,F401

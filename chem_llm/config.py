@@ -20,7 +20,7 @@ TEMPERATURE = 0.0
 DO_SAMPLE = False
 MAX_HISTORY = 32
 
-MAX_AGENT_STEPS = 36
+MAX_AGENT_STEPS = 44
 
 # --- Tool settings ---
 READ_MAX_CHARS = 10000
@@ -37,6 +37,11 @@ LOG_FILE = REPO_ROOT / "logs" / "log.jsonl"
 # path relative to REPO_ROOT or an absolute path -- an absolute value on
 # the right of `/` replaces the left side entirely, per pathlib semantics,
 # so no separate branch is needed for the two cases.
-WORK_DIR = (REPO_ROOT / os.environ.get("MATAGENT_WORK_DIR", "sandbox/test21")).resolve()
+WORK_DIR = (REPO_ROOT / os.environ.get("MATAGENT_WORK_DIR", "sandbox/test22")).resolve()
 
 EXAMPLE_DIR = (REPO_ROOT / os.environ.get("EXAMPLE_DIR", "example")).resolve()
+
+# Reference scripts + real, validated DFT output for a single (unperturbed
+# cubic) CsPbBr3 structure -- the load_path for the DeePseudopot tool-use
+# notebook (deepseudopot_agent.ipynb). See deepseudopot_example/README.md.
+DPP_EXAMPLE_DIR = (REPO_ROOT / os.environ.get("DPP_EXAMPLE_DIR", "deepseudopot_example")).resolve()
