@@ -98,6 +98,7 @@ ASE_PAGE_ALLOWLIST = [
     "ase/io/io.html",
     "ase/dft/kpoints.html",
     "ase/dft/bandgap.html",
+    "ase/spectrum/band_structure.html",
     "ase/spacegroup/spacegroup.html",
     "ase/build/build.html",
     "ase/build/tools.html",
