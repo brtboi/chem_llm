@@ -20,7 +20,7 @@ import shutil
 import time
 
 from . import REPO_ROOT
-from .config import MAX_AGENT_STEPS, MAX_HISTORY, MAX_NEW_TOKENS, TEMPERATURE, DO_SAMPLE, WORK_DIR, MODEL_NAME
+from .config import MAX_AGENT_STEPS, MAX_HISTORY, MAX_NEW_TOKENS, TEMPERATURE, DO_SAMPLE, WORK_DIR, MODEL_NAME, DPP_EXAMPLE_SUBDIR
 from .state import AgentState
 from .tools import TOOLS, TOOL_DISPATCH
 
@@ -385,12 +385,19 @@ def copy_to_cwd(load_path) -> None:
         shutil.copy2(src, dst)
 
 
-def prepare_work_dir(work_dir: Path, clear_dir: bool = False, load_path=None) -> None:
+def prepare_work_dir(work_dir: Path, clear_dir: bool = False, load_path=None, load_deepseudopot: bool = False) -> None:
     """Ensure `work_dir` exists and make it the current directory -- every
     tool (write_file, run_python, generate_cif, ...) resolves its paths
     against cwd, so this is the one place that contract is established,
     rather than every entry point (run_agent, replay) chdir'ing on its own.
     Optionally clears it first and/or seeds it from `load_path`.
+
+    `load_deepseudopot`, if true, ALSO copies DPP_EXAMPLE_SUBDIR (the
+    qe_bands_to_ref.py / setup_nn_inputs.py / nn_template/ reference
+    materials for building a DeePseudopot input bundle from this pipeline's
+    own QE output) into the work dir, on top of whatever `load_path`
+    already copied -- most runs never touch DeePseudopot, so this is opt-in
+    rather than something every `load_path` copy carries automatically.
     """
     if not work_dir.exists():
         print(f"Work directory {work_dir} does not exist yet -- creating it.")
@@ -401,6 +408,9 @@ def prepare_work_dir(work_dir: Path, clear_dir: bool = False, load_path=None) ->
         clear_directory(Path.cwd())
 
     copy_to_cwd(load_path)
+
+    if load_deepseudopot:
+        copy_to_cwd(DPP_EXAMPLE_SUBDIR)
 
 
 def build_log_entry(state: AgentState, start_time: float, work_dir: Path, clear_dir: bool, load_path, model_name: str, extra: dict | None = None) -> dict:
@@ -440,16 +450,17 @@ def run_agent(
     log_file=_UNSET,
     clear_dir: bool = False,
     load_path=None,
+    load_deepseudopot: bool = False,
 ) -> AgentState:
     """Run the agent live: the model generates each tool call. Executes in
     `work_dir` (defaults to config.WORK_DIR) and appends a run record to
     `log_file` (defaults to `work_dir / "log.jsonl"`; pass `log_file=None`
-    to skip logging).
+    to skip logging). `load_deepseudopot` -- see prepare_work_dir.
     """
     if log_file is _UNSET:
         log_file = work_dir / "log.jsonl"
 
-    prepare_work_dir(work_dir, clear_dir, load_path)
+    prepare_work_dir(work_dir, clear_dir, load_path, load_deepseudopot)
 
     if log_file:
         log_file.parent.mkdir(parents=True, exist_ok=True)
