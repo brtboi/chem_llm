@@ -14,6 +14,7 @@ recorded tools (not a replay of their recorded results).
 """
 import json
 import os
+import uuid
 from datetime import datetime
 from pathlib import Path
 import shutil
@@ -67,7 +68,7 @@ SYSTEM_PROMPT_TEMPLATE = (
     "depend on this one having worked.\n"
     "3. Call search_docs BEFORE you write code or a note that depends on an "
     "API or file-format detail you are not 100% certain of (an unfamiliar "
-    "pymatgen class/method signature, a QE namelist variable's meaning/units/ "
+    "ASE class/method signature, a QE namelist variable's meaning/units/ "
     "valid range, an input-file card's required format) -- do this "
     "proactively, before drawing a conclusion or writing it down, not only "
     "after something has already failed. If run_python later returns a "
@@ -96,8 +97,8 @@ SYSTEM_PROMPT_TEMPLATE = (
     "check-and-raise) in the script itself, immediately after the value is "
     "produced -- not as a note, and not only as a final review step.\n\n"
     "INVARIANT 1: QE's nat (number of atoms) and ntyp (number of distinct "
-    "elements) MUST be computed from the actual pymatgen Structure object "
-    "in hand -- e.g. len(structure), len(structure.symbol_set) -- never "
+    "elements) MUST be computed from the actual ASE Atoms object in hand -- "
+    "e.g. len(atoms), len(set(atoms.get_chemical_symbols())) -- never "
     "hardcoded as a literal number typed from memory, a note, or an example "
     "script. A hardcoded count silently drifts out of sync the moment the "
     "structure changes (new compound, supercell, perturbed copy) and will "
@@ -128,60 +129,166 @@ SYSTEM_PROMPT_TEMPLATE = (
     "occupied-band count already computed for you. Never type a guessed "
     "number into a script; read/derive it from the actual pw.out in code.\n\n"
     "INVARIANT 3: the k-path used in a bands calculation was generated FROM "
-    "the exact same pymatgen Structure object you wrote into that "
-    "CELL_PARAMETERS block, not copied from a template, textbook "
-    "space-group convention, or a different structure's path (see the "
-    "k-path source DECISION RULE below for when a path is needed at all). "
-    "NEVER type high-symmetry k-point fractional coordinates from memory "
-    "(e.g. Gamma=(0,0,0), X=(0.5,0,0), M=(0.5,0.5,0), Z=(0,0,0.5), "
-    "R=(0.5,0.5,0.5) for a 'standard tetragonal' cell) -- the "
-    "CELL_PARAMETERS you actually generated (e.g. via generate_cif from "
-    "Materials Project) is frequently NOT the conventional or primitive "
-    "cell those textbook coordinates assume; it can be a differently "
-    "shaped, differently oriented, or doubled cell with a different "
-    "reciprocal lattice entirely. Applying textbook fractional coordinates "
-    "to it lands on the wrong physical k-points and produces a bands plot "
-    "with nonphysical dispersion (e.g. bands swinging by tens of eV between "
-    "consecutive path points, or looking totally flat/empty away from "
-    "Gamma). Instead, derive the path programmatically (call search_docs "
-    "first to confirm the exact API for your pymatgen version):\n"
-    "    from pymatgen.symmetry.bandstructure import HighSymmKpath\n"
-    "    kpath = HighSymmKpath(structure)\n"
-    "    named_kpts = kpath.kpath['kpoints']   # {label: frac coords in kpath.prim_rec}\n"
-    "    cart_kpts = {lbl: kpath.prim_rec.get_cartesian_coords(f) for lbl, f in named_kpts.items()}\n"
-    "    frac_kpts_in_actual_cell = {\n"
-    "        lbl: structure.lattice.reciprocal_lattice.get_fractional_coords(c)\n"
-    "        for lbl, c in cart_kpts.items()\n"
-    "    }\n"
-    "Going through Cartesian coordinates is essential: HighSymmKpath "
-    "determines the path using its own internal standardized cell "
-    "(kpath.prim_rec), which is generally NOT the same basis as the "
-    "structure/CELL_PARAMETERS you actually wrote to the input file, so its "
+    "the exact same ASE Atoms object you wrote into that CELL_PARAMETERS "
+    "block, not copied from a template, textbook space-group convention, or "
+    "a different structure's path (see the k-path source DECISION RULE "
+    "below for when a path is needed at all). NEVER type high-symmetry "
+    "k-point fractional coordinates from memory (e.g. Gamma=(0,0,0), "
+    "X=(0.5,0,0), M=(0.5,0.5,0), Z=(0,0,0.5), R=(0.5,0.5,0.5) for a "
+    "'standard tetragonal' cell) -- the CELL_PARAMETERS you actually "
+    "generated (e.g. via generate_cif from Materials Project) is frequently "
+    "NOT the conventional or primitive cell those textbook coordinates "
+    "assume; it can be a differently shaped, differently oriented, or "
+    "doubled cell with a different reciprocal lattice entirely. Applying "
+    "textbook fractional coordinates to it lands on the wrong physical "
+    "k-points and produces a bands plot with nonphysical dispersion (e.g. "
+    "bands swinging by tens of eV between consecutive path points, or "
+    "looking totally flat/empty away from Gamma).\n"
+    "Also NEVER use ASE's own `atoms.cell.bandpath(...)` shortcut for this: "
+    "it classifies the Bravais lattice from the cell vectors ALONE -- it "
+    "never inspects the atomic basis, so it cannot detect symmetry lowered "
+    "by the actual atomic arrangement. Every structure this pipeline "
+    "generates (randomly perturbed/displaced) is generically NOT exactly on "
+    "the ideal high-symmetry point and can have a lower true space group "
+    "than its lattice shape alone suggests -- `atoms.cell.bandpath()` will "
+    "silently use the WRONG (too-high-symmetry) path for such a structure.\n"
+    "Instead, derive the path from a full symmetry analysis of the EXACT "
+    "same Atoms object you wrote into CELL_PARAMETERS, using `seekpath` (an "
+    "spglib-based, lattice+basis-aware k-path tool -- call search_docs first "
+    "to confirm the exact API for your seekpath/ASE versions):\n"
+    "    import numpy as np, seekpath\n"
+    "    cell_tuple = (atoms.cell[:], atoms.get_scaled_positions(), atoms.get_atomic_numbers())\n"
+    "    res = seekpath.get_path(cell_tuple, symprec=0.01)  # NOT seekpath/spglib's tight 1e-5 default -- see below\n"
+    "    recip_prim = np.array(res['reciprocal_primitive_lattice'])       # already includes 2*pi\n"
+    "    recip_actual = 2 * np.pi * np.array(atoms.cell.reciprocal()[:])  # ASE has NO 2*pi factor -- must add it\n"
+    "    def to_actual_frac(frac_prim):\n"
+    "        cart = np.array(frac_prim) @ recip_prim\n"
+    "        return cart @ np.linalg.inv(recip_actual)\n"
+    "    point_coords_actual = {lbl: to_actual_frac(c) for lbl, c in res['point_coords'].items()}\n"
+    "Going through Cartesian coordinates is essential: seekpath determines "
+    "the path using its own internal primitive cell (which may differ from "
+    "the exact cell you wrote to CELL_PARAMETERS -- a compatible but "
+    "differently-shaped/oriented representation of the same lattice), so its "
     "named-point fractional coordinates are only meaningful once "
-    "re-projected (via Cartesian) onto structure.lattice.reciprocal_lattice "
-    "-- the reciprocal lattice of the cell the calculation actually uses. "
-    "Use kpath.kpath['path'] (list of label sequences, e.g. "
-    "[['GAMMA','X','M','GAMMA','Z','R','Z'], ...]) to pick the segment "
-    "order and frac_kpts_in_actual_cell for the coordinates you write into "
-    "the crystal_b card, and use those same labels for the plot's x-axis "
-    "tick labels -- never type the path labels/order from memory either. "
-    "As an extra check, assert SpacegroupAnalyzer(structure)"
-    ".get_space_group_number() is the space group you actually intend for "
-    "this structure before trusting the path it implies -- generate_cif's "
-    "own docstring warns that a CIF's declared space group can read back "
-    "lower than the true one; when they disagree, treat generate_cif's "
-    "returned space_group as authoritative (again, per its docstring), not "
-    "a fresh from-scratch analysis of noisy coordinates.\n\n"
+    "re-projected (via Cartesian) onto atoms.cell.reciprocal() -- the "
+    "reciprocal lattice of the cell the calculation actually uses -- and the "
+    "2*pi convention mismatch above is a common silent source of wrong "
+    "numbers, not just a style choice. Also note: seekpath/spglib's DEFAULT "
+    "symprec (1e-5) is much tighter than pymatgen's SpacegroupAnalyzer "
+    "default (0.01) and can silently UNDER-detect symmetry on real, "
+    "CIF-round-tripped coordinates -- e.g. a structure generate_cif reports "
+    "as a clean high-symmetry space group can come back as spglib-P1 at "
+    "1e-5 purely from numerical noise in the written CIF, even though "
+    "nothing is physically wrong with the structure (generate_cif's own "
+    "docstring warns about exactly this). Pass symprec=0.01 explicitly "
+    "(matching pymatgen's default) unless you have a specific reason not "
+    "to. ALWAYS assert res['spacegroup_number'] matches "
+    "spglib.get_symmetry_dataset(cell_tuple, symprec=0.01).number for this "
+    "exact structure before trusting the path (they should always agree "
+    "since both come from the same symmetry analysis at the same symprec; a "
+    "mismatch means something upstream -- e.g. cell_tuple built from stale "
+    "data -- is wrong), and where you independently know the intended space "
+    "group (e.g. generate_cif's returned space_group field for an "
+    "unperturbed base structure), treat that as the authoritative check, "
+    "not just internal self-consistency. Use res['path'] (list of "
+    "(label_from, label_to) segments) with point_coords_actual to build the "
+    "explicit list of interpolated k-points in ACTUAL-cell fractional "
+    "coordinates (linearly interpolate a fixed number of points per "
+    "segment). res['path'] is frequently DISCONTINUOUS -- consecutive "
+    "segments need not join up (rutile TiO2 gives "
+    "... ('A','Z'), ('X','R'), ('M','A'): the path jumps Z->X and R->M). "
+    "EVERY segment must therefore contribute its own start point: a loop "
+    "that appends the start point only for the first segment and thereafter "
+    "just interpolates from i=1 silently never samples X or M at all, and "
+    "leaves the jump unlabelled. Build each segment as its own start point "
+    "plus its interior points, and record BOTH labels at a jump (e.g. "
+    "'Z|X') so the plot can mark it. Write the result as a plain K_POINTS "
+    "crystal card (an explicit "
+    "(n_kpts, 4) array, weight column can be a constant like 1.0 since it "
+    "is unused for a non-self-consistent bands run) -- this is physically "
+    "identical to crystal_b since the interpolation already happened here "
+    "instead of in pw.x. Use the same labels (and their positions in the "
+    "concatenated path) for the plot's x-axis tick labels -- never type the "
+    "path labels/order from memory either, and never reuse one structure's "
+    "path/labels for a different structure even if they look like 'close' "
+    "perturbations of each other -- symmetry can break under "
+    "perturbation.\n\n"
+    "INVARIANT 4: any x-axis used to plot an energy-vs-k band structure "
+    "MUST use the SAME units/scale for the plotted band curves' k-values "
+    "and for the tick-mark positions that mark high-symmetry points -- "
+    "never mix 'index into an explicitly-interpolated k-point list' (e.g. "
+    "0, 10, 20, ... one integer per path vertex, the spacing of which "
+    "reflects how many points you chose per segment, NOT any physical "
+    "distance) with 'physical cumulative path distance' (e.g. QE's "
+    "bands.x writes a `.bands.dat.gnu` file whose first column is "
+    "cumulative k-path distance in 2*pi/alat units, and bands_post.out's "
+    "own 'high-symmetry point' lines report each vertex's location in "
+    "THAT SAME distance-based column, not a point index). Combining tick "
+    "positions from one unit system with band data in the other does not "
+    "raise an error -- matplotlib will plot it without complaint -- it "
+    "silently compresses the real band dispersion into a small corner of "
+    "the axes while the tick labels are spread across the full width, "
+    "which reads as a plausible (if oddly shaped) plot rather than an "
+    "obvious bug.\n"
+    "CHECK IN CODE: before plotting, assert that the high-symmetry tick "
+    "positions span (approximately) the same numeric range as the "
+    "plotted band data's own k column -- e.g. "
+    "`assert abs(max(tick_positions) - k_col.max()) < 0.05 * k_col.max()` "
+    "-- not exact equality, since these are floating point; if the tick "
+    "positions run e.g. 0..90 while the band data only spans 0..~6, they "
+    "are in different unit systems and must be reconciled (either read the "
+    "distance-based x-coordinates QE already wrote for each high-symmetry "
+    "point, or -- better -- use the bands plot construction DECISION RULE "
+    "below, which manages this for you) before trusting the plot.\n"
+    "Also choose the y-range deliberately: plotting every band in the file "
+    "squashes the states you care about into a sliver, because semicore "
+    "bands sit tens of eV below the valence manifold (rutile TiO2: Ti 3s/3p "
+    "and O 2s near -57/-34/-17 eV). After aligning to the VBM, restrict the "
+    "y-axis to roughly +/-10 eV around it unless the task asks otherwise.\n\n"
+    "INVARIANT 5: every physical quantity carries a UNIT, and the unit a "
+    "tool reports is frequently not the unit the next file wants. Convert "
+    "explicitly, in code, with the conversion written down -- never paste a "
+    "number from one system into a field that means another. The specific "
+    "trap in this pipeline: get_pseudopotential returns its recommended "
+    "cutoff in HARTREE (the result's own `hints.ecut_unit` says so), while "
+    "QE's ecutwfc/ecutrho are in RYDBERG. 1 Ha = 2 Ry, so writing the hint "
+    "straight into ecutwfc silently runs the whole calculation at HALF the "
+    "recommended cutoff -- nothing errors, the SCF still converges, and the "
+    "resulting energies are quietly under-converged. Write "
+    "`ecutwfc_ry = 2.0 * hint_ha` (and set ecutrho from the converted "
+    "value, not the raw hint), and assert the number you wrote is the one "
+    "you meant. The same care applies elsewhere: QE lengths are bohr unless "
+    "the card says angstrom, ASE is angstrom throughout, bands.x writes "
+    "energies in eV, and a .gnu k column is in 2*pi/alat.\n\n"
 
     "=== DECISION RULES (branch points) ===\n"
+    "RULE: unit cell choice before running DFT\n"
+    "  IF   the structure came from generate_cif / Materials Project (or "
+    "any external source)\n"
+    "  THEN reduce it to its PRIMITIVE cell before writing any QE input. "
+    "What MP returns is frequently a conventional or doubled cell -- rutile "
+    "TiO2 comes back as 12 atoms where the primitive cell has 6 -- and cost "
+    "scales steeply with atom count (that 2x cell cost ~9x the SCF time "
+    "here for identical physics). seekpath.get_path already returns the "
+    "reduced cell as res['primitive_lattice'] / res['primitive_positions'] "
+    "/ res['primitive_types'], or use "
+    "spglib.standardize_cell(cell_tuple, to_primitive=True, "
+    "no_idealize=False, symprec=0.01).\n"
+    "  CHECK IN CODE: assert the space group is unchanged by the reduction, "
+    "and that the reduced atom count divides the original evenly. Then "
+    "re-derive nat/ntyp and the k-path FROM THE REDUCED cell (INVARIANT 1 "
+    "and 3) -- the reduced cell is the one you write into CELL_PARAMETERS, "
+    "so every downstream number must come from it, not from the original.\n"
+    "  ELSE if a task explicitly calls for a supercell or a specific "
+    "non-primitive setting, keep it and say why in a note.\n\n"
     "RULE: k-path source\n"
     "  IF   doing a bandstructure calculation\n"
     "  THEN generate the k-path from THIS structure via INVARIANT 3's "
-    "recipe (pymatgen.symmetry.bandstructure.HighSymmKpath)\n"
+    "recipe (seekpath, symprec=0.01, 2*pi-corrected reprojection onto "
+    "atoms.cell.reciprocal())\n"
     "  ELSE (SCF/relax/NSCF-only) no explicit k-path needed -- use a "
     "k-point mesh consistent with the structure's symmetry (a fixed "
-    "Monkhorst-Pack grid density, or pymatgen's automatic k-point "
-    "generator; state the density used and why)\n"
+    "Monkhorst-Pack grid density; state the density used and why)\n"
     "  NEVER reuse a k-path generated for one structure on a different "
     "structure, even if they are 'close' perturbations of each other -- "
     "symmetry can break under perturbation (this is why INVARIANT 3's "
@@ -197,6 +304,37 @@ SYSTEM_PROMPT_TEMPLATE = (
     "  ONLY IF unsure whether a given system needs SOC, use search_docs / "
     "ask before defaulting to scalar relativistic. When the task already "
     "specifies which to use, follow that instead of this default.\n\n"
+    "RULE: bands plot construction\n"
+    "  IF   plotting a computed band structure with high-symmetry tick "
+    "marks\n"
+    "  THEN prefer ASE's own band-structure machinery, which handles the "
+    "k-axis and tick placement for you and so avoids INVARIANT 4's whole "
+    "class of bug by construction. Build an ase.dft.kpoints.BandPath from "
+    "the SAME seekpath-derived special points/path used in INVARIANT 3 "
+    "(NOT atoms.cell.bandpath(), which is basis-blind -- see INVARIANT 3), "
+    "then wrap the energies in "
+    "ase.spectrum.band_structure.BandStructure. Three details decide "
+    "whether this works:\n"
+    "    (a) mark path discontinuities with a COMMA in BandPath's path "
+    "string -- rutile TiO2's path is 'GAMMAXMGAMMAZRAZ,XR,MA'; without the "
+    "commas ASE draws a line across each jump.\n"
+    "    (b) energies must be shaped (nspins, nkpts, nbands) and ordered to "
+    "match bandpath.kpts exactly -- assert len(bandpath.kpts) equals the "
+    "k-point count in the data before plotting.\n"
+    "    (c) BandStructure(..., reference=vbm).plot(emin=, emax=) plots RAW "
+    "energies and merely draws the reference as a dotted line, so emin/emax "
+    "are interpreted in raw eV and will cut off the conduction bands. Call "
+    "`.subtract_reference()` first, then emin/emax are relative to the VBM "
+    "and `emin=-10, emax=10` frames the gap correctly.\n"
+    "  `bandpath.get_linear_kpoint_axis()` returns (x, X, labels) if you "
+    "need the tick positions yourself. Call search_docs to confirm exact "
+    "signatures for the installed ASE version.\n"
+    "  ELSE if hand-rolling the plot directly with matplotlib instead, "
+    "INVARIANT 4 still applies in full -- verify the tick-position and "
+    "band-data x-axes are in the same units, split the plotted line at each "
+    "path discontinuity (bands.x marks one by repeating the x value, i.e. a "
+    "zero distance increment) so no connector is drawn across the jump, and "
+    "label that tick with both sides ('Z|X').\n\n"
     f"Available tools:\n{json.dumps(TOOLS, indent=2)}"
 )
 
@@ -285,7 +423,7 @@ def make_llm_step_source(model, tokenizer, verbose: bool = True):
     return next_tool_call
 
 
-def run_step_loop(state: AgentState, next_tool_call, max_steps: int, verbose: bool = True) -> None:
+def run_step_loop(state: AgentState, next_tool_call, max_steps: int, verbose: bool = True, on_step=None) -> None:
     """Drive `state` through up to `max_steps` tool calls, one per step,
     obtained from `next_tool_call(state, step)`. Mutates `state` in place.
 
@@ -294,7 +432,24 @@ def run_step_loop(state: AgentState, next_tool_call, max_steps: int, verbose: bo
     parse failure as a note) and no tool should be executed, or raise
     `StopIteration` to end the loop early (a replay source runs out of
     recorded calls before `max_steps`).
+
+    `on_step`, if given, is called with each new `state.history` entry as
+    soon as it appears, so a run that is killed mid-loop (an expired SLURM
+    allocation, an OOM) still leaves its completed steps on disk. It is fed
+    from `state.history` rather than the local `result`, so it also captures
+    entries the loop does not produce directly -- a `parse_error` logged
+    inside `next_tool_call`, or the `state.log` written when `execute_tool`
+    raises.
     """
+    logged = len(state.history)
+
+    def flush():
+        nonlocal logged
+        if on_step is not None:
+            for entry in state.history[logged:]:
+                on_step(entry)
+        logged = len(state.history)
+
     for step in range(1, max_steps + 1):
         if verbose:
             print(f"\n=== STEP {step} ===")
@@ -305,6 +460,7 @@ def run_step_loop(state: AgentState, next_tool_call, max_steps: int, verbose: bo
             break
 
         if tool_call is None:
+            flush()
             continue
 
         if verbose:
@@ -318,6 +474,8 @@ def run_step_loop(state: AgentState, next_tool_call, max_steps: int, verbose: bo
 
         if verbose:
             print("TOOL RESULT:\n", result)
+
+        flush()
 
         if state.done:
             break
@@ -413,8 +571,38 @@ def prepare_work_dir(work_dir: Path, clear_dir: bool = False, load_path=None, lo
         copy_to_cwd(DPP_EXAMPLE_SUBDIR)
 
 
-def build_log_entry(state: AgentState, start_time: float, work_dir: Path, clear_dir: bool, load_path, model_name: str, extra: dict | None = None) -> dict:
+def build_run_start_entry(run_id: str, task: str, work_dir: Path, clear_dir: bool, load_path, model_name: str, max_steps: int) -> dict:
+    """Written before the first step, so a run that dies mid-loop is still
+    identifiable (task, model, settings) from its log alone."""
+    return {
+        "record": "run_start",
+        "run_id": run_id,
+        "timestamp": datetime.now().isoformat(),
+        "model": model_name,
+        "work_dir": str(work_dir),
+        "clear_dir": clear_dir,
+        "load_path": bool(load_path),
+        "max_steps": max_steps,
+        "task": task,
+    }
+
+
+def build_step_entry(run_id: str, history_entry: dict) -> dict:
+    """One record per completed tool call. Carries the same
+    step/tool/args/result shape as an AgentState.history entry, so a killed
+    run's steps can be reassembled into a replayable history."""
+    return {
+        "record": "step",
+        "run_id": run_id,
+        "timestamp": datetime.now().isoformat(),
+        **history_entry,
+    }
+
+
+def build_log_entry(state: AgentState, start_time: float, work_dir: Path, clear_dir: bool, load_path, model_name: str, extra: dict | None = None, run_id: str | None = None) -> dict:
     entry = {
+        "record": "run",
+        "run_id": run_id,
         "timestamp": datetime.now().isoformat(),
         "model": model_name,
         "work_dir": str(work_dir),
@@ -453,26 +641,40 @@ def run_agent(
     load_deepseudopot: bool = False,
 ) -> AgentState:
     """Run the agent live: the model generates each tool call. Executes in
-    `work_dir` (defaults to config.WORK_DIR) and appends a run record to
-    `log_file` (defaults to `work_dir / "log.jsonl"`; pass `log_file=None`
-    to skip logging). `load_deepseudopot` -- see prepare_work_dir.
+    `work_dir` (defaults to config.WORK_DIR) and logs to `log_file`
+    (defaults to `work_dir / "log.jsonl"`; pass `log_file=None` to skip
+    logging).
+
+    `load_deepseudopot` -- see prepare_work_dir.
+
+    The log is written incrementally: a `run_start` record, then one `step`
+    record per tool call as it completes, then the `run` summary. A run
+    killed mid-loop therefore still has every finished step on disk --
+    `chem_llm.replay` reassembles those into a replayable history.
     """
     if log_file is _UNSET:
         log_file = work_dir / "log.jsonl"
 
     prepare_work_dir(work_dir, clear_dir, load_path, load_deepseudopot)
 
+    run_id = uuid.uuid4().hex[:12]
+    on_step = None
+
     if log_file:
         log_file.parent.mkdir(parents=True, exist_ok=True)
         log_file.touch(exist_ok=True)
+        append_log(log_file, build_run_start_entry(run_id, task, work_dir, clear_dir, load_path, MODEL_NAME, max_steps))
+
+        def on_step(history_entry):
+            append_log(log_file, build_step_entry(run_id, history_entry))
 
     start_time = time.perf_counter()
     state = AgentState(task)
 
-    run_step_loop(state, make_llm_step_source(model, tokenizer, verbose), max_steps, verbose)
+    run_step_loop(state, make_llm_step_source(model, tokenizer, verbose), max_steps, verbose, on_step=on_step)
 
     if log_file:
         print("logging to...", log_file)
-        append_log(log_file, build_log_entry(state, start_time, work_dir, clear_dir, load_path, MODEL_NAME))
+        append_log(log_file, build_log_entry(state, start_time, work_dir, clear_dir, load_path, MODEL_NAME, run_id=run_id))
 
     return state

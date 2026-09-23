@@ -1,0 +1,236 @@
+import os
+import shutil
+from pathlib import Path
+
+from pymatgen.core import Structure
+
+# SETTINGS
+OVERWRITE = False
+
+TEMPLATE_DIR = "template"
+STRUCTURE_DIR = "structures"
+CALC_DIR = "calculations"
+
+os.makedirs(CALC_DIR, exist_ok=True)
+os.makedirs(STRUCTURE_DIR, exist_ok=True)
+
+# Pseudopotential filenames (pbesol, scalar-relativistic, norm-conserving, stringent)
+PP_FILES = {
+    "Ti": "Ti.pbesol-sr-rrkjus_psl.1.0.0.UPF",
+    "O": "O.pbesol-sr-rrkjus_psl.1.0.0.UPF",
+}
+
+# Atomic masses (amu)
+ATOMIC_MASSES = {
+    "Ti": 47.867,
+    "O": 15.999,
+}
+
+# Plane-wave cutoffs (Ry) from Pseudo-Dojo pbesol stringent recommendations
+ECUTWFC = 42.0
+ECUTRHO = 4 * ECUTWFC  # 168.0 Ry, default for norm-conserving PPs
+
+# nbnd for bands calculation: padded generously above the expected occupied-band
+# count. Rutile TiO2 conventional cell (4 Ti + 8 O): 4*4 + 8*6 = 64 valence
+# electrons = 32 occupied bands. Pad to 100 to be safe. Will verify against
+# pw.out after SCF run.
+NBND = 100
+
+# K-point grid for SCF: 8x8x8 is safe for the non-orthogonal cell setting
+SCF_KGRID = "8 8 8 0 0 0"
+
+# Bands path: standard tetragonal high-symmetry path in fractional coordinates.
+# Gamma -> X -> M -> Gamma -> Z -> R -> Z
+# 7 points, 10 divisions each (last segment 1 to avoid duplicate endpoint).
+BANDS_PATH = [
+    (0.0, 0.0, 0.0, 10),   # Gamma
+    (0.5, 0.0, 0.0, 10),   # X
+    (0.5, 0.5, 0.0, 10),   # M
+    (0.0, 0.0, 0.0, 10),   # Gamma
+    (0.0, 0.0, 0.5, 10),   # Z
+    (0.5, 0.5, 0.5, 10),   # R
+    (0.0, 0.0, 0.5, 1),    # Z
+]
+
+
+def structure_to_qe(structure, prefix, calculation):
+    """Generate a Quantum ESPRESSO pw.x input file for the given structure.
+    
+    Args:
+        structure: pymatgen Structure object
+        prefix: unique prefix for this calculation (e.g. '000')
+        calculation: 'scf' or 'bands'
+    """
+    lines = []
+
+    # &CONTROL
+    lines.append("&CONTROL")
+    lines.append(f"   prefix = '{prefix}'")
+    lines.append(f"   calculation = '{calculation}'")
+    lines.append("   restart_mode = 'from_scratch'")
+    lines.append("   outdir = './'")
+    lines.append("   wfcdir = './'")
+    lines.append("   pseudo_dir = './'")
+    lines.append("   verbosity = 'high'")
+    lines.append("/")
+
+    # &SYSTEM
+    lines.append("&SYSTEM")
+    lines.append("   ibrav = 0")
+    # nat/ntyp MUST be computed from the structure object, never hardcoded
+    lines.append(f"   nat = {len(structure)}")
+    lines.append(f"   ntyp = {len(structure.symbol_set)}")
+    lines.append(f"   ecutwfc = {ECUTWFC}")
+    lines.append(f"   ecutrho = {ECUTRHO}")
+    lines.append("   tot_charge = 0.0")
+    lines.append("   nosym = .true.")
+    lines.append("   noinv = .true.")
+    lines.append("   occupations = 'fixed'")
+    # TiO2 is non-magnetic, no spin-orbit coupling needed
+    # nspin defaults to 1 (spin-polarized off)
+
+    if calculation == "bands":
+        lines.append(f"   nbnd = {NBND}")
+
+    lines.append("/")
+
+    # &ELECTRONS
+    lines.append("&ELECTRONS")
+    lines.append("   electron_maxstep = 100")
+    lines.append("   conv_thr = 1.0d-8")
+    lines.append("   mixing_mode = 'plain'")
+    lines.append("   mixing_beta = 0.3")
+    lines.append("   mixing_ndim = 8")
+    lines.append("   diagonalization = 'david'")
+    lines.append("   diago_david_ndim = 4")
+    lines.append("   diago_full_acc = .false.")
+    lines.append("/")
+
+    # ATOMIC_SPECIES
+    lines.append("ATOMIC_SPECIES")
+    for symbol in sorted(structure.symbol_set):
+        mass = ATOMIC_MASSES[symbol]
+        pp_file = PP_FILES[symbol]
+        lines.append(f"{symbol} {mass:.5f} {pp_file}")
+    lines.append("")
+
+    # CELL_PARAMETERS (angstrom)
+    lines.append("CELL_PARAMETERS angstrom")
+    for vec in structure.lattice.matrix:
+        lines.append(f"{vec[0]:.10f} {vec[1]:.10f} {vec[2]:.10f}")
+    lines.append("")
+
+    # ATOMIC_POSITIONS (crystal/fractional coordinates)
+    lines.append("ATOMIC_POSITIONS crystal")
+    frac = structure.frac_coords % 1.0
+    for specie, pos in zip(structure.species, frac):
+        lines.append(f"{specie.symbol:<2} {pos[0]:.6f} {pos[1]:.6f} {pos[2]:.6f}")
+    lines.append("")
+
+    # K_POINTS
+    if calculation == "scf":
+        lines.append("K_POINTS automatic")
+        lines.append(SCF_KGRID)
+    elif calculation == "bands":
+        lines.append("K_POINTS crystal_b")
+        lines.append(str(len(BANDS_PATH)))
+        for pt in BANDS_PATH:
+            lines.append(f"{pt[0]:.1f} {pt[1]:.1f} {pt[2]:.1f} {pt[3]}")
+
+    return "\n".join(lines)
+
+
+def write_submit_script(calc_path, prefix):
+    """Write a SLURM submit script for the QE workflow."""
+    submit_text = f"""#!/bin/bash
+#SBATCH -A m4735
+#SBATCH -J tio2_{prefix}
+#SBATCH -C gpu
+#SBATCH --qos=regular
+#SBATCH --nodes=2
+#SBATCH --ntasks-per-node=4
+#SBATCH --time 03:00:00
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=brent.hu@yale.edu
+
+module load espresso
+
+PW=pw.x
+BANDS=bands.x
+
+echo "Running SCF for {prefix}"
+
+srun -n 8 --gpus-per-task=1 --gpu-bind=map_gpu:0,1,2,3 $PW -in pw.in > pw.out
+
+if [ $? -ne 0 ]; then
+    echo "SCF failed"
+    exit 1
+fi
+
+echo "Running bands SCF for {prefix}"
+
+srun -n 8 --gpus-per-task=1 --gpu-bind=map_gpu:0,1,2,3 $PW -in bands.in > bands_pw.out
+
+if [ $? -ne 0 ]; then
+    echo "Bands calculation failed"
+    exit 1
+fi
+
+echo "Running bands.x for {prefix}"
+
+$BANDS -in bands_post.in > bands_post.out
+
+echo "Finished {prefix}"
+"""
+    with open(calc_path / "submit.sh", "w") as f:
+        f.write(submit_text)
+
+
+# MAIN LOOP
+cif_files = sorted(Path(STRUCTURE_DIR).glob("structure_*.cif"))
+
+for n, cif_file in enumerate(cif_files):
+    prefix = f"{n:03d}"
+    calc_path = Path(CALC_DIR) / prefix
+
+    print(f"Setting up {calc_path}")
+
+    # copy template (pseudopotentials)
+    if calc_path.exists():
+        if OVERWRITE:
+            print(f"Overwriting {calc_path}")
+            shutil.rmtree(calc_path)
+        else:
+            print(f"Skipping existing directory: {calc_path}")
+            continue
+
+    shutil.copytree(TEMPLATE_DIR, calc_path)
+
+    # load structure
+    structure = Structure.from_file(cif_file)
+
+    # write pw.in (SCF)
+    pw_text = structure_to_qe(structure, prefix, calculation="scf")
+    with open(calc_path / "pw.in", "w") as f:
+        f.write(pw_text)
+
+    # write bands.in
+    bands_text = structure_to_qe(structure, prefix, calculation="bands")
+    with open(calc_path / "bands.in", "w") as f:
+        f.write(bands_text)
+
+    # write bands_post.in
+    bands_post = f"""&BANDS
+    prefix  = '{prefix}'
+    outdir  = './'
+    filband = '{prefix}.bands.dat'
+    lsym = .true.
+/
+"""
+    with open(calc_path / "bands_post.in", "w") as f:
+        f.write(bands_post)
+
+    # write submit.sh
+    write_submit_script(calc_path, prefix)
+
+print("Done.")

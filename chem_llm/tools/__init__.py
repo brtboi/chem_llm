@@ -2,9 +2,16 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+from ase.io import write as ase_write
 from mp_api.client import MPRester
 from pseudohub import get_pseudo, get_hints
 from pseudohub.exceptions import InvalidParameterError
+# The Materials Project client (mp_api) returns structures as pymatgen
+# Structure objects -- that dependency is unavoidable here since it's baked
+# into mp_api's own return type, not something this codebase chooses. We
+# convert to an ASE Atoms object immediately (via AseAtomsAdaptor) so every
+# other tool/script downstream of generate_cif works with ASE, not pymatgen.
+from pymatgen.io.ase import AseAtomsAdaptor
 
 from ..config import READ_MAX_CHARS, MP_API_KEY
 
@@ -316,10 +323,8 @@ def generate_cif(
             str(d.material_id) for d in docs
         ]
 
-        selected_doc.structure.to(
-            filename=str(output_path),
-            fmt="cif",
-        )
+        atoms = AseAtomsAdaptor.get_atoms(selected_doc.structure)
+        ase_write(str(output_path), atoms, format="cif")
 
         return {
             "success": True,

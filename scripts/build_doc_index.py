@@ -24,6 +24,7 @@ from chem_llm.retrieval.bm25 import BM25Index
 from chem_llm.retrieval.chunking import chunk_documents
 from chem_llm.retrieval.embeddings import EmbeddingModel
 from chem_llm.retrieval.models import Chunk, Document
+from chem_llm.retrieval.scrapers.ase_docs import scrape_ase
 from chem_llm.retrieval.scrapers.pymatgen import scrape_pymatgen
 from chem_llm.retrieval.scrapers.quantum_espresso import scrape_quantum_espresso
 from chem_llm.retrieval.vector_store import VectorStore
@@ -32,6 +33,7 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(messag
 logger = logging.getLogger("build_doc_index")
 
 SCRAPERS = {
+    "ase": scrape_ase,
     "pymatgen": scrape_pymatgen,
     "quantum_espresso": scrape_quantum_espresso,
 }
