@@ -26,8 +26,9 @@ def _get_retriever() -> DocRetriever:
     "search_docs",
     (
         "Search indexed technical documentation (ASE -- Atomic Simulation "
-        "Environment -- API reference and Quantum ESPRESSO pw.x input "
-        "variables) for text relevant to a natural-language question or an "
+        "Environment -- API reference, including ase.io.espresso's "
+        "write_espresso_in/read_espresso_out, and Quantum ESPRESSO pw.x and "
+        "bands.x input variables) for text relevant to a natural-language question or an "
         "exact API identifier. Combines keyword (BM25) and semantic "
         "(embedding) search, then reranks with a cross-encoder. Does not "
         "call an LLM -- results are retrieved documentation chunks, not "

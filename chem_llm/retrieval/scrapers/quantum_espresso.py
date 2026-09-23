@@ -1,5 +1,5 @@
-"""Scraper for the Quantum ESPRESSO pw.x input documentation
-(https://www.quantum-espresso.org/Doc/INPUT_PW.html).
+"""Scraper for Quantum ESPRESSO helpdoc input documentation pages
+(config.QE_DOC_URLS: pw.x's INPUT_PW.html, bands.x's INPUT_BANDS.html).
 
 The page is hand-written HTML, not Sphinx output, with its own recurring
 pattern: every namelist/card variable is introduced by
@@ -49,7 +49,7 @@ def _variable_name(table: Tag) -> str | None:
     return anchor["name"]
 
 
-def _parse_variable_table(table: Tag, var_name: str, section_type: str, section_name: str) -> Document | None:
+def _parse_variable_table(table: Tag, var_name: str, section_type: str, section_name: str, page_url: str) -> Document | None:
     rows = table.find_all("tr", recursive=False)
     if not rows:
         return None
@@ -93,18 +93,23 @@ def _parse_variable_table(table: Tag, var_name: str, section_type: str, section_
     return Document(
         text="\n".join(lines),
         title=f"{section_name} / {var_name}",
-        url=f"{config.QE_PW_DOC_URL}#{var_name}",
+        url=f"{page_url}#{var_name}",
         source="quantum_espresso",
         metadata=metadata,
     )
 
 
-def scrape_quantum_espresso(url: str | None = None) -> list[Document]:
-    """Scrape the pw.x INPUT_PW documentation into one Document per
-    namelist/card input variable.
+def scrape_quantum_espresso(urls: list[str] | None = None) -> list[Document]:
+    """Scrape QE helpdoc input pages (pw.x, bands.x, ...) into one Document
+    per namelist/card input variable.
     """
-    url = url or config.QE_PW_DOC_URL
+    documents: list[Document] = []
+    for url in urls or config.QE_DOC_URLS:
+        documents.extend(_scrape_page(url))
+    return documents
 
+
+def _scrape_page(url: str) -> list[Document]:
     try:
         html = _get(url)
     except Exception as e:
@@ -134,7 +139,7 @@ def scrape_quantum_espresso(url: str | None = None) -> list[Document]:
         if not rows or not rows[0].find("th", recursive=False):
             continue
 
-        doc = _parse_variable_table(el, var_name, section_type, section_name)
+        doc = _parse_variable_table(el, var_name, section_type, section_name, url)
         if doc is not None:
             documents.append(doc)
             seen_vars.add(var_name)
