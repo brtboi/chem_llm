@@ -14,6 +14,7 @@ recorded tools (not a replay of their recorded results).
 """
 import json
 import os
+import uuid
 from datetime import datetime
 from pathlib import Path
 import shutil
@@ -359,7 +360,7 @@ def make_llm_step_source(model, tokenizer, verbose: bool = True):
     return next_tool_call
 
 
-def run_step_loop(state: AgentState, next_tool_call, max_steps: int, verbose: bool = True) -> None:
+def run_step_loop(state: AgentState, next_tool_call, max_steps: int, verbose: bool = True, on_step=None) -> None:
     """Drive `state` through up to `max_steps` tool calls, one per step,
     obtained from `next_tool_call(state, step)`. Mutates `state` in place.
 
@@ -368,7 +369,24 @@ def run_step_loop(state: AgentState, next_tool_call, max_steps: int, verbose: bo
     parse failure as a note) and no tool should be executed, or raise
     `StopIteration` to end the loop early (a replay source runs out of
     recorded calls before `max_steps`).
+
+    `on_step`, if given, is called with each new `state.history` entry as
+    soon as it appears, so a run that is killed mid-loop (an expired SLURM
+    allocation, an OOM) still leaves its completed steps on disk. It is fed
+    from `state.history` rather than the local `result`, so it also captures
+    entries the loop does not produce directly -- a `parse_error` logged
+    inside `next_tool_call`, or the `state.log` written when `execute_tool`
+    raises.
     """
+    logged = len(state.history)
+
+    def flush():
+        nonlocal logged
+        if on_step is not None:
+            for entry in state.history[logged:]:
+                on_step(entry)
+        logged = len(state.history)
+
     for step in range(1, max_steps + 1):
         if verbose:
             print(f"\n=== STEP {step} ===")
@@ -379,6 +397,7 @@ def run_step_loop(state: AgentState, next_tool_call, max_steps: int, verbose: bo
             break
 
         if tool_call is None:
+            flush()
             continue
 
         if verbose:
@@ -392,6 +411,8 @@ def run_step_loop(state: AgentState, next_tool_call, max_steps: int, verbose: bo
 
         if verbose:
             print("TOOL RESULT:\n", result)
+
+        flush()
 
         if state.done:
             break
@@ -477,8 +498,38 @@ def prepare_work_dir(work_dir: Path, clear_dir: bool = False, load_path=None) ->
     copy_to_cwd(load_path)
 
 
-def build_log_entry(state: AgentState, start_time: float, work_dir: Path, clear_dir: bool, load_path, model_name: str, extra: dict | None = None) -> dict:
+def build_run_start_entry(run_id: str, task: str, work_dir: Path, clear_dir: bool, load_path, model_name: str, max_steps: int) -> dict:
+    """Written before the first step, so a run that dies mid-loop is still
+    identifiable (task, model, settings) from its log alone."""
+    return {
+        "record": "run_start",
+        "run_id": run_id,
+        "timestamp": datetime.now().isoformat(),
+        "model": model_name,
+        "work_dir": str(work_dir),
+        "clear_dir": clear_dir,
+        "load_path": bool(load_path),
+        "max_steps": max_steps,
+        "task": task,
+    }
+
+
+def build_step_entry(run_id: str, history_entry: dict) -> dict:
+    """One record per completed tool call. Carries the same
+    step/tool/args/result shape as an AgentState.history entry, so a killed
+    run's steps can be reassembled into a replayable history."""
+    return {
+        "record": "step",
+        "run_id": run_id,
+        "timestamp": datetime.now().isoformat(),
+        **history_entry,
+    }
+
+
+def build_log_entry(state: AgentState, start_time: float, work_dir: Path, clear_dir: bool, load_path, model_name: str, extra: dict | None = None, run_id: str | None = None) -> dict:
     entry = {
+        "record": "run",
+        "run_id": run_id,
         "timestamp": datetime.now().isoformat(),
         "model": model_name,
         "work_dir": str(work_dir),
@@ -516,26 +567,38 @@ def run_agent(
     load_path=None,
 ) -> AgentState:
     """Run the agent live: the model generates each tool call. Executes in
-    `work_dir` (defaults to config.WORK_DIR) and appends a run record to
-    `log_file` (defaults to `work_dir / "log.jsonl"`; pass `log_file=None`
-    to skip logging).
+    `work_dir` (defaults to config.WORK_DIR) and logs to `log_file`
+    (defaults to `work_dir / "log.jsonl"`; pass `log_file=None` to skip
+    logging).
+
+    The log is written incrementally: a `run_start` record, then one `step`
+    record per tool call as it completes, then the `run` summary. A run
+    killed mid-loop therefore still has every finished step on disk --
+    `chem_llm.replay` reassembles those into a replayable history.
     """
     if log_file is _UNSET:
         log_file = work_dir / "log.jsonl"
 
     prepare_work_dir(work_dir, clear_dir, load_path)
 
+    run_id = uuid.uuid4().hex[:12]
+    on_step = None
+
     if log_file:
         log_file.parent.mkdir(parents=True, exist_ok=True)
         log_file.touch(exist_ok=True)
+        append_log(log_file, build_run_start_entry(run_id, task, work_dir, clear_dir, load_path, MODEL_NAME, max_steps))
+
+        def on_step(history_entry):
+            append_log(log_file, build_step_entry(run_id, history_entry))
 
     start_time = time.perf_counter()
     state = AgentState(task)
 
-    run_step_loop(state, make_llm_step_source(model, tokenizer, verbose), max_steps, verbose)
+    run_step_loop(state, make_llm_step_source(model, tokenizer, verbose), max_steps, verbose, on_step=on_step)
 
     if log_file:
         print("logging to...", log_file)
-        append_log(log_file, build_log_entry(state, start_time, work_dir, clear_dir, load_path, MODEL_NAME))
+        append_log(log_file, build_log_entry(state, start_time, work_dir, clear_dir, load_path, MODEL_NAME, run_id=run_id))
 
     return state
