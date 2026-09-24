@@ -630,8 +630,8 @@ _UNSET = object()
 
 def run_agent(
     task: str,
-    model,
-    tokenizer,
+    model=None,
+    tokenizer=None,
     max_steps: int = MAX_AGENT_STEPS,
     verbose: bool = True,
     work_dir: Path = WORK_DIR,
@@ -639,6 +639,8 @@ def run_agent(
     clear_dir: bool = False,
     load_path=None,
     load_deepseudopot: bool = False,
+    step_source=None,
+    model_name: str = MODEL_NAME,
 ) -> AgentState:
     """Run the agent live: the model generates each tool call. Executes in
     `work_dir` (defaults to config.WORK_DIR) and logs to `log_file`
@@ -646,6 +648,11 @@ def run_agent(
     logging).
 
     `load_deepseudopot` -- see prepare_work_dir.
+
+    By default the tool calls come from the local model/tokenizer pair. Pass
+    `step_source` (with `model_name` for the log) to drive the same loop
+    from something else -- see chem_llm.claude_backend for the Claude API
+    backend, which differs only in how the text is generated.
 
     The log is written incrementally: a `run_start` record, then one `step`
     record per tool call as it completes, then the `run` summary. A run
@@ -663,7 +670,7 @@ def run_agent(
     if log_file:
         log_file.parent.mkdir(parents=True, exist_ok=True)
         log_file.touch(exist_ok=True)
-        append_log(log_file, build_run_start_entry(run_id, task, work_dir, clear_dir, load_path, MODEL_NAME, max_steps))
+        append_log(log_file, build_run_start_entry(run_id, task, work_dir, clear_dir, load_path, model_name, max_steps))
 
         def on_step(history_entry):
             append_log(log_file, build_step_entry(run_id, history_entry))
@@ -671,10 +678,11 @@ def run_agent(
     start_time = time.perf_counter()
     state = AgentState(task)
 
-    run_step_loop(state, make_llm_step_source(model, tokenizer, verbose), max_steps, verbose, on_step=on_step)
+    source = step_source or make_llm_step_source(model, tokenizer, verbose)
+    run_step_loop(state, source, max_steps, verbose, on_step=on_step)
 
     if log_file:
         print("logging to...", log_file)
-        append_log(log_file, build_log_entry(state, start_time, work_dir, clear_dir, load_path, MODEL_NAME, run_id=run_id))
+        append_log(log_file, build_log_entry(state, start_time, work_dir, clear_dir, load_path, model_name, run_id=run_id))
 
     return state

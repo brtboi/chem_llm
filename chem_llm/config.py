@@ -14,6 +14,18 @@ print("HF_HOME: ", HF_HOME)
 # MODEL_NAME = "Qwen/Qwen3-30B-A3B-Instruct-2507"
 MODEL_NAME = "Qwen/Qwen3.8-27B"
 
+# --- Claude API backend (chem_llm/claude_backend.py) ---
+# An alternative to the local Qwen model: same prompt, same JSON tool-call
+# protocol, same agent loop -- only the text generation differs.
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
+CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-opus-5")
+# Non-streaming default; leaves room for adaptive thinking, which is on by
+# default on Opus 5 and is billed/emitted separately from the text we parse.
+CLAUDE_MAX_TOKENS = int(os.environ.get("CLAUDE_MAX_TOKENS", 16000))
+# low | medium | high | xhigh | max. Each agent step is a small, well-specified
+# decision, so the default sits below the API default of high.
+CLAUDE_EFFORT = os.environ.get("CLAUDE_EFFORT", "medium")
+
 # --- Generation settings ---
 MAX_NEW_TOKENS = 5000
 TEMPERATURE = 0.0
