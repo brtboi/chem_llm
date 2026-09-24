@@ -109,7 +109,7 @@ def run_python(path: str):
         "directory directly on the current node (module-loads 'espresso', then "
         "runs pw.x for the SCF step, pw.x for the bands step, and bands.x for "
         "the bands post-processing step, in that order -- three commands total, "
-        "matching the pw.x/pw.x/bands.x sequence in submit.sh). Does NOT use "
+        "in that order: SCF, bands, bands post-processing). Does NOT use "
         "srun or sbatch: this assumes the calling process is already running on "
         "an allocated compute node (e.g. inside the pipeline's own GPU job), so "
         "the three commands run in-process one after another. Stops and reports "
