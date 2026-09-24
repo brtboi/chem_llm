@@ -1,18 +1,14 @@
 """Reproduce a past agent run by re-executing its recorded tool calls, in
 order, without asking an LLM to generate them.
 
-Every run_agent() call writes a run to log.jsonl as an ordered list of
-`{step, tool, args, result}` calls. `replay_run` reads that list out of a
-chosen run and drives it back through `run_step_loop` (the same loop
-`run_agent` uses), pulling `{tool, args}` from the recording instead of the
-model. Tools are executed for real, so this reissues the same generate_cif/
-run_python/write_file/... calls with the same arguments -- it does not
-merely print back the old results.
-
-Runs are logged incrementally (a `run_start` record, a `step` per tool
-call, then the `run` summary), so a run killed mid-loop is still replayable:
-`load_runs` rebuilds its history from the step records and marks it
-`partial`.
+Every run_agent() call appends one line to a log.jsonl -- a JSON object
+whose `final_state.history` is the ordered list of `{step, tool, args,
+result}` calls that run made. `replay_run` reads that list out of a chosen
+run and drives it back through `run_step_loop` (the same loop `run_agent`
+uses), pulling `{tool, args}` from the recording instead of the model. Tools
+are executed for real, so this reissues the same generate_cif/run_python/
+write_file/... calls with the same arguments -- it does not merely print
+back the old results.
 
 CLI usage:
     python -m chem_llm.replay sandbox/test17                # replay latest run in that dir's log.jsonl
@@ -41,66 +37,14 @@ def resolve_log_file(path: Path) -> Path:
     return path
 
 
-def load_runs(log_file: Path) -> list[dict]:
-    """Group `log_file`'s records into one entry per run, oldest first.
-
-    log.jsonl interleaves record types (see agent_core): `run_start` when a
-    run begins, `step` per completed tool call, and `run` -- the full
-    summary -- only if the run finished. Lines written before the `record`
-    field existed are full run summaries.
-
-    A run killed before it could write its summary (expired allocation, OOM)
-    is reconstructed here from its `step` records and flagged `partial`, so
-    it is still inspectable and replayable.
-    """
-    with log_file.open(encoding="utf-8") as f:
-        records = [json.loads(line) for line in f if line.strip()]
-
-    entries: dict[str, dict] = {}
-    order: list[str] = []
-    legacy = 0
-
-    for rec in records:
-        kind = rec.get("record", "run")
-        run_id = rec.get("run_id")
-
-        if kind == "run_start":
-            entries[run_id] = {
-                "timestamp": rec.get("timestamp"),
-                "model": rec.get("model"),
-                "work_dir": rec.get("work_dir"),
-                "run_id": run_id,
-                "partial": True,
-                "final_state": {"task": rec.get("task", ""), "history": []},
-            }
-            order.append(run_id)
-        elif kind == "step":
-            entry = entries.get(run_id)
-            if entry is None:  # steps without a run_start (truncated log)
-                entry = {"run_id": run_id, "partial": True, "final_state": {"task": "", "history": []}}
-                entries[run_id] = entry
-                order.append(run_id)
-            entry["final_state"]["history"].append(
-                {k: rec[k] for k in ("step", "tool", "args", "result") if k in rec}
-            )
-        else:  # completed run summary; supersedes the partial reconstruction
-            if run_id is None:  # legacy line, pre-`record`
-                run_id = f"_legacy{legacy}"
-                legacy += 1
-            if run_id not in entries:
-                order.append(run_id)
-            entries[run_id] = rec
-
-    if not entries:
-        raise ValueError(f"{log_file} has no recorded runs.")
-
-    return [entries[run_id] for run_id in order]
-
-
 def load_run(log_file: Path, index: int) -> dict:
-    """Load a single recorded run from `log_file`. `index` supports
-    Python-style negative indexing (-1 = most recent run)."""
-    runs = load_runs(log_file)
+    """Load a single recorded run (one jsonl line) from `log_file`. `index`
+    supports Python-style negative indexing (-1 = most recent run)."""
+    with log_file.open(encoding="utf-8") as f:
+        runs = [json.loads(line) for line in f if line.strip()]
+
+    if not runs:
+        raise ValueError(f"{log_file} has no recorded runs.")
 
     try:
         return runs[index]
@@ -152,13 +96,6 @@ def replay_run(
     final_state = entry.get("final_state", {})
     task = final_state.get("task", "")
     recorded_history = final_state.get("history", [])
-
-    if entry.get("partial"):
-        print(
-            f"NOTE: replaying a PARTIAL run ({len(recorded_history)} steps) -- it was "
-            "killed before writing its summary, so this is every step it finished, "
-            "not a completed run."
-        )
 
     prepare_work_dir(work_dir, clear_dir, load_path)
     log_file = work_dir / "log.jsonl"

@@ -14,7 +14,6 @@ recorded tools (not a replay of their recorded results).
 """
 import json
 import os
-import uuid
 from datetime import datetime
 from pathlib import Path
 import shutil
@@ -353,14 +352,35 @@ def build_prompt(state: AgentState, tokenizer):
 
 
 def parse_tool_call(text: str) -> dict:
+    """Pull one {"tool": ..., "args": ...} object out of a model reply.
+
+    A reply is often not pure JSON: it may be fenced in ```json, prefixed
+    with prose, or -- seen from Claude -- followed by a fabricated
+    continuation of the conversation (the tool call, then an invented
+    "tool result" for it). Spanning the first '{' to the last '}' swallows
+    that trailing junk and fails, so decode the FIRST complete object
+    instead, and skip any leading object that isn't a tool call.
+    """
     try:
         return json.loads(text)
     except json.JSONDecodeError:
-        start = text.find("{")
-        end = text.rfind("}") + 1
-        if start == -1 or end <= start:
-            raise
-        return json.loads(text[start:end])
+        pass
+
+    decoder = json.JSONDecoder()
+    pos = text.find("{")
+    while pos != -1:
+        try:
+            obj, _ = decoder.raw_decode(text[pos:])
+        except json.JSONDecodeError:
+            pos = text.find("{", pos + 1)
+            continue
+        if isinstance(obj, dict) and "tool" in obj:
+            return obj
+        pos = text.find("{", pos + 1)
+
+    # Nothing decodable: re-raise from the original text so callers still
+    # see a JSONDecodeError with the model's output in context.
+    return json.loads(text)
 
 
 def execute_tool(call: dict, state: AgentState):
@@ -423,7 +443,7 @@ def make_llm_step_source(model, tokenizer, verbose: bool = True):
     return next_tool_call
 
 
-def run_step_loop(state: AgentState, next_tool_call, max_steps: int, verbose: bool = True, on_step=None) -> None:
+def run_step_loop(state: AgentState, next_tool_call, max_steps: int, verbose: bool = True) -> None:
     """Drive `state` through up to `max_steps` tool calls, one per step,
     obtained from `next_tool_call(state, step)`. Mutates `state` in place.
 
@@ -432,24 +452,7 @@ def run_step_loop(state: AgentState, next_tool_call, max_steps: int, verbose: bo
     parse failure as a note) and no tool should be executed, or raise
     `StopIteration` to end the loop early (a replay source runs out of
     recorded calls before `max_steps`).
-
-    `on_step`, if given, is called with each new `state.history` entry as
-    soon as it appears, so a run that is killed mid-loop (an expired SLURM
-    allocation, an OOM) still leaves its completed steps on disk. It is fed
-    from `state.history` rather than the local `result`, so it also captures
-    entries the loop does not produce directly -- a `parse_error` logged
-    inside `next_tool_call`, or the `state.log` written when `execute_tool`
-    raises.
     """
-    logged = len(state.history)
-
-    def flush():
-        nonlocal logged
-        if on_step is not None:
-            for entry in state.history[logged:]:
-                on_step(entry)
-        logged = len(state.history)
-
     for step in range(1, max_steps + 1):
         if verbose:
             print(f"\n=== STEP {step} ===")
@@ -460,7 +463,6 @@ def run_step_loop(state: AgentState, next_tool_call, max_steps: int, verbose: bo
             break
 
         if tool_call is None:
-            flush()
             continue
 
         if verbose:
@@ -474,8 +476,6 @@ def run_step_loop(state: AgentState, next_tool_call, max_steps: int, verbose: bo
 
         if verbose:
             print("TOOL RESULT:\n", result)
-
-        flush()
 
         if state.done:
             break
@@ -571,38 +571,8 @@ def prepare_work_dir(work_dir: Path, clear_dir: bool = False, load_path=None, lo
         copy_to_cwd(DPP_EXAMPLE_SUBDIR)
 
 
-def build_run_start_entry(run_id: str, task: str, work_dir: Path, clear_dir: bool, load_path, model_name: str, max_steps: int) -> dict:
-    """Written before the first step, so a run that dies mid-loop is still
-    identifiable (task, model, settings) from its log alone."""
-    return {
-        "record": "run_start",
-        "run_id": run_id,
-        "timestamp": datetime.now().isoformat(),
-        "model": model_name,
-        "work_dir": str(work_dir),
-        "clear_dir": clear_dir,
-        "load_path": bool(load_path),
-        "max_steps": max_steps,
-        "task": task,
-    }
-
-
-def build_step_entry(run_id: str, history_entry: dict) -> dict:
-    """One record per completed tool call. Carries the same
-    step/tool/args/result shape as an AgentState.history entry, so a killed
-    run's steps can be reassembled into a replayable history."""
-    return {
-        "record": "step",
-        "run_id": run_id,
-        "timestamp": datetime.now().isoformat(),
-        **history_entry,
-    }
-
-
-def build_log_entry(state: AgentState, start_time: float, work_dir: Path, clear_dir: bool, load_path, model_name: str, extra: dict | None = None, run_id: str | None = None) -> dict:
+def build_log_entry(state: AgentState, start_time: float, work_dir: Path, clear_dir: bool, load_path, model_name: str, extra: dict | None = None) -> dict:
     entry = {
-        "record": "run",
-        "run_id": run_id,
         "timestamp": datetime.now().isoformat(),
         "model": model_name,
         "work_dir": str(work_dir),
@@ -653,36 +623,24 @@ def run_agent(
     `step_source` (with `model_name` for the log) to drive the same loop
     from something else -- see chem_llm.claude_backend for the Claude API
     backend, which differs only in how the text is generated.
-
-    The log is written incrementally: a `run_start` record, then one `step`
-    record per tool call as it completes, then the `run` summary. A run
-    killed mid-loop therefore still has every finished step on disk --
-    `chem_llm.replay` reassembles those into a replayable history.
     """
     if log_file is _UNSET:
         log_file = work_dir / "log.jsonl"
 
     prepare_work_dir(work_dir, clear_dir, load_path, load_deepseudopot)
 
-    run_id = uuid.uuid4().hex[:12]
-    on_step = None
-
     if log_file:
         log_file.parent.mkdir(parents=True, exist_ok=True)
         log_file.touch(exist_ok=True)
-        append_log(log_file, build_run_start_entry(run_id, task, work_dir, clear_dir, load_path, model_name, max_steps))
-
-        def on_step(history_entry):
-            append_log(log_file, build_step_entry(run_id, history_entry))
 
     start_time = time.perf_counter()
     state = AgentState(task)
 
     source = step_source or make_llm_step_source(model, tokenizer, verbose)
-    run_step_loop(state, source, max_steps, verbose, on_step=on_step)
+    run_step_loop(state, source, max_steps, verbose)
 
     if log_file:
         print("logging to...", log_file)
-        append_log(log_file, build_log_entry(state, start_time, work_dir, clear_dir, load_path, model_name, run_id=run_id))
+        append_log(log_file, build_log_entry(state, start_time, work_dir, clear_dir, load_path, model_name))
 
     return state
