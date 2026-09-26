@@ -1,0 +1,64 @@
+# chem_llm configuration.
+#
+# Copy to config.yaml and fill in. chem_llm.configure() with no argument
+# searches the current directory and its parents for chem_llm.yaml or
+# config.yaml. Every field is optional: anything omitted falls back to the
+# matching environment variable, then to a default.
+
+api_keys:
+  # Needed for the Claude backend (model.backend: claude).
+  # Falls back to $ANTHROPIC_API_KEY.
+  anthropic: null
+  # Needed by the generate_cif tool. Falls back to $MP_API_KEY.
+  # Get one at https://next-gen.materialsproject.org/api
+  materials_project: null
+  # Needed only for the local Qwen backend. Falls back to $HF_TOKEN.
+  huggingface: null
+
+paths:
+  # Each run is written to work_root/<run name>/.
+  work_root: ./chem_llm_runs
+  # Where the local model is downloaded/cached (sets HF_HOME). Point this
+  # at scratch on a cluster -- model weights are tens of GB.
+  hf_home: null
+  # Documentation retrieval index, built by scripts/build_doc_index.py.
+  # Without it the search_docs tool reports that it is unavailable.
+  doc_index_dir: ./retrieval_index
+
+quantum_espresso:
+  # Either give absolute paths to the binaries...
+  pw_x: pw.x
+  bands_x: bands.x
+  # ...or name an Lmod module to load first, leaving the names above bare.
+  # The load runs in the same shell invocation as the binary, which an
+  # Lmod module requires.
+  module: null            # e.g. espresso/7.5-libxc-7.0.0-cpu
+  # Prepended verbatim to each QE call; empty means run serially, which is
+  # right on a single interactive node. e.g. "srun -n 8", "mpirun -np 4".
+  mpi_prefix: ""
+  # A serial pw.x otherwise spawns one OpenMP thread per core, which for a
+  # small cell is heavy oversubscription and much slower.
+  omp_num_threads: 1
+  timeout_seconds: 7200
+
+model:
+  backend: claude         # claude | qwen
+
+  # Claude API backend.
+  claude_model: claude-opus-4-8
+  claude_max_tokens: 16000
+  claude_effort: high     # low | medium | high | xhigh | max
+
+  # Local Qwen backend (needs a GPU).
+  qwen_model: Qwen/Qwen3.8-27B
+  max_new_tokens: 5000
+  temperature: 0.0
+  do_sample: false
+
+agent:
+  # Tool calls per run before the loop gives up. A from-scratch band
+  # structure takes roughly 40 (Claude) to 60+ (Qwen) steps.
+  max_steps: 60
+  # Tool results kept in the prompt; older ones are summarised out.
+  max_history: 32
+  read_max_chars: 10000

@@ -8,6 +8,7 @@ __init__.py), not cwd, so behavior doesn't depend on where the caller was
 launched from.
 """
 import os
+from pathlib import Path
 
 from .. import REPO_ROOT
 
@@ -45,7 +46,19 @@ MAX_CHUNKS_PER_DOCUMENT = int(os.environ.get("DOC_MAX_CHUNKS_PER_DOCUMENT", 2))
 # DOC_INDEX_DIR may override with either a path relative to REPO_ROOT or an
 # absolute path -- see the WORK_DIR comment in chem_llm/config.py for why a
 # single `/` handles both cases.
-INDEX_DIR = (REPO_ROOT / os.environ.get("DOC_INDEX_DIR", "retrieval_index")).resolve()
+def _index_dir():
+    """Where the built index lives. Settings win (that is what a deployed
+    install configures); the env var and a repo-relative default remain as
+    fallbacks so in-tree scripts keep working."""
+    from ..settings import get_settings
+
+    configured = get_settings().doc_index_dir
+    if configured is not None:
+        return Path(configured).resolve()
+    return (REPO_ROOT / os.environ.get("DOC_INDEX_DIR", "retrieval_index")).resolve()
+
+
+INDEX_DIR = _index_dir()
 CHUNKS_PATH = INDEX_DIR / "chunks.jsonl"
 VECTOR_INDEX_DIR = INDEX_DIR / "vector"
 BM25_INDEX_PATH = INDEX_DIR / "bm25.pkl"

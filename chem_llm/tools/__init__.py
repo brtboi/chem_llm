@@ -14,6 +14,7 @@ from pseudohub.exceptions import InvalidParameterError
 from pymatgen.io.ase import AseAtomsAdaptor
 
 from ..config import READ_MAX_CHARS, MP_API_KEY
+from ..settings import get_settings
 
 TOOLS: list[dict] = []
 TOOL_DISPATCH: dict[str, callable] = {}
@@ -155,10 +156,14 @@ def run_espresso_workflow(
     if not work_dir.is_dir():
         return {"success": False, "stderr": f"{work_dir} is not a directory"}
 
+    # How to invoke QE on this machine comes from config, not from a
+    # hardcoded module name -- see chem_llm.settings.QESettings.
+    qe = get_settings().qe
+
     steps = [
-        ("scf", "pw.x", pw_input, "pw.out"),
-        ("bands_scf", "pw.x", bands_input, "bands_pw.out"),
-        ("bands_post", "bands.x", bands_post_input, "bands_post.out"),
+        ("scf", qe.pw_x, pw_input, "pw.out"),
+        ("bands_scf", qe.pw_x, bands_input, "bands_pw.out"),
+        ("bands_post", qe.bands_x, bands_post_input, "bands_post.out"),
     ]
 
     completed = []
@@ -171,17 +176,18 @@ def run_espresso_workflow(
                 "completed_steps": completed,
             }
 
-        command = f"module load espresso/7.5-libxc-7.0.0-cpu && {exe} -in {in_file} > {out_file} 2>&1"
+        command = qe.shell_command(exe, in_file, out_file)
         # Without OMP_NUM_THREADS pinned, pw.x/bands.x default to one OpenMP
-        # thread per core on the node (128 here) for every k-point's serial
+        # thread per core on the node for every k-point's serial
         # diagonalization -- for a small unit cell that's massive
-        # oversubscription (~118 threads thrashing on a tiny matrix) that
-        # made even a single SCF iteration take many minutes. Since this
-        # tool deliberately runs without srun/MPI (see docstring), there is
-        # no k-point-level parallelism to hand those cores to, so pin to 1
-        # thread and let each k-point's diagonalization run efficiently.
-        env = {**os.environ, "OMP_NUM_THREADS": "1"}
-        result = subprocess.run(["bash", "-c", command], cwd=work_dir, capture_output=True, text=True, env=env)
+        # oversubscription that made even a single SCF iteration take many
+        # minutes. Serial runs (no mpi_prefix) have no k-point parallelism
+        # to hand those cores to, so the configured default is 1 thread.
+        env = {**os.environ, "OMP_NUM_THREADS": str(qe.omp_num_threads)}
+        result = subprocess.run(
+            ["bash", "-c", command], cwd=work_dir, capture_output=True, text=True,
+            env=env, timeout=qe.timeout_seconds,
+        )
         outputs[name] = str(work_dir / out_file)
 
         if result.returncode != 0:
@@ -251,7 +257,7 @@ def generate_cif(
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     try:
-        with MPRester(MP_API_KEY) as mpr:
+        with MPRester(get_settings().mp_api_key or MP_API_KEY) as mpr:
             docs = mpr.materials.summary.search(
                 formula=composition,
                 fields=["material_id", "structure", "symmetry"],
