@@ -27,7 +27,7 @@ COMPOUNDS = {
     "si":       dict(compound="Si",      spacegroup="Fd-3m",    spacegroup_number=227, spacegroup_name="diamond-structure"),
 }
 
-RESULTS = Path("sandbox/package_runs/results.jsonl")
+RESULTS = Path(__file__).resolve().parent / "package_runs" / "results.jsonl"
 
 
 def main(names):

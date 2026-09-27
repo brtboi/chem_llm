@@ -15,6 +15,7 @@ different workflow.
 """
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -124,11 +125,23 @@ def _inspect_outputs(work_dir: Path, job: str = "000") -> dict:
         for key, pattern in (
             ("n_atoms", r"number of atoms/cell\s*=\s*(\d+)"),
             ("n_electrons", rf"number of electrons\s*=\s*({_FLOAT})"),
-            ("n_occupied", r"number of Kohn-Sham states\s*=\s*(\d+)"),
+            ("n_bands", r"number of Kohn-Sham states\s*=\s*(\d+)"),
         ):
             match = re.search(pattern, text)
             if match:
                 found[key] = float(match.group(1)) if "." in match.group(1) else int(match.group(1))
+
+        # Occupied-band count must come from the electron count, NOT from
+        # "number of Kohn-Sham states": those coincide only when nbnd
+        # defaults to nelec/2 (fixed occupations). Under smearing QE pads
+        # nbnd above that, and using the padded value picks two bands deep
+        # inside the conduction manifold -- which yields a nonsense
+        # (often negative) gap. Spin-orbit/noncollinear runs hold one
+        # electron per band rather than two.
+        electrons = found.get("n_electrons")
+        if electrons:
+            noncolin = bool(re.search(r"(?i)non-?colin|noncollinear|spin-orbit", text))
+            found["n_occupied"] = int(round(electrons if noncolin else electrons / 2))
 
     done = sum(
         (calc / name).exists() and "JOB DONE" in (calc / name).read_text(errors="replace")
@@ -247,16 +260,24 @@ def run_dft_agent(
 
     step_source, model_name = _build_step_source(settings, verbose)
 
-    state = run_agent(
-        prompt,
-        step_source=step_source,
-        model_name=model_name,
-        work_dir=work_dir,
-        max_steps=max_steps or settings.agent.max_steps,
-        verbose=verbose,
-        clear_dir=clear_dir,
-        load_path=None,
-    )
+    # run_agent chdir's into the work dir (every tool resolves paths against
+    # cwd). Restore it afterwards so calling this twice from a notebook does
+    # not nest run dirs, and so the caller's relative paths still mean what
+    # they did before the call.
+    previous_cwd = Path.cwd()
+    try:
+        state = run_agent(
+            prompt,
+            step_source=step_source,
+            model_name=model_name,
+            work_dir=work_dir,
+            max_steps=max_steps or settings.agent.max_steps,
+            verbose=verbose,
+            clear_dir=clear_dir,
+            load_path=None,
+        )
+    finally:
+        os.chdir(previous_cwd)
 
     found = _inspect_outputs(work_dir)
     runtime = 0.0

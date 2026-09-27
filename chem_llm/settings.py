@@ -105,7 +105,7 @@ class ModelSettings:
 
 @dataclass
 class AgentSettings:
-    max_steps: int = 60
+    max_steps: int = 80
     max_history: int = 32
     read_max_chars: int = 10000
 
