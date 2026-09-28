@@ -103,8 +103,9 @@ class DocRetriever:
         index_dir: Path | None = None,
         embedding_model: str | None = None,
         reranker_model: str | None = None,
+        cache_dir: Path | None = None,
     ):
-        index_dir = index_dir or config.INDEX_DIR
+        index_dir = Path(index_dir or config.INDEX_DIR)
         chunks_path = index_dir / "chunks.jsonl"
         vector_path = index_dir / "vector"
         bm25_path = index_dir / "bm25.pkl"
@@ -115,11 +116,12 @@ class DocRetriever:
 
         if self.vector_store is None and self.bm25_index is None:
             raise FileNotFoundError(
-                f"No vector or BM25 index found under {index_dir}. Run scripts/build_doc_index.py first."
+                f"No vector or BM25 index found under {index_dir}. Build one with "
+                "DocumentationIndex(path).build() or scripts/build_doc_index.py."
             )
 
-        self._embedder = EmbeddingModel(embedding_model)
-        self._reranker = Reranker(reranker_model)
+        self._embedder = EmbeddingModel(embedding_model, cache_dir=cache_dir)
+        self._reranker = Reranker(reranker_model, cache_dir=cache_dir)
 
     def search(
         self,

@@ -1,9 +1,14 @@
 # chem_llm configuration.
 #
-# Copy to config.yaml and fill in. chem_llm.configure() with no argument
-# searches the current directory and its parents for chem_llm.yaml or
-# config.yaml. Every field is optional: anything omitted falls back to the
-# matching environment variable, then to a default.
+# Copy to config.yaml and fill in, then:
+#
+#     from chem_llm import DFTAgent, Settings
+#     agent = DFTAgent(Settings.from_yaml("config.yaml"))
+#
+# DFTAgent() with no settings searches the current directory and its parents
+# for chem_llm.yaml or config.yaml. Every field is optional: anything omitted
+# falls back to the matching environment variable (a .env file works), then
+# to a default.
 
 api_keys:
   # Needed for the Claude backend (model.backend: claude).
@@ -16,12 +21,14 @@ api_keys:
   huggingface: null
 
 paths:
+  # Relative paths are relative to this file, not to the working directory.
   # Each run is written to work_root/<run name>/.
   work_root: ./chem_llm_runs
   # Where the local model is downloaded/cached (sets HF_HOME). Point this
   # at scratch on a cluster -- model weights are tens of GB.
   hf_home: null
-  # Documentation retrieval index, built by scripts/build_doc_index.py.
+  # Documentation retrieval index, built by DocumentationIndex.build()
+  # or scripts/build_doc_index.py.
   # Without it the search_docs tool reports that it is unavailable.
   doc_index_dir: ./retrieval_index
 
@@ -42,23 +49,25 @@ quantum_espresso:
   timeout_seconds: 7200
 
 model:
-  backend: claude         # claude | qwen
-
-  # Claude API backend.
-  claude_model: claude-opus-4-8
-  claude_max_tokens: 16000
-  claude_effort: high     # low | medium | high | xhigh | max
+  # Local Qwen runs on your own GPU and costs nothing per run; claude goes
+  # to the Anthropic API and bills for every step.
+  backend: qwen           # qwen | claude
 
   # Local Qwen backend (needs a GPU).
   qwen_model: Qwen/Qwen3.8-27B
   max_new_tokens: 5000
-  temperature: 0.0
+  temperature: 0.0        # only used when do_sample is true
   do_sample: false
+
+  # Claude API backend (used only when backend: claude).
+  claude_model: claude-opus-4-8
+  claude_max_tokens: 16000
+  claude_effort: high     # low | medium | high | xhigh | max
 
 agent:
   # Tool calls per run before the loop gives up. A from-scratch band
   # structure takes roughly 40 (Claude) to 60+ (Qwen) steps.
-  max_steps: 60
+  max_steps: 80
   # Tool results kept in the prompt; older ones are summarised out.
   max_history: 32
   read_max_chars: 10000

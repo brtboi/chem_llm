@@ -9,15 +9,31 @@ from .models import ScoredChunk
 
 
 class Reranker:
-    def __init__(self, model_name: str | None = None):
+    def __init__(self, model_name: str | None = None, cache_dir=None):
         self.model_name = model_name or config.RERANKER_MODEL
+        self.cache_dir = cache_dir  # hub cache; None -> library default / HF_HOME
         self._model = None
 
     def _load(self):
         if self._model is None:
             from sentence_transformers import CrossEncoder
 
-            self._model = CrossEncoder(self.model_name)
+            # sentence-transformers 5.x: CrossEncoder forwards cache_folder
+            # to its Transformer module via an argument that module itself
+            # deprecated, so it logs a deprecation warning at us -- then
+            # routes the directory correctly. Nothing for us to change;
+            # silence that one logger for the duration of the load.
+            import logging
+
+            decorators_log = logging.getLogger("sentence_transformers.util.decorators")
+            level = decorators_log.level
+            decorators_log.setLevel(logging.ERROR)
+            try:
+                self._model = CrossEncoder(
+                    self.model_name, cache_folder=str(self.cache_dir) if self.cache_dir else None
+                )
+            finally:
+                decorators_log.setLevel(level)
         return self._model
 
     def rerank(self, query: str, candidates: list[ScoredChunk], top_k: int) -> list[ScoredChunk]:

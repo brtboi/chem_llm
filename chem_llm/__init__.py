@@ -6,11 +6,15 @@ structure ensemble, writes Quantum ESPRESSO inputs, runs the SCF + bands +
 post-processing chain, and plots the result -- writing every script itself
 and checking its own work against a set of invariants.
 
-    from chem_llm import configure, run_dft_agent
+    from chem_llm import DFTAgent, Settings
 
-    configure("config.yaml")
-    result = run_dft_agent("TiO2", "P4_2/mnm", spacegroup_name="rutile")
+    agent = DFTAgent(Settings.from_yaml("config.yaml"))    # the machine
+    result = agent.run("TiO2", "P4_2/mnm")                 # the job
     print(result)
+
+Each DFTAgent owns its Settings (credentials, Quantum ESPRESSO, caches,
+generation parameters); nothing is configured process-wide. The agent holds
+the model, so a second `run()` reuses the loaded weights.
 
 See config.example.yaml for the configuration file format.
 """
@@ -22,19 +26,22 @@ from pathlib import Path
 # points at the install directory, which is not a useful place to write.
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
-from .settings import Settings, configure, get_settings, set_settings  # noqa: E402
+from .settings import AgentSettings, ModelSettings, QESettings, Settings  # noqa: E402
 from .tasks import build_task  # noqa: E402
 from .pipeline import RunResult, run_dft_agent  # noqa: E402
+from .agent import DFTAgent, DocumentationIndex  # noqa: E402
 
 __version__ = "0.1.0"
 
 __all__ = [
+    "AgentSettings",
+    "DFTAgent",
+    "DocumentationIndex",
+    "ModelSettings",
+    "QESettings",
     "REPO_ROOT",
     "RunResult",
     "Settings",
     "build_task",
-    "configure",
-    "get_settings",
     "run_dft_agent",
-    "set_settings",
 ]

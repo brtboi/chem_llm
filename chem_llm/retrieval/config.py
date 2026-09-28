@@ -47,14 +47,9 @@ MAX_CHUNKS_PER_DOCUMENT = int(os.environ.get("DOC_MAX_CHUNKS_PER_DOCUMENT", 2))
 # absolute path -- see the WORK_DIR comment in chem_llm/config.py for why a
 # single `/` handles both cases.
 def _index_dir():
-    """Where the built index lives. Settings win (that is what a deployed
-    install configures); the env var and a repo-relative default remain as
-    fallbacks so in-tree scripts keep working."""
-    from ..settings import get_settings
-
-    configured = get_settings().doc_index_dir
-    if configured is not None:
-        return Path(configured).resolve()
+    """Default index location for callers that do not name one. An agent
+    always names one (Settings.doc_index_dir), so this is only the fallback
+    for in-tree scripts and direct DocRetriever() use."""
     return (REPO_ROOT / os.environ.get("DOC_INDEX_DIR", "retrieval_index")).resolve()
 
 

@@ -1,18 +1,22 @@
-"""Run the packaged pipeline over a set of compounds, one per process.
+"""Run the packaged agent over a set of compounds.
 
     python sandbox/run_package_benchmark.py diamond
-    python sandbox/run_package_benchmark.py tio2 cspbbr3
+    python sandbox/run_package_benchmark.py diamond mgo gaas
 
-Each compound is a single `run_dft_agent` call -- the whole point of the
-package is that this is all it takes -- and the result line is appended to
-sandbox/package_runs/results.jsonl so several processes can report into the
-same place.
+One DFTAgent drives every compound in the list, so the local model is loaded
+once for the whole sweep rather than once per compound -- which for a 27B
+model is several minutes apiece. Each result line is appended to
+sandbox/package_runs/results.jsonl, so several processes (or several
+invocations after a node expires) report into the same place.
+
+Backend comes from config.yaml; that is the local Qwen model, which runs on
+the allocated GPU and costs nothing per step.
 """
 import json
 import sys
 from pathlib import Path
 
-from chem_llm import configure, run_dft_agent
+from chem_llm import DFTAgent, Settings
 
 # A spread of space groups and chemistries: cubic diamond-structure
 # covalent, tetragonal oxide, cubic perovskite, rocksalt ionic,
@@ -27,16 +31,24 @@ COMPOUNDS = {
     "si":       dict(compound="Si",      spacegroup="Fd-3m",    spacegroup_number=227, spacegroup_name="diamond-structure"),
 }
 
-RESULTS = Path(__file__).resolve().parent / "package_runs" / "results.jsonl"
+SANDBOX = Path(__file__).resolve().parent
+RESULTS = SANDBOX / "package_runs" / "results.jsonl"
 
 
 def main(names):
-    configure("config.yaml")
+    agent = DFTAgent(Settings.from_yaml(SANDBOX.parent / "config.yaml"))
+    print(f"agent: {agent}", flush=True)
+    agent.load()
+
     for name in names:
         spec = COMPOUNDS[name]
         print(f"\n{'=' * 70}\n=== {name}: {spec['compound']} ({spec['spacegroup']})\n{'=' * 70}", flush=True)
         try:
-            result = run_dft_agent(run_name=name, **spec)
+            result = agent.run(
+                **spec,
+                work_dir=agent.settings.work_root / name,
+                log_file=SANDBOX / "logs" / f"package_{name}.jsonl",
+            )
             record = dict(
                 name=name, compound=spec["compound"], spacegroup=spec["spacegroup"],
                 ok=result.ok, completed=result.completed, dft_finished=result.dft_finished,

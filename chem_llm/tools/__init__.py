@@ -13,8 +13,9 @@ from pseudohub.exceptions import InvalidParameterError
 # other tool/script downstream of generate_cif works with ASE, not pymatgen.
 from pymatgen.io.ase import AseAtomsAdaptor
 
-from ..config import READ_MAX_CHARS, MP_API_KEY
-from ..settings import get_settings
+# Everything machine-specific comes from the running agent's Settings, read
+# at call time -- see chem_llm.settings.active_settings.
+from ..settings import active_settings
 
 TOOLS: list[dict] = []
 TOOL_DISPATCH: dict[str, callable] = {}
@@ -76,7 +77,8 @@ def make_dir(path: str):
     "Read a file from disk (truncated if very large)",
     {"path": "string"},
 )
-def read_file(path: str, max_chars: int = READ_MAX_CHARS):
+def read_file(path: str, max_chars: int | None = None):
+    max_chars = max_chars or active_settings().agent.read_max_chars
     file_path = Path(path)
     if not file_path.exists():
         return f"ERROR: {path} does not exist"
@@ -100,6 +102,9 @@ def run_python(path: str):
         [sys.executable, path],
         capture_output=True,
         text=True,
+        # The agent's own credentials/HF cache, not just whatever this
+        # process happened to inherit.
+        env=active_settings().subprocess_env(),
     )
     return {"stdout": result.stdout, "stderr": result.stderr}
 
@@ -156,9 +161,10 @@ def run_espresso_workflow(
     if not work_dir.is_dir():
         return {"success": False, "stderr": f"{work_dir} is not a directory"}
 
-    # How to invoke QE on this machine comes from config, not from a
-    # hardcoded module name -- see chem_llm.settings.QESettings.
-    qe = get_settings().qe
+    # How to invoke QE on this machine comes from the agent's settings, not
+    # from a hardcoded module name -- see chem_llm.settings.QESettings.
+    settings = active_settings()
+    qe = settings.qe
 
     steps = [
         ("scf", qe.pw_x, pw_input, "pw.out"),
@@ -183,7 +189,7 @@ def run_espresso_workflow(
         # oversubscription that made even a single SCF iteration take many
         # minutes. Serial runs (no mpi_prefix) have no k-point parallelism
         # to hand those cores to, so the configured default is 1 thread.
-        env = {**os.environ, "OMP_NUM_THREADS": str(qe.omp_num_threads)}
+        env = {**settings.subprocess_env(), "OMP_NUM_THREADS": str(qe.omp_num_threads)}
         result = subprocess.run(
             ["bash", "-c", command], cwd=work_dir, capture_output=True, text=True,
             env=env, timeout=qe.timeout_seconds,
@@ -257,7 +263,7 @@ def generate_cif(
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     try:
-        with MPRester(get_settings().mp_api_key or MP_API_KEY) as mpr:
+        with MPRester(active_settings().mp_api_key) as mpr:
             docs = mpr.materials.summary.search(
                 formula=composition,
                 fields=["material_id", "structure", "symmetry"],

@@ -14,15 +14,18 @@ from . import config
 
 
 class EmbeddingModel:
-    def __init__(self, model_name: str | None = None):
+    def __init__(self, model_name: str | None = None, cache_dir=None):
         self.model_name = model_name or config.EMBEDDING_MODEL
+        self.cache_dir = cache_dir  # hub cache; None -> library default / HF_HOME
         self._model = None
 
     def _load(self):
         if self._model is None:
             from sentence_transformers import SentenceTransformer
 
-            self._model = SentenceTransformer(self.model_name)
+            self._model = SentenceTransformer(
+                self.model_name, cache_folder=str(self.cache_dir) if self.cache_dir else None
+            )
         return self._model
 
     def embed_documents(self, texts: list[str], batch_size: int = 64) -> np.ndarray:

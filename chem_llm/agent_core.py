@@ -17,6 +17,7 @@ import os
 from datetime import datetime
 from pathlib import Path
 import shutil
+import sys
 import time
 
 from . import REPO_ROOT
@@ -384,10 +385,10 @@ SYSTEM_PROMPT_TEMPLATE = (
 )
 
 
-def build_prompt(state: AgentState, tokenizer):
+def build_prompt(state: AgentState, tokenizer, max_history: int = MAX_HISTORY):
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT_TEMPLATE},
-        {"role": "user", "content": state.context_summary(max_history = MAX_HISTORY)},
+        {"role": "user", "content": state.context_summary(max_history=max_history)},
     ]
     return tokenizer.apply_chat_template(
         messages,
@@ -449,15 +450,24 @@ def execute_tool(call: dict, state: AgentState):
     return result
 
 
-def generate(prompt: str, model, tokenizer, remove_prompt_from_output=True, print_generated_tokens=False):
+def generate(
+    prompt: str,
+    model,
+    tokenizer,
+    remove_prompt_from_output=True,
+    print_generated_tokens=False,
+    max_new_tokens: int = MAX_NEW_TOKENS,
+    temperature: float = TEMPERATURE,
+    do_sample: bool = DO_SAMPLE,
+):
     inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
     input_len = inputs["input_ids"].shape[1]
-    outputs = model.generate(
-        **inputs,
-        max_new_tokens=MAX_NEW_TOKENS,
-        temperature=TEMPERATURE,
-        do_sample=DO_SAMPLE,
-    )
+    sampling = {"do_sample": do_sample}
+    if do_sample:
+        # Greedy decoding ignores temperature, and transformers warns about
+        # it on every step if it is passed anyway.
+        sampling["temperature"] = temperature
+    outputs = model.generate(**inputs, max_new_tokens=max_new_tokens, **sampling)
     if print_generated_tokens:
         print(f"Generated tokens: {outputs[0].shape[0] - input_len}")
     if remove_prompt_from_output:
@@ -467,16 +477,31 @@ def generate(prompt: str, model, tokenizer, remove_prompt_from_output=True, prin
     return decoded.strip()
 
 
-def make_llm_step_source(model, tokenizer, verbose: bool = True):
+def make_llm_step_source(
+    model,
+    tokenizer,
+    verbose: bool = True,
+    *,
+    max_new_tokens: int = MAX_NEW_TOKENS,
+    temperature: float = TEMPERATURE,
+    do_sample: bool = DO_SAMPLE,
+    max_history: int = MAX_HISTORY,
+):
     """Build a `next_tool_call(state, step)` source for `run_step_loop` that
     asks the model to generate each step, same as the original inline
     run_agent loop. A JSON parse failure is logged as a 'parse_error' step
     (fed back as a note so the model can self-correct) and reported to the
     loop as a no-op step rather than a tool call.
+
+    The keyword defaults are the legacy chem_llm.config values; DFTAgent
+    passes its own settings.
     """
     def next_tool_call(state: AgentState, step: int):
-        prompt = build_prompt(state, tokenizer)
-        output = generate(prompt, model, tokenizer)
+        prompt = build_prompt(state, tokenizer, max_history=max_history)
+        output = generate(
+            prompt, model, tokenizer,
+            max_new_tokens=max_new_tokens, temperature=temperature, do_sample=do_sample,
+        )
         if verbose:
             print("RAW MODEL OUTPUT:\n", output)
         try:
@@ -547,11 +572,18 @@ def _guard_clear_target(directory: Path) -> None:
 
 
 def _confirm_clear_dir(directory: Path) -> bool:
-    response = input(
+    message = (
         f"clear_dir=True: about to permanently delete everything in "
-        f"{directory} except *.jsonl log files. Type 'yes' to continue: "
+        f"{directory} except *.jsonl log files."
     )
-    return response.strip().lower() == "yes"
+    if not sys.stdin.isatty():
+        # Batch job, notebook kernel, nohup'd sweep: there is nobody to
+        # answer, and raising here would kill a run whose caller already
+        # authorised the delete by passing clear_dir=True. Say what is being
+        # deleted and proceed.
+        print(message + " (non-interactive: proceeding)")
+        return True
+    return input(message + " Type 'yes' to continue: ").strip().lower() == "yes"
 
 
 def clear_directory(directory: Path) -> None:

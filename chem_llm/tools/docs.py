@@ -2,24 +2,30 @@
 chem_llm/retrieval/. Registers `search_docs` against the same
 TOOLS/TOOL_DISPATCH registry as every other tool in tools/__init__.py.
 
-The retriever (and the embedding/reranker models it lazily owns) is
-built once per process on first call and reused after that -- loading a
-DocRetriever is index-load-only (cheap); the actual models only load on
-the first `search_docs` call, not at import time, so importing tools
-doesn't require a GPU or network access.
+Which index is searched comes from the running agent's settings
+(doc_index_dir), so two agents pointed at different indexes each search
+their own. A retriever is built once per index directory and reused --
+constructing one only loads the index files (cheap); the embedding and
+reranker models load on its first search, not at import time, so importing
+tools doesn't require a GPU or network access.
 """
+from pathlib import Path
+
 from ..retrieval import config as retrieval_config
 from ..retrieval.hybrid_search import DocRetriever
+from ..settings import active_settings
 from . import register_tool
 
-_retriever: DocRetriever | None = None
+_retrievers: dict[tuple[Path, Path | None], DocRetriever] = {}
 
 
-def _get_retriever() -> DocRetriever:
-    global _retriever
-    if _retriever is None:
-        _retriever = DocRetriever()
-    return _retriever
+def get_retriever(index_dir: Path, cache_dir: Path | None = None) -> DocRetriever:
+    """The shared retriever for one index directory (built on first use).
+    Raises FileNotFoundError if no index has been built there."""
+    key = (Path(index_dir).resolve(), cache_dir)
+    if key not in _retrievers:
+        _retrievers[key] = DocRetriever(index_dir=key[0], cache_dir=cache_dir)
+    return _retrievers[key]
 
 
 @register_tool(
@@ -50,8 +56,9 @@ def _get_retriever() -> DocRetriever:
     },
 )
 def search_docs(query: str, top_k: int | None = None, sources: list[str] | None = None):
+    settings = active_settings()
     try:
-        retriever = _get_retriever()
+        retriever = get_retriever(settings.doc_index_dir, settings.hf_cache_dir)
     except FileNotFoundError as e:
         return {"success": False, "stderr": str(e)}
 

@@ -1,27 +1,23 @@
-"""One-call entry point: compound + space group -> finished DFT run.
+"""Run bookkeeping shared by DFTAgent, plus a one-shot convenience wrapper.
 
-    from chem_llm import configure, run_dft_agent
+    from chem_llm import run_dft_agent
 
-    configure("config.yaml")
     result = run_dft_agent("TiO2", "P4_2/mnm", spacegroup_name="rutile")
     print(result.completed, result.band_gap, result.work_dir)
 
-Everything between those two lines -- picking the backend, hiding tools the
-task does not need, building the prompt, creating the run directory,
-driving the agent loop, and reading the outcome back off disk -- is handled
-here. The pieces are still importable on their own (chem_llm.tasks,
-chem_llm.agent_core, chem_llm.claude_backend) when you want to assemble a
-different workflow.
+RunResult and the output inspection (_inspect_outputs, _band_gap) read what
+a run actually left on disk rather than trusting the agent's own summary.
+For more than one run, use chem_llm.DFTAgent directly so the model is
+loaded once.
 """
 from __future__ import annotations
 
-import os
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .settings import Settings, get_settings
+from .settings import Settings
 from .tasks import build_task
 
 
@@ -72,39 +68,6 @@ def _hide_tools(names) -> None:
     tools_module.TOOLS[:] = [t for t in tools_module.TOOLS if t["name"] not in names]
     for name in names:
         tools_module.TOOL_DISPATCH.pop(name, None)
-
-
-def _build_step_source(settings: Settings, verbose: bool):
-    """Return (step_source, model_name) for the configured backend."""
-    backend = settings.model.backend.lower()
-
-    if backend == "claude":
-        settings.require("anthropic_api_key")
-        from .claude_backend import ClaudeModel, make_claude_step_source
-
-        claude = ClaudeModel(
-            model=settings.model.claude_model,
-            max_tokens=settings.model.claude_max_tokens,
-            effort=settings.model.claude_effort,
-            api_key=settings.anthropic_api_key,
-        )
-        return make_claude_step_source(claude, verbose=verbose), claude.model
-
-    if backend == "qwen":
-        settings.require("hf_token")
-        import torch
-        from transformers import AutoModelForCausalLM, AutoTokenizer
-
-        from .agent_core import make_llm_step_source
-
-        name = settings.model.qwen_model
-        tokenizer = AutoTokenizer.from_pretrained(name, token=settings.hf_token)
-        model = AutoModelForCausalLM.from_pretrained(
-            name, device_map="auto", dtype=torch.bfloat16, token=settings.hf_token
-        )
-        return make_llm_step_source(model, tokenizer, verbose), name
-
-    raise ValueError(f"Unknown model backend {backend!r}; expected 'claude' or 'qwen'")
 
 
 # ----------------------------------------------------------------------
@@ -230,80 +193,32 @@ def run_dft_agent(
     verbose: bool = True,
     clear_dir: bool = True,
 ) -> RunResult:
-    """Run the full agentic DFT band-structure workflow for one compound.
+    """One-shot convenience wrapper: build a DFTAgent from `settings`
+    (default: DFTAgent.default_settings()), run one compound, throw the agent away.
 
-    Only `compound` and `spacegroup` are required. The run is written to
-    settings.work_root / run_name (default: the compound name), and the
-    returned RunResult reports what actually landed on disk.
+    Fine for a single run. For several, build the agent yourself and call
+    `agent.run()` per compound -- that loads the model once instead of once
+    per compound, which for a 27B local model is minutes apiece:
+
+        agent = DFTAgent(settings)
+        for compound, spacegroup in jobs:
+            agent.run(compound, spacegroup)
     """
-    settings = settings or get_settings()
-    settings.apply_env()
+    from .agent import DFTAgent
 
-    _hide_tools(hide_tools)
-
-    # Imported after _hide_tools: agent_core serialises the tool list into
-    # the system prompt at import time.
-    from .agent_core import run_agent
-
-    work_dir = (settings.work_root / (run_name or compound)).resolve()
-    work_dir.mkdir(parents=True, exist_ok=True)
-
-    prompt = task or build_task(
-        compound=compound,
-        spacegroup=spacegroup,
+    agent = DFTAgent(settings)
+    return agent.run(
+        compound,
+        spacegroup,
         spacegroup_number=spacegroup_number,
         spacegroup_name=spacegroup_name,
+        work_dir=agent.settings.work_root / (run_name or compound),
+        clear_dir=clear_dir,
+        max_steps=max_steps,
         n_structures=n_structures,
         relativistic=relativistic,
         functional=functional,
-    )
-
-    step_source, model_name = _build_step_source(settings, verbose)
-
-    # run_agent chdir's into the work dir (every tool resolves paths against
-    # cwd). Restore it afterwards so calling this twice from a notebook does
-    # not nest run dirs, and so the caller's relative paths still mean what
-    # they did before the call.
-    previous_cwd = Path.cwd()
-    try:
-        state = run_agent(
-            prompt,
-            step_source=step_source,
-            model_name=model_name,
-            work_dir=work_dir,
-            max_steps=max_steps or settings.agent.max_steps,
-            verbose=verbose,
-            clear_dir=clear_dir,
-            load_path=None,
-        )
-    finally:
-        os.chdir(previous_cwd)
-
-    found = _inspect_outputs(work_dir)
-    runtime = 0.0
-    log = work_dir / "log.jsonl"
-    if log.exists():
-        import json
-
-        try:
-            runtime = json.loads(log.read_text().strip().splitlines()[-1]).get("runtime", 0.0)
-        except (ValueError, IndexError):
-            pass
-
-    return RunResult(
-        compound=compound,
-        spacegroup=spacegroup,
-        work_dir=work_dir,
-        completed=state.done,
-        num_steps=len(state.history),
-        runtime_seconds=runtime,
-        model=model_name,
-        summary=state.final_result,
-        scf_converged=found.get("scf_converged", False),
-        dft_finished=found.get("dft_finished", False),
-        n_atoms=found.get("n_atoms"),
-        n_electrons=found.get("n_electrons"),
-        band_gap=found.get("band_gap"),
-        plot=found.get("plot"),
-        state=state,
+        task=task,
+        hide_tools=hide_tools,
+        verbose=verbose,
     )
