@@ -8,8 +8,13 @@ load_dotenv()
 
 # --- Model ---
 HF_TOKEN = os.environ.get("HF_TOKEN")
-HF_HOME = os.environ.get("HF_HOME", "/pscratch/sd/b/brenthu/huggingface")
-print("HF_HOME: ", HF_HOME)
+# Same default as chem_llm.settings: $HF_HOME, else scratch on NERSC, else the
+# Hugging Face library default.
+HF_HOME = (
+    os.environ.get("HF_HOME")
+    or (os.environ.get("PSCRATCH") and os.path.join(os.environ["PSCRATCH"], "huggingface"))
+    or os.path.expanduser("~/.cache/huggingface")
+)
 
 # MODEL_NAME = "Qwen/Qwen3-30B-A3B-Instruct-2507"
 MODEL_NAME = "Qwen/Qwen3.8-27B"

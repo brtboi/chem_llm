@@ -12,14 +12,17 @@ how the package's own README says to invoke it (`python main.py
 /path/to/inputs/ /path/to/results/`), just from a subprocess instead of a
 shell.
 """
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 from . import register_tool
-from .. import REPO_ROOT
 
-DEEPSEUDOPOT_DIR = REPO_ROOT / "chem_llm" / "DeePseudopot"
+# A git checkout of github.com/TommyLinkl/DeePseudopot. It is vendored in the
+# source repository only -- not shipped in the wheel -- so an installed
+# package needs $DEEPSEUDOPOT_DIR pointing at a checkout to use this tool.
+DEEPSEUDOPOT_DIR = Path(os.environ.get("DEEPSEUDOPOT_DIR") or Path(__file__).resolve().parents[1] / "DeePseudopot")
 
 
 @register_tool(
@@ -95,6 +98,15 @@ DEEPSEUDOPOT_DIR = REPO_ROOT / "chem_llm" / "DeePseudopot"
     remember_on=("inputs_folder", "results_folder"),
 )
 def train_deepseudopot(inputs_folder: str, results_folder: str, timeout_seconds: int = 5400):
+    if not (DEEPSEUDOPOT_DIR / "main.py").exists():
+        return {
+            "success": False,
+            "stderr_tail": (
+                f"DeePseudopot is not available: no main.py in {DEEPSEUDOPOT_DIR}. It is not part of "
+                "the chem-llm package -- clone https://github.com/TommyLinkl/DeePseudopot and set "
+                "DEEPSEUDOPOT_DIR to that checkout."
+            ),
+        }
     inputs_path = Path(inputs_folder).resolve()
     if not inputs_path.is_dir():
         return {"success": False, "stderr_tail": f"{inputs_path} is not a directory"}
