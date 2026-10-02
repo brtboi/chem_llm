@@ -13,6 +13,7 @@ with the cards in the same file.
 import re
 from pathlib import Path
 
+from ..kpath_check import check_bands_kpath
 from . import register_tool
 from .qe_namelists import VARIABLE_NAMELIST
 
@@ -127,9 +128,13 @@ def _extract_card_lines(text: str, card: str) -> list[str]:
         "really about where the variable sits. This is a deterministic file "
         "check, not a correctness judgement -- it cannot tell you whether "
         "nat is the *scientifically* right number, only whether it agrees "
-        "with the cards in the same file. Call this on every pw.in-style "
-        "file (SCF and bands inputs) right after writing it, and again after "
-        "any edit to it, before run_espresso_workflow or done."
+        "with the cards in the same file. (3) For a bands input "
+        "(calculation='bands'): every segment endpoint of the k-path is a real "
+        "high-symmetry point (a missing segment start after a discontinuity "
+        "shows up as an endpoint that is not one), and the band_labels.dat "
+        "next to it labels every endpoint with the right name. Call this on "
+        "every pw.in-style file (SCF and bands inputs) right after writing it, "
+        "and again after any edit to it, before run_espresso_workflow or done."
     ),
     {"path": "string. Path to the QE input file to validate."},
 )
@@ -172,6 +177,7 @@ def validate_qe_input(path: str):
         )
 
     issues.extend(_check_namelist_membership(text, binary))
+    issues.extend(check_bands_kpath(file_path, file_path.parent / "band_labels.dat"))
 
     return {
         "success": not issues,

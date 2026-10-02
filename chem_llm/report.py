@@ -147,54 +147,21 @@ def _displacement_lines(content: str) -> list[str]:
 
 
 def _kpath(bands_in: str | None, labels_txt: str | None) -> dict:
+    """The bands k-path: type, points, labels, discontinuities and segment
+    endpoints (the same reading validate_qe_input's k-path check uses)."""
+    from .kpath_check import _labels, read_kpoints, segment_endpoints
+
     info: dict = {}
     if bands_in:
-        m = re.search(r"K_POINTS\s*\{?\(?\s*(\w+)", bands_in)
-        info["kind"] = m.group(1) if m else None
-        block = bands_in[m.end():] if m else ""
-        lines = block.strip().splitlines()
-        if lines and lines[0].strip().isdigit():
-            n = int(lines[0])
-            info["n"] = n
-            pts = []
-            for l in lines[1:n + 1]:
-                parts = l.split()
-                try:
-                    pts.append(tuple(float(x) for x in parts[:3]))
-                except ValueError:
-                    break
-            info["points"] = pts
+        kind, pts = read_kpoints(bands_in)
+        info["kind"] = kind
+        if len(pts):
+            info["n"], info["points"] = len(pts), pts
     if labels_txt:
-        found = []
-        for l in labels_txt.splitlines():
-            if l.strip().startswith("#"):
-                continue
-            toks = l.replace(",", " ").split()
-            ints = [t for t in toks if re.fullmatch(r"\d+", t)]
-            names = [t for t in toks if not re.fullmatch(r"[-\d.]+", t)]
-            if len(ints) == 1 and names:
-                found.append((int(ints[0]), names[0]))
-        info["labels"] = sorted(found)
-    pts = info.get("points") or []
-    if info.get("kind", "").lower() in ("crystal", "tpiba") and len(pts) > 2:
-        import math
-        d = [math.dist(pts[i], pts[i + 1]) for i in range(len(pts) - 1)]
-        positive = sorted(x for x in d if x > 1e-9)
-        typical = positive[len(positive) // 2] if positive else 0
-        info["breaks"] = [i + 1 for i, x in enumerate(d) if typical and x > 3 * typical]
-        # Segment endpoints: first/last point, every turn, and both sides of a
-        # break -- each one is a high-symmetry point that should be labelled.
-        corners = {0, len(pts) - 1}
-        for b in info["breaks"]:
-            corners |= {b - 1, b}
-        unit = lambda a, b: tuple((y - x) / (math.dist(a, b) or 1) for x, y in zip(a, b))
-        for i in range(1, len(pts) - 1):
-            if i in info["breaks"] or i + 1 in info["breaks"]:
-                continue
-            u, w = unit(pts[i - 1], pts[i]), unit(pts[i], pts[i + 1])
-            if math.dist(u, w) > 1e-3 and d[i - 1] > 1e-9 and d[i] > 1e-9:
-                corners.add(i)
-        info["corners"] = sorted(corners)
+        info["labels"] = sorted(_labels(labels_txt))
+    pts = info.get("points")
+    if (info.get("kind") or "") in ("crystal", "tpiba") and pts is not None and len(pts) > 2:
+        info["corners"], info["breaks"] = segment_endpoints(pts)
     return info
 
 
