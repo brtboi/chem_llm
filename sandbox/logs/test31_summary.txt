@@ -1,0 +1,67 @@
+chem_llm run summary -- CsPbBr3 (Pm-3m)
+=======================================
+completed in 46 steps, 169.7 min | Qwen/Qwen3.8-27B
+work dir: /pscratch/sd/b/brenthu/chem_llm/sandbox/test31
+band gap: 0.385 eV (computed from the bands output)
+plot:     calculations/000/bands_000.pdf
+
+1. What the agent did
+    step  2  Materials Project: CsPbBr3 (Pm-3m) -> mp-600089, saved structures/CsPbBr3_base.cif
+    step  4  wrote reduce_primitive.py: 2 versions, run 2x (1 failed) -> OK at step 9
+    step 11  wrote generate_structures.py: 1 version, run 1x -> OK at step 12
+    step 14  Pseudo-Dojo: Cs pseudopotential (nc, fr, pbesol, stringent) -> z_valence 9, recommended
+             ecutwfc 25.0 Ha
+    step 15  Pseudo-Dojo: Pb pseudopotential (nc, fr, pbesol, stringent) -> z_valence 22,
+             recommended ecutwfc 44.0 Ha
+    step 16  Pseudo-Dojo: Br pseudopotential (nc, fr, pbesol, stringent) -> z_valence 17,
+             recommended ecutwfc 38.0 Ha
+    step 26  wrote setup_jobs.py: 1 version, run 1x -> OK at step 27
+    step 28  validated calculations/000/pw.in: OK
+    step 29  validated calculations/000/bands.in: OK
+    step 31  Quantum ESPRESSO on calculations/000: OK (scf, bands_scf, bands_post)
+    step 41  wrote plot_bands.py: 1 version, run 1x -> OK at step 42
+             documentation lookups: 7 (where they clustered: section 3)
+
+2. Results and key choices (in the order they were made)
+    step  2  structure: 5 atoms in the Materials Project cell -> 5 atoms in the cell used for DFT
+    step 12  perturbed structures (generate_structures.py): no numeric displacement parameter found
+             in the script
+    step 14  pseudopotentials: fully relativistic (spin-orbit); valence electrons per atom: Cs 9, Pb
+             22, Br 17
+    step 27  cutoffs: ecutwfc 88.0 Ry, ecutrho 352.0 Ry (largest recommended: 44 Ha = 88 Ry)
+    step 27  SCF settings: occupations fixed, k-mesh 8 x 8 x 8 (shift 0 0 0), conv_thr 1e-08, spin-
+             orbit ON (noncolin, lspinorb)
+    step 27  k-path: GAMMA X M GAMMA R X X|R M; 126 points (crystal), 1 discontinuity; nbnd 100 in
+             the bands run
+    step 31  DFT: 82 electrons, SCF converged, all three QE stages finished
+    step 42  band gap: 0.385 eV computed from the bands output; agent reported 0.385 eV
+
+3. Uncertainties and difficulties
+    - reduce_primitive.py: 1 failed run(s), fixed at step 9
+        step 5: AttributeError: 'Atoms' object has no attribute 'spacegroup'
+    - documentation lookups, grouped by what the agent did next:
+        setup_jobs.py: 6 lookup(s) (steps 18-24): ase.io.espresso write_espresso_in input_data
+        format namelist; ase.io.espresso write_espresso_in kpoints kpts format; ase.io.espresso
+        write_espresso_in noncolin lspinorb spin orbit system ; ase.io.espresso write_espresso_in
+        kpts numpy array crystal coordinates; ase.io.espresso write_espresso_in pseudopotentials
+        parameter format di; ase.io.espresso write_fortran_namelist bands.x BANDS namelist filband
+        reduce_primitive.py: 1 lookup(s) (step 6): ASE Atoms object space group symmetry information
+        from CIF metadata
+    - notes where the agent flagged doubt or an assumption:
+        step 3: CsPbBr3 cubic perovskite: conventional cell has 5 atoms (Cs at 0,0,0; Pb at
+                1/2,1/2,1/2; 3 Br at face positions) -- primitive cell of Pm-3m perovskite is the
+                same 5-atom cell (simple cubic lattice, 1 formula unit), so reduction sh
+        step 13: Let me verify: omega_e = kB*100/hbar = 1.38e-23*100/1.055e-34 = 1.31e13 rad/s.
+        step 32: First I need to check what files bands.x actually produced (000.bands.dat and/or
+                 .gnu file), read the 'number of electrons' from pw.out to verify nbnd, and read
+                 band_labels.dat to understand the label format.
+        step 34: I need to: (1) check what files exist in calculations/000/ (000.bands.dat, possibly
+                 .gnu), (2) read 'number of electrons' from pw.out to verify nbnd, (3) read
+                 band_labels.dat format, (4) write plot_bands.py that reads 000.bands.da
+        step 36: I need to: (1) read 000.bands.dat to understand its format, (2) read 'number of
+                 electrons' from pw.out to verify nbnd, (3) write plot_bands.py.
+        step 38: Need to: (1) read 'number of electrons' from pw.out to verify nbnd, (2) write
+                 plot_bands.py that parses 000.bands.dat, aligns to VBM using occupied-band count
+                 from pw.out, puts ticks in same x units (cumulative path distance), lab
+    - caveats in the agent's done summary:
+        * Items needing expert review:
