@@ -22,8 +22,10 @@ Perlmutter, so `DFTAgent()` with no arguments reproduces it:
     model           Qwen/Qwen3.8-27B (local; backend "qwen")
     generation      max_new_tokens=5000, greedy (do_sample=False)
     agent loop      max_steps=80, max_history=32, trim_history=True, read_max_chars=10000
-    Quantum ESPRESSO pw.x / bands.x, serial, OMP_NUM_THREADS=1, 2 h timeout,
-                    module espresso/7.5-libxc-7.0.0-cpu  (on Perlmutter only)
+    Quantum ESPRESSO pw.x / bands.x, OMP_NUM_THREADS=1, 2 h timeout; on Perlmutter
+                    the GPU build (module espresso/7.5-libxc-7.0.0-gpu-cu13) on
+                    "srun -n 4 -c 32 --gpus-per-task=1 --gpu-bind=closest", pw.x -nk 4;
+                    elsewhere serial with no module
     model cache     $HF_HOME, else $PSCRATCH/huggingface (on NERSC), else ~/.cache
     docs index      ./retrieval_index/ase
     runs            ./chem_llm_runs/<compound>
@@ -81,12 +83,49 @@ def _path(value) -> Path | None:
     return Path(value).expanduser().resolve() if value else None
 
 
-# The Quantum ESPRESSO build this project was developed against.
-PERLMUTTER_QE_MODULE = "espresso/7.5-libxc-7.0.0-cpu"
+# The Quantum ESPRESSO builds on NERSC Perlmutter. The GPU build is the
+# default there; the CPU build is for runs on CPU-only nodes.
+PERLMUTTER_QE_MODULE = "espresso/7.5-libxc-7.0.0-gpu-cu13"
+PERLMUTTER_QE_MODULE_CPU = "espresso/7.5-libxc-7.0.0-cpu"
+
+
+def _on_perlmutter() -> bool:
+    return os.environ.get("NERSC_HOST") == "perlmutter"
+
+
+def _gpus_on_node() -> int:
+    """GPUs in this Slurm allocation's node (Perlmutter GPU nodes have 4)."""
+    try:
+        return int(os.environ.get("SLURM_GPUS_ON_NODE") or 4)
+    except ValueError:
+        return 4
 
 
 def _default_qe_module() -> str | None:
-    return PERLMUTTER_QE_MODULE if os.environ.get("NERSC_HOST") == "perlmutter" else None
+    return PERLMUTTER_QE_MODULE if _on_perlmutter() else None
+
+
+def _default_mpi_prefix() -> str:
+    """On Perlmutter: one MPI rank per GPU, each bound to its closest GPU.
+
+    -c gives each rank an equal share of the node's CPUs. It is needed when the
+    job was allocated as a single task owning every CPU (e.g. an interactive
+    salloc): srun would otherwise inherit that cpus-per-task for each of the
+    ranks and refuse the step ("More processors requested than permitted").
+    """
+    if not _on_perlmutter():
+        return ""
+    n = _gpus_on_node()
+    try:
+        cpus = int(os.environ.get("SLURM_CPUS_ON_NODE") or 128)
+    except ValueError:
+        cpus = 128
+    return f"srun -n {n} -c {max(1, cpus // n)} --gpus-per-task=1 --gpu-bind=closest"
+
+
+def _default_pw_args() -> str:
+    # one k-point pool per rank (per GPU): the efficient split for small cells
+    return f"-nk {_gpus_on_node()}" if _on_perlmutter() else ""
 
 
 def _default_hf_home() -> Path | None:
@@ -103,8 +142,16 @@ class QESettings:
     Either point `pw_x`/`bands_x` at absolute binaries, or give `module`
     (an Lmod module to load first) and leave the binaries as bare names to
     be found on PATH after the load. `mpi_prefix` is prepended verbatim,
-    e.g. "srun -n 8" or "mpirun -np 4"; leave empty to run serially, which
-    is what a single allocated node without an MPI launcher wants.
+    e.g. "srun -n 8" or "mpirun -np 4"; leave empty to run serially.
+    `pw_args` are extra pw.x command-line flags, e.g. "-nk 4" for four
+    k-point pools.
+
+    On Perlmutter the defaults run the GPU build with one MPI rank per GPU:
+    module espresso/7.5-libxc-7.0.0-gpu-cu13,
+    "srun -n 4 -c 32 --gpus-per-task=1 --gpu-bind=closest", and "-nk 4".
+    For TiO2 that is about 12x (SCF) to 34x (bands) faster than one CPU
+    core, with the same results. Elsewhere the defaults are serial and
+    module-free.
     """
 
     pw_x: str = "pw.x"
@@ -112,16 +159,18 @@ class QESettings:
     # Lmod module loaded before each QE step. Default: the Perlmutter build
     # this project used, when running on Perlmutter; otherwise none.
     module: str | None = field(default_factory=_default_qe_module)
-    mpi_prefix: str = ""
+    mpi_prefix: str = field(default_factory=_default_mpi_prefix)
+    pw_args: str = field(default_factory=_default_pw_args)
     # Pinned to 1 by default: a serial pw.x otherwise spawns one OpenMP
     # thread per core, which for a small cell is heavy oversubscription and
     # is far slower than running single-threaded.
     omp_num_threads: int = 1
     timeout_seconds: int = 7200
 
-    def shell_command(self, exe: str, in_file: str, out_file: str) -> str:
-        """Full shell command for one QE step, including any module load."""
-        launch = f"{self.mpi_prefix} {exe}".strip()
+    def shell_command(self, exe: str, in_file: str, out_file: str, args: str = "") -> str:
+        """Full shell command for one QE step, including any module load.
+        `args` are extra flags for the executable (pw_args for pw.x)."""
+        launch = " ".join(part for part in (self.mpi_prefix, exe, args) if part)
         command = f"{launch} -in {in_file} > {out_file} 2>&1"
         if self.module:
             # Must be in the same shell invocation: an Lmod module is not

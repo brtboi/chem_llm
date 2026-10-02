@@ -156,17 +156,26 @@ def run_python(path: str):
     )
     return {"stdout": result.stdout, "stderr": result.stderr, "returncode": result.returncode}
 
+def _release_cached_gpu_memory() -> None:
+    """Hand GPU memory PyTorch is caching (for the loaded model) back to the
+    driver, so a GPU build of pw.x on the same GPUs can use it. The model's
+    weights stay resident; only the cache from earlier generation is freed."""
+    import sys
+
+    torch = sys.modules.get("torch")  # only if the model already imported it
+    if torch is not None and torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+
 @register_tool(
     "run_espresso_workflow",
     (
         "Run the Quantum ESPRESSO SCF + bands workflow for one calculation "
-        "directory directly on the current node (module-loads 'espresso', then "
-        "runs pw.x for the SCF step, pw.x for the bands step, and bands.x for "
-        "the bands post-processing step, in that order -- three commands total, "
-        "in that order: SCF, bands, bands post-processing). Does NOT use "
-        "srun or sbatch: this assumes the calling process is already running on "
-        "an allocated compute node (e.g. inside the pipeline's own GPU job), so "
-        "the three commands run in-process one after another. Stops and reports "
+        "directory on the current node: pw.x for the SCF step, pw.x for the bands "
+        "step, and bands.x for the bands post-processing step -- three commands, in "
+        "that order. How QE is launched (module, MPI/GPU layout, parallel flags) is "
+        "configured by the harness, not by you; it runs inside the current "
+        "allocation, never through the batch queue. Stops and reports "
         "failure at the first step that errors, without running later steps. "
         "The SCF, bands, and bands-post-processing input files must already "
         "exist in `directory` (as written by setup_jobs.py).\n"
@@ -219,14 +228,15 @@ def run_espresso_workflow(
     qe = settings.qe
 
     steps = [
-        ("scf", qe.pw_x, pw_input, "pw.out"),
-        ("bands_scf", qe.pw_x, bands_input, "bands_pw.out"),
-        ("bands_post", qe.bands_x, bands_post_input, "bands_post.out"),
+        ("scf", qe.pw_x, qe.pw_args, pw_input, "pw.out"),
+        ("bands_scf", qe.pw_x, qe.pw_args, bands_input, "bands_pw.out"),
+        ("bands_post", qe.bands_x, "", bands_post_input, "bands_post.out"),
     ]
+    _release_cached_gpu_memory()
 
     completed = []
     outputs = {}
-    for name, exe, in_file, out_file in steps:
+    for name, exe, args, in_file, out_file in steps:
         if not (work_dir / in_file).exists():
             return {
                 "success": False,
@@ -234,7 +244,7 @@ def run_espresso_workflow(
                 "completed_steps": completed,
             }
 
-        command = qe.shell_command(exe, in_file, out_file)
+        command = qe.shell_command(exe, in_file, out_file, args)
         # Without OMP_NUM_THREADS pinned, pw.x/bands.x default to one OpenMP
         # thread per core on the node for every k-point's serial
         # diagonalization -- for a small unit cell that's massive

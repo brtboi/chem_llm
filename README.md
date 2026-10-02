@@ -64,8 +64,9 @@ Perlmutter. `DFTAgent.default_settings()` returns them as an editable object.
 | model | `Qwen/Qwen3.8-27B`, local (`backend="qwen"`) |
 | generation | `max_new_tokens=5000`, greedy (`do_sample=False`) |
 | agent loop | `max_steps=80`, `max_history=32`, `trim_history=True`, `read_max_chars=10000` |
-| Quantum ESPRESSO | `pw.x` / `bands.x`, serial, `OMP_NUM_THREADS=1`, 2 h timeout per step |
-| QE module | `espresso/7.5-libxc-7.0.0-cpu` on Perlmutter, none elsewhere |
+| Quantum ESPRESSO | `pw.x` / `bands.x`, `OMP_NUM_THREADS=1`, 2 h timeout per step |
+| QE on Perlmutter | GPU build `espresso/7.5-libxc-7.0.0-gpu-cu13`, one MPI rank per GPU: `srun -n 4 -c 32 --gpus-per-task=1 --gpu-bind=closest pw.x -nk 4` |
+| QE elsewhere | serial, no module |
 | model cache | `$HF_HOME`, else `$PSCRATCH/huggingface` on NERSC, else `~/.cache/huggingface` |
 | docs index | `./retrieval_index/ase` |
 | runs | `./chem_llm_runs/<compound>` |

@@ -136,7 +136,7 @@ class DFTAgent:
                 scratch -- the weights are tens of GB.
     hf_token, mp_api_key, anthropic_api_key:
                 credentials; otherwise the Settings / environment values.
-    pw_x, bands_x, qe_module, mpi_prefix, omp_num_threads, qe_timeout_seconds:
+    pw_x, bands_x, qe_module, mpi_prefix, pw_args, omp_num_threads, qe_timeout_seconds:
                 how to run Quantum ESPRESSO (settings.qe).
     docs:       a DocumentationIndex or a path to one (settings.doc_index_dir).
     max_steps, max_history, trim_history, max_new_tokens, temperature, do_sample:
@@ -157,6 +157,7 @@ class DFTAgent:
         bands_x: str | None = None,
         qe_module: str | None = None,
         mpi_prefix: str | None = None,
+        pw_args: str | None = None,
         omp_num_threads: int | None = None,
         qe_timeout_seconds: int | None = None,
         docs: "DocumentationIndex | str | Path | None" = None,
@@ -189,7 +190,7 @@ class DFTAgent:
             s.hf_home = Path(hf_home).expanduser().resolve()
         if work_root is not None:
             s.work_root = Path(work_root).expanduser().resolve()
-        override(s.qe, pw_x=pw_x, bands_x=bands_x, module=qe_module, mpi_prefix=mpi_prefix,
+        override(s.qe, pw_x=pw_x, bands_x=bands_x, module=qe_module, mpi_prefix=mpi_prefix, pw_args=pw_args,
                  omp_num_threads=omp_num_threads, timeout_seconds=qe_timeout_seconds)
         override(s.model, backend=backend, qwen_model=model, max_new_tokens=max_new_tokens,
                  temperature=temperature, do_sample=do_sample, claude_model=claude_model,
@@ -212,8 +213,9 @@ class DFTAgent:
             model           Qwen/Qwen3.8-27B, local ("qwen" backend)
             generation      max_new_tokens=5000, greedy (do_sample=False)
             agent loop      max_steps=80, max_history=32, trim_history=True, read_max_chars=10000
-            QE              pw.x / bands.x, serial, OMP_NUM_THREADS=1, 2 h timeout,
-                            module espresso/7.5-libxc-7.0.0-cpu on Perlmutter
+            QE              pw.x / bands.x, OMP_NUM_THREADS=1, 2 h timeout; on Perlmutter
+                            the GPU build, one MPI rank per GPU via srun, pw.x -nk 4;
+                            serial elsewhere
             model cache     $HF_HOME, else $PSCRATCH/huggingface on NERSC
             docs index      ./retrieval_index/ase
             runs            ./chem_llm_runs/<compound>
