@@ -467,7 +467,9 @@ def get_pseudopotential(
     result = {"success": True, "element": element, "output_path": str(saved_path), "requested": {**spec, "format": format}}
 
     # Facts from the file itself -- the authority on what QE will actually use.
-    if str(saved_path).lower().endswith(".upf"):
+    # Decided by the requested format, not the file name: agents pick names
+    # like "Ti.pbesol_upf" with no .upf extension.
+    if str(format).lower() == "upf" or str(saved_path).lower().endswith(".upf"):
         try:
             result["file"] = read_upf_header(saved_path)
         except ValueError as e:
