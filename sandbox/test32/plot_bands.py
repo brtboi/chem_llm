@@ -3,302 +3,259 @@
 plot_bands.py: Plot the band structure for calculations/000.
 
 Reads:
-  - calculations/000/000.bands.dat (primary filband file from bands.x)
-    Format: header '&plot nbnd=..., nks=... /' then for each k-point:
-      a line with 3 cartesian k-coordinates (kx ky kz in 2*pi/alat)
-      followed by nbnd lines of energies (one per band, in eV)
-  - calculations/000/band_labels.dat (label and 0-based index for each
-    high-symmetry point)
-  - calculations/000/pw.out (to read 'number of electrons' for VBM alignment)
+  - calculations/000/000.bands.dat (bands.x primary output: cartesian k-coords + energies)
+  - calculations/000/band_labels.dat (high-symmetry labels and 0-based indices)
+  - calculations/000/pw.out (to get 'number of electrons' for VBM alignment)
 
-Steps:
-  1. Parse 000.bands.dat: extract k-points (cartesian) and band energies.
-  2. Compute cumulative path distance from consecutive k-points.
-     At a discontinuity (jump in k-space), add NO distance (x stays the same
-     for the new segment's start point, so the plot shows a vertical gap).
-     Assert x values never decrease.
-  3. Read 'number of electrons' from pw.out -> occupied bands = n_elec/2.
-     VBM = highest occupied band energy (band index = occupied-1, 0-based).
-  4. Align all energies to VBM (subtract VBM energy).
-  5. Read band_labels.dat for tick positions (0-based index -> x coordinate).
-  6. Plot with matplotlib: y range +/-10 eV around VBM, ticks at high-symmetry
-     points, no line across discontinuities.
-  7. Save to calculations/000/bands_000.pdf.
-  8. Print VBM, CBM, and band gap.
+Writes:
+  - calculations/000/bands_000.pdf
+
+Prints:
+  - VBM, CBM, and band gap (in eV)
+
+Key details:
+  - The .bands.dat file has cartesian k-coordinates (2*pi/alat), NOT cumulative distance.
+    We compute cumulative path distance ourselves, adding NO distance across a
+    discontinuity (detected via band_labels.dat labels containing '|').
+  - VBM alignment: occupied bands = n_electrons / 2 (spin-unpolarized, non-metallic).
+    VBM = max energy of the highest occupied band.
+  - Y-axis: +/-10 eV around VBM (INVARIANT 4).
+  - Ticks: at the x positions corresponding to each label's index, in the same
+    cumulative-distance units as the band data (INVARIANT 4).
+  - Discontinuities: no line drawn across the jump; tick labelled 'Z|X' etc.
 """
 
 import numpy as np
-import re
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+import re
+import os
 
 CALC_DIR = 'calculations/000'
-BANDS_DAT = f'{CALC_DIR}/000.bands.dat'
-BAND_LABELS = f'{CALC_DIR}/band_labels.dat'
-PW_OUT = f'{CALC_DIR}/pw.out'
-OUTPUT_PDF = f'{CALC_DIR}/bands_000.pdf'
+BANDS_DAT = os.path.join(CALC_DIR, '000.bands.dat')
+BAND_LABELS = os.path.join(CALC_DIR, 'band_labels.dat')
+PW_OUT = os.path.join(CALC_DIR, 'pw.out')
+OUTPUT_PDF = os.path.join(CALC_DIR, 'bands_000.pdf')
 
 
-def parse_bands_dat(fname):
+def parse_bands_dat(path):
     """
-    Parse the primary filband file (NNN.bands.dat).
+    Parse the bands.x primary output file (NNN.bands.dat).
     
     Format:
-      &plot nbnd=  48, nks=   183 /
-      kx ky kz
-      E1 E2 ... E48   (one line per k-point, 48 energies)
-      kx ky kz
-      E1 E2 ... E48
-      ...
+      Line 1: '&plot nbnd=NN, nks=NNN /'
+      Then for each k-point:
+        Line: kx ky kz  (cartesian coordinates in 2*pi/alat)
+        Lines: nbnd energy values (in eV), spread over multiple lines
     
     Returns:
-      kpts_cart: numpy array (n_kpts, 3) -- cartesian k-coordinates (2*pi/alat)
-      energies: numpy array (n_kpts, nbnd) -- band energies in eV
+      kpts_cart: numpy array (nks, 3) -- cartesian k-coordinates
+      energies: numpy array (nks, nbnd) -- band energies in eV
     """
-    with open(fname, 'r') as f:
+    with open(path, 'r') as f:
         lines = f.readlines()
     
-    # Find the header line
-    header_idx = None
-    for i, line in enumerate(lines):
-        if line.strip().startswith('&plot'):
-            header_idx = i
-            break
-    assert header_idx is not None, f"Could not find '&plot' header in {fname}"
+    # Parse header
+    header = lines[0].strip()
+    m = re.match(r'&plot\s+nbnd=\s*(\d+),\s*nks=\s*(\d+)\s*/', header)
+    assert m, f"Cannot parse header: {header}"
+    nbnd = int(m.group(1))
+    nks = int(m.group(2))
     
-    # Parse nbnd and nks from header (allow spaces after '=')
-    header = lines[header_idx]
-    nbnd_match = re.search(r'nbnd=\s*(\d+)', header)
-    nks_match = re.search(r'nks=\s*(\d+)', header)
-    assert nbnd_match and nks_match, f"Could not parse nbnd/nks from header: {header}"
-    nbnd = int(nbnd_match.group(1))
-    nks = int(nks_match.group(1))
-    
-    # Parse k-points and energies
     kpts_cart = np.zeros((nks, 3))
     energies = np.zeros((nks, nbnd))
     
-    data_lines = lines[header_idx + 1:]
-    # Remove blank lines
-    data_lines = [l for l in data_lines if l.strip()]
+    line_idx = 1
+    for ik in range(nks):
+        # Read k-point coordinates
+        coords = lines[line_idx].split()
+        assert len(coords) == 3, f"Expected 3 coords at line {line_idx+1}, got {len(coords)}"
+        kpts_cart[ik] = [float(coords[0]), float(coords[1]), float(coords[2])]
+        line_idx += 1
+        
+        # Read nbnd energy values (may span multiple lines)
+        vals = []
+        while len(vals) < nbnd:
+            vals.extend(lines[line_idx].split())
+            line_idx += 1
+        assert len(vals) >= nbnd, f"Expected {nbnd} energies for k-point {ik}, got {len(vals)}"
+        energies[ik] = [float(v) for v in vals[:nbnd]]
     
-    # Each k-point block: 1 line of k-coords + 1 line of nbnd energies
-    # (or possibly multiple lines of energies if nbnd is large)
-    # Let's parse more carefully: after the header, the format is:
-    #   kx ky kz
-    #   E1 E2 ... E_nbnd
-    #   kx ky kz
-    #   E1 E2 ... E_nbnd
-    #   ...
-    # But energies might be split across multiple lines if nbnd is large.
-    # Let's read all remaining numbers and group them.
-    
-    all_numbers = []
-    for line in data_lines:
-        nums = line.split()
-        for n in nums:
-            try:
-                all_numbers.append(float(n))
-            except ValueError:
-                pass
-    
-    # Total numbers should be nks * (3 + nbnd)
-    expected = nks * (3 + nbnd)
-    assert len(all_numbers) >= expected, \
-        f"Expected {expected} numbers, got {len(all_numbers)}"
-    
-    for i in range(nks):
-        base = i * (3 + nbnd)
-        kpts_cart[i] = all_numbers[base:base+3]
-        energies[i] = all_numbers[base+3:base+3+nbnd]
+    assert line_idx <= len(lines), f"Read past end of file: line_idx={line_idx}, total={len(lines)}"
     
     return kpts_cart, energies
 
 
-def compute_cumulative_distance(kpts_cart):
+def parse_band_labels(path):
     """
-    Compute cumulative path distance from cartesian k-coordinates.
-    
-    At a discontinuity (where the k-point jumps to a new segment start),
-    we add NO distance -- the x value stays the same, creating a vertical
-    gap in the plot.
-    
-    We detect discontinuities by checking if the distance between consecutive
-    k-points is anomalously large compared to the typical step size.
-    
-    Returns:
-      x: numpy array (n_kpts,) -- cumulative path distance (2*pi/alat)
+    Parse band_labels.dat: each line is 'label index' (0-based index).
+    Returns list of (label, index) sorted by index.
     """
-    n_kpts = len(kpts_cart)
-    x = np.zeros(n_kpts)
-    
-    # Compute all consecutive distances
-    dists = np.zeros(n_kpts - 1)
-    for i in range(n_kpts - 1):
-        dists[i] = np.linalg.norm(kpts_cart[i+1] - kpts_cart[i])
-    
-    # Typical step size: median of the smallest distances
-    # (interior points are evenly spaced, so most distances are similar)
-    # Use the 10th percentile as a robust estimate of the step size
-    step_size = np.percentile(dists, 10)
-    
-    # A discontinuity is where the distance is much larger than the step size
-    # (e.g., > 3x the step size)
-    discontinuity_threshold = 3.0 * step_size
-    
-    for i in range(n_kpts - 1):
-        if dists[i] > discontinuity_threshold:
-            # Discontinuity: do NOT add distance
-            x[i+1] = x[i]
-        else:
-            x[i+1] = x[i] + dists[i]
-    
-    # Assert x never decreases
-    assert np.all(np.diff(x) >= -1e-10), \
-        f"Cumulative distance decreases somewhere: min diff = {np.min(np.diff(x))}"
-    
-    return x
+    labels = []
+    with open(path, 'r') as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split()
+            assert len(parts) == 2, f"Expected 'label index', got: {line}"
+            label = parts[0]
+            idx = int(parts[1])
+            labels.append((label, idx))
+    labels.sort(key=lambda x: x[1])
+    return labels
 
 
-def read_number_of_electrons(pw_out_path):
+def get_n_electrons(pw_out_path):
     """
     Read 'number of electrons' from pw.out.
-    Returns the number of electrons (float).
     """
     with open(pw_out_path, 'r') as f:
         for line in f:
             if 'number of electrons' in line:
                 # Format: 'number of electrons       =        48.00'
-                match = re.search(r'number of electrons\s*=\s*([\d.]+)', line)
-                assert match, f"Could not parse number of electrons from: {line}"
-                return float(match.group(1))
-    raise ValueError(f"Could not find 'number of electrons' in {pw_out_path}")
+                m = re.search(r'number of electrons\s*=\s*([\d.]+)', line)
+                assert m, f"Cannot parse electron count from: {line}"
+                return float(m.group(1))
+    raise ValueError("'number of electrons' not found in pw.out")
 
 
-def read_band_labels(fname):
+def compute_cumulative_distance(kpts_cart, discontinuity_indices):
     """
-    Read band_labels.dat: each line is 'label index' (0-based index).
-    Returns list of (label, index) tuples.
+    Compute cumulative path distance from cartesian k-coordinates.
+    
+    At a discontinuity (index in discontinuity_indices), NO distance is added
+    from the previous point -- the x value stays the same.
+    
+    Args:
+      kpts_cart: (nks, 3) array of cartesian k-coordinates
+      discontinuity_indices: set of 0-based indices where a discontinuity occurs
+                             (i.e., the k-point at this index is the START of a
+                             new segment after a jump, so no distance is added
+                             from the previous point to this one)
+    
+    Returns:
+      x: (nks,) array of cumulative distances (non-decreasing)
     """
-    labels = []
-    with open(fname, 'r') as f:
-        for line in f:
-            parts = line.strip().split()
-            if len(parts) >= 2:
-                label = parts[0]
-                idx = int(parts[1])
-                labels.append((label, idx))
-    return labels
+    nks = len(kpts_cart)
+    x = np.zeros(nks)
+    
+    for i in range(1, nks):
+        if i in discontinuity_indices:
+            # Discontinuity: no distance added
+            x[i] = x[i - 1]
+        else:
+            # Normal step: add Euclidean distance in cartesian k-space
+            dk = kpts_cart[i] - kpts_cart[i - 1]
+            x[i] = x[i - 1] + np.linalg.norm(dk)
+    
+    # INVARIANT 4: assert x never decreases
+    diffs = np.diff(x)
+    assert np.all(diffs >= -1e-12), \
+        f"Cumulative distance decreases somewhere: min diff = {diffs.min()}"
+    
+    return x
 
 
 def main():
-    # 1. Parse bands data
+    # --- Parse input files ---
     kpts_cart, energies = parse_bands_dat(BANDS_DAT)
-    n_kpts, nbnd = energies.shape
-    print(f"Parsed {n_kpts} k-points, {nbnd} bands from {BANDS_DAT}")
+    labels = parse_band_labels(BAND_LABELS)
+    n_electrons = get_n_electrons(PW_OUT)
     
-    # 2. Compute cumulative distance
-    x = compute_cumulative_distance(kpts_cart)
-    print(f"Cumulative distance range: {x[0]:.4f} to {x[-1]:.4f} (2*pi/alat)")
+    nks, nbnd = energies.shape
+    print(f"Parsed {BANDS_DAT}: nks={nks}, nbnd={nbnd}")
+    print(f"Parsed {BAND_LABELS}: {len(labels)} labels")
+    print(f"Number of electrons from pw.out: {n_electrons}")
     
-    # 3. Read number of electrons from pw.out
-    n_elec = read_number_of_electrons(PW_OUT)
-    occupied_bands = int(n_elec / 2)  # spin-unpolarized
-    print(f"Number of electrons: {n_elec}, occupied bands: {occupied_bands}")
+    # --- VBM alignment (INVARIANT 2) ---
+    # Spin-unpolarized, non-metallic: occupied bands = n_electrons / 2
+    n_occ = int(n_electrons / 2)
+    assert n_occ * 2 == int(n_electrons), \
+        f"n_electrons={n_electrons} is not even -- cannot determine occupied bands"
+    assert n_occ <= nbnd, \
+        f"Occupied bands ({n_occ}) > nbnd ({nbnd}) -- nbnd is too small"
     
-    # VBM: highest occupied band (band index = occupied_bands - 1, 0-based)
-    # Find the maximum energy among occupied bands at all k-points
-    vbm = np.max(energies[:, :occupied_bands])
-    print(f"VBM (raw): {vbm:.4f} eV")
+    # VBM = max energy of the highest occupied band (0-based index n_occ-1)
+    vbm = np.max(energies[:, n_occ - 1])
+    # CBM = min energy of the lowest conduction band (0-based index n_occ)
+    cbm = np.min(energies[:, n_occ:])
+    gap = cbm - vbm
     
-    # CBM: lowest unoccupied band (band index = occupied_bands, 0-based)
-    cbm = np.min(energies[:, occupied_bands:])
-    print(f"CBM (raw): {cbm:.4f} eV")
+    print(f"\nVBM = {vbm:.4f} eV")
+    print(f"CBM = {cbm:.4f} eV")
+    print(f"Band gap = {gap:.4f} eV")
     
-    # Band gap
-    band_gap = cbm - vbm
-    print(f"Band gap: {band_gap:.4f} eV")
+    # Shift energies so VBM = 0
+    energies_shifted = energies - vbm
     
-    # 4. Align energies to VBM
-    energies_aligned = energies - vbm
-    
-    # 5. Read band labels
-    labels = read_band_labels(BAND_LABELS)
-    print(f"Band labels: {labels}")
-    
-    # Map labels to x positions
-    tick_positions = []
-    tick_labels = []
+    # --- Compute cumulative distance ---
+    # Discontinuity indices: labels containing '|' mark the START of a new
+    # segment after a jump. At these indices, no distance is added.
+    discontinuity_indices = set()
     for label, idx in labels:
-        assert 0 <= idx < n_kpts, f"Label index {idx} out of range [0, {n_kpts})"
-        tick_positions.append(x[idx])
-        tick_labels.append(label)
+        if '|' in label:
+            discontinuity_indices.add(idx)
     
-    # INVARIANT 4: assert tick positions span approximately the same range
-    # as the band data's x column
-    assert abs(max(tick_positions) - x[-1]) < 0.05 * x[-1], \
-        f"Tick positions ({max(tick_positions):.4f}) don't match x range ({x[-1]:.4f})"
+    x = compute_cumulative_distance(kpts_cart, discontinuity_indices)
     
-    # 6. Plot
+    # --- Verify tick positions span the same range as the band data (INVARIANT 4) ---
+    tick_positions = [x[idx] for _, idx in labels]
+    assert abs(max(tick_positions) - x.max()) < 0.05 * x.max(), \
+        f"Tick positions ({min(tick_positions)} to {max(tick_positions)}) " \
+        f"do not span the band data range (0 to {x.max()})"
+    
+    print(f"\nCumulative distance range: 0 to {x.max():.4f} (2*pi/alat)")
+    print(f"Discontinuity indices: {sorted(discontinuity_indices)}")
+    
+    # --- Plot ---
     fig, ax = plt.subplots(figsize=(10, 6))
     
-    # Plot all bands, but restrict y-axis to +/-10 eV around VBM
-    y_min = -10.0
-    y_max = 10.0
+    # Plot bands, splitting at discontinuities so no line is drawn across jumps
+    # Identify the segments: each discontinuity index starts a new segment
+    # (the point at the discontinuity index is the first point of the new segment)
     
-    # We need to split the plot at discontinuities (where x doesn't increase)
-    # Find discontinuity indices
-    disc_indices = []
-    for i in range(1, n_kpts):
-        if x[i] - x[i-1] < 1e-10:  # no distance added -> discontinuity
-            disc_indices.append(i)
+    # Build a list of (start_idx, end_idx) for each continuous segment
+    # A segment ends just before a discontinuity index (exclusive)
+    # and starts at 0 or at a discontinuity index (inclusive)
     
-    # Build segments: list of (start_idx, end_idx) inclusive
-    segments = []
-    seg_start = 0
-    for i in disc_indices:
-        segments.append((seg_start, i - 1))
-        seg_start = i
-    segments.append((seg_start, n_kpts - 1))
+    # The discontinuity indices are where a NEW segment starts.
+    # So the segments are:
+    #   [0, d1), [d1, d2), [d2, ...)
+    # where d1, d2, ... are the discontinuity indices.
     
-    for band_idx in range(nbnd):
-        for seg_start, seg_end in segments:
-            x_seg = x[seg_start:seg_end+1]
-            e_seg = energies_aligned[seg_start:seg_end+1, band_idx]
-            # Only plot if any energy is in the y range
-            if np.any((e_seg >= y_min) & (e_seg <= y_max)):
-                ax.plot(x_seg, e_seg, 'b-', linewidth=0.5)
+    disc_sorted = sorted(discontinuity_indices)
     
-    # Add tick marks at high-symmetry points
-    ax.set_xticks(tick_positions)
-    ax.set_xticklabels(tick_labels, rotation=45, ha='right')
+    # Build segment boundaries
+    boundaries = [0] + disc_sorted + [nks]
     
-    # Draw vertical lines at discontinuities
-    for i in disc_indices:
-        ax.axvline(x=x[i], color='gray', linestyle='--', linewidth=0.5, alpha=0.5)
+    for seg_i in range(len(boundaries) - 1):
+        seg_start = boundaries[seg_i]
+        seg_end = boundaries[seg_i + 1]  # exclusive
+        
+        # Plot all bands in this segment
+        for ib in range(nbnd):
+            ax.plot(x[seg_start:seg_end], energies_shifted[seg_start:seg_end, ib],
+                    'b-', linewidth=0.5, alpha=0.7)
     
-    # Labels and formatting
-    ax.set_xlabel(r'k-path (2$\pi$/a)')
+    # Add high-symmetry point ticks
+    for label, idx in labels:
+        xpos = x[idx]
+        ax.axvline(x=xpos, color='gray', linestyle='--', linewidth=0.5, alpha=0.5)
+        ax.text(xpos, -10.5, label, ha='center', va='top', fontsize=9)
+    
+    # Y-axis: +/-10 eV around VBM (INVARIANT 4)
+    ax.set_ylim(-10, 10)
+    ax.set_xlim(0, x.max())
+    ax.set_xlabel('k-path (2$\pi$/a$_{lat}$)')
     ax.set_ylabel('Energy (eV)')
-    ax.set_title(r'TiO$_2$ (rutile) Band Structure - PBEsol')
-    ax.set_ylim(y_min, y_max)
+    ax.set_title('TiO$_2$ (rutile) band structure -- PBESOL, 6-atom primitive cell')
     ax.axhline(y=0, color='red', linestyle=':', linewidth=0.5, alpha=0.5)
-    ax.grid(True, alpha=0.3)
     
     plt.tight_layout()
-    plt.savefig(OUTPUT_PDF, dpi=150, bbox_inches='tight')
-    print(f"Saved plot to {OUTPUT_PDF}")
-    
-    # 7. Print summary
-    print(f"\n=== Band Structure Summary ===")
-    print(f"VBM: {vbm:.4f} eV (raw)")
-    print(f"CBM: {cbm:.4f} eV (raw)")
-    print(f"Band gap: {band_gap:.4f} eV")
-    print(f"Occupied bands: {occupied_bands}")
-    print(f"Total bands: {nbnd}")
-    print(f"K-points: {n_kpts}")
-    print(f"Discontinuities at indices: {disc_indices}")
+    plt.savefig(OUTPUT_PDF, dpi=150)
+    print(f"\nSaved plot to {OUTPUT_PDF}")
 
 
 if __name__ == '__main__':

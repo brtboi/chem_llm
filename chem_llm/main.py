@@ -110,7 +110,12 @@ def main(argv=None) -> int:
             verbose=not args.quiet,
         )
     if args.pretty_print:
-        print(result.report(), end="")
+        try:
+            print(result.report(), end="")
+        except Exception as e:  # the run is logged; never leave stdout empty
+            print(result)
+            print(f"(could not build the run summary: {type(e).__name__}: {e}; "
+                  f"retry with: chem-llm --summarize {result.work_dir})")
         return 0 if result.ok else 1
     print(result)
     print("work dir:", result.work_dir)
