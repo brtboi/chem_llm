@@ -41,6 +41,7 @@ class RunResult:
     band_gap: float | None = None  # eV, from the bands output
     plot: Path | None = None
     state: Any = None              # the full AgentState
+    config: dict | None = None     # DFTAgent.run_config() for this run
 
     def report(self) -> str:
         """A readable summary of the run: what the agent did, its results and
@@ -56,6 +57,7 @@ class RunResult:
             model=self.model,
             compound=self.compound,
             spacegroup=self.spacegroup,
+            config=self.config,
         )
 
     @property

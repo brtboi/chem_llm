@@ -755,6 +755,7 @@ def run_agent(
     load_deepseudopot: bool = False,
     step_source=None,
     model_name: str = MODEL_NAME,
+    log_extra: dict | None = None,
 ) -> AgentState:
     """Run the agent live: the model generates each tool call. Executes in
     `work_dir` (defaults to config.WORK_DIR) and logs to `log_file`
@@ -785,6 +786,6 @@ def run_agent(
 
     if log_file:
         print("logging to...", log_file)
-        append_log(log_file, build_log_entry(state, start_time, work_dir, clear_dir, load_path, model_name))
+        append_log(log_file, build_log_entry(state, start_time, work_dir, clear_dir, load_path, model_name, extra=log_extra))
 
     return state

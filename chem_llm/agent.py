@@ -360,7 +360,9 @@ class DFTAgent:
             functional=functional,
         )
 
+        config = self.run_config(prompt)
         kwargs = dict(
+            log_extra={"config": config},
             step_source=self._loaded.step_source_factory(s, verbose),
             model_name=self._loaded.name,
             work_dir=work_dir,
@@ -406,7 +408,36 @@ class DFTAgent:
             band_gap=found.get("band_gap"),
             plot=found.get("plot"),
             state=state,
+            config=config,
         )
+
+    def run_config(self, task: str | None = None) -> dict:
+        """What this agent runs with, as recorded with each run (no
+        credentials): model and decoding, loop and history settings, prompt
+        sizes, and how Quantum ESPRESSO is launched."""
+        from .agent_core import SYSTEM_PROMPT_TEMPLATE
+        from .tools import TOOLS
+
+        s = self.settings
+        decoding = ({"max_new_tokens": s.model.max_new_tokens, "do_sample": s.model.do_sample,
+                     **({"temperature": s.model.temperature} if s.model.do_sample else {})}
+                    if self.backend == "qwen" else
+                    {"max_tokens": s.model.claude_max_tokens, "effort": s.model.claude_effort})
+        return {
+            "backend": self.backend,
+            "model": self.model_name,
+            "decoding": decoding,
+            "max_steps": s.agent.max_steps,
+            "max_history": s.agent.max_history,
+            "trim_history": s.agent.trim_history,
+            "read_max_chars": s.agent.read_max_chars,
+            "system_prompt_chars": len(SYSTEM_PROMPT_TEMPLATE),
+            "task_chars": len(task) if task else None,
+            "tools": [t["name"] for t in TOOLS],
+            "qe_command": s.qe.shell_command(s.qe.pw_x, "pw.in", "pw.out"),
+            "qe_omp_threads": s.qe.omp_num_threads,
+            "chem_llm_version": __import__("chem_llm").__version__,
+        }
 
     def __repr__(self) -> str:
         loaded = "loaded" if self._loaded else "not loaded"
