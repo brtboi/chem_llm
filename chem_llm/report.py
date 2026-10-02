@@ -146,6 +146,40 @@ def _displacement_lines(content: str) -> list[str]:
     return out[:6]
 
 
+def _measured_perturbations(structures: Path, finished_at: float | None) -> str | None:
+    """Per-species per-axis RMS displacement and RMS strain, measured from
+    the structures the agent wrote (structure_000 = unperturbed base)."""
+    base_file = structures / "structure_000.cif"
+    others = sorted(structures.glob("structure_[0-9][0-9][0-9].cif"))[1:]
+    if not base_file.exists() or not others:
+        return None
+    if finished_at is not None and any(f.stat().st_mtime > finished_at + 60 for f in [base_file, *others]):
+        return None  # written by a later run
+    try:
+        import numpy as np
+        from ase.io import read
+
+        base = read(base_file)
+        symbols = base.get_chemical_symbols()
+        disp = {s: [] for s in dict.fromkeys(symbols)}
+        strains = []
+        for f in others:
+            a = read(f)
+            if len(a) != len(base):
+                return None
+            d = a.get_scaled_positions() - base.get_scaled_positions()
+            d -= np.round(d)
+            for s, v in zip(symbols, d @ a.cell[:]):
+                disp[s].append(v)
+            deform = np.linalg.solve(base.cell[:], a.cell[:]).T
+            strains.append(0.5 * (deform + deform.T) - np.eye(3))
+    except Exception:
+        return None
+    per = ", ".join(f"{s} {np.sqrt((np.array(v) ** 2).mean()):.3f}" for s, v in disp.items())
+    strain = np.sqrt((np.array(strains) ** 2).mean()) * 100
+    return f"measured over {len(others)} structures: per-axis RMS displacement {per} A; RMS strain {strain:.2f}%"
+
+
 def _kpath(bands_in: str | None, labels_txt: str | None) -> dict:
     """The bands k-path: type, points, labels, discontinuities and segment
     endpoints (the same reading validate_qe_input's k-path check uses)."""
@@ -187,8 +221,8 @@ def _summary_sections(text: str | None) -> dict[str, str]:
     """The done summary's 'HEADING:' sections (newer runs write them)."""
     if not text:
         return {}
-    parts = re.split(r"(?m)^\s*([A-Z][A-Z0-9 /&()'-]{3,}):", text)
-    return {parts[i].strip(): parts[i + 1].strip() for i in range(1, len(parts) - 1, 2)}
+    parts = re.split(r"(?m)^\s*([A-Z][A-Z0-9 /&()'-]{3,}|[A-Z][A-Za-z0-9 /&()'-]{3,60}(?=:\s*$)):", text)
+    return {parts[i].strip().upper(): parts[i + 1].strip() for i in range(1, len(parts) - 1, 2)}
 
 
 def _doubt_sentences(texts: list[tuple[int, str]], limit: int = 6) -> list[tuple[int, str]]:
@@ -321,11 +355,16 @@ def summarize_run(
                 chosen.append(_Item(e["step"], "structure: " + (f"{n_base} atoms in the Materials Project cell" if n_base else "")
                                     + (f" -> {n_dft} atoms in the cell used for DFT" if n_dft else "")))
     gen = _structure_script(scripts)
-    if gen:
-        path, s = gen
-        disp = _displacement_lines(s["content"] or "")
-        chosen.append(_Item(s["ok_step"] or s["first"], f"perturbed structures ({_name(path)}): "
-                            + ("; ".join(disp) if disp else "no numeric displacement parameter found in the script")))
+    measured = _measured_perturbations(work_dir / "structures", finished_at)
+    if gen or measured:
+        path, s = gen if gen else (None, {"ok_step": None, "first": None, "content": ""})
+        params = _displacement_lines(s["content"] or "")
+        temp = re.search(r"^\s*(?:T|TEMP\w*|temp\w*|T_K|temperature\w*)\s*=\s*([\d.]+)", s["content"] or "", re.M)
+        parts = [f"T = {temp.group(1)} K (from the script)"] if temp else []
+        parts += [measured] if measured else []
+        parts += [f"script parameters: {'; '.join(params)}"] if params else []
+        where = f" ({_name(path)})" if path else ""
+        chosen.append(_Item(s["ok_step"] or s["first"], f"perturbed structures{where}: " + ("; ".join(parts) or "no parameters found")))
     rels = sorted({e["args"].get("relativity") for e in pseudos if isinstance(e.get("result"), dict) and e["result"].get("success")} - {None})
     if pseudos:
         word = {"sr": "scalar-relativistic", "fr": "fully relativistic (spin-orbit)"}
