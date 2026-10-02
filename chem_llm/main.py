@@ -1,6 +1,7 @@
 """Command-line entry point: `chem-llm <compound> <spacegroup>`.
 
     chem-llm TiO2 P4_2/mnm --name rutile --work-dir runs/tio2
+    chem-llm TiO2 P4_2/mnm --progress                 # readable live stream
     chem-llm TiO2 P4_2/mnm --pretty-print > summary.txt
     chem-llm C Fd-3m --model Qwen/Qwen3.8-27B --pw-x /opt/qe/bin/pw.x
     chem-llm --summarize runs/tio2          # summary of a past run (no GPU)
@@ -21,6 +22,7 @@ import contextlib
 import sys
 
 from .agent import DFTAgent
+from .progress import ProgressPrinter
 from .settings import Settings
 
 
@@ -48,6 +50,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--structures", type=int, default=51, help="Size of the perturbed ensemble.")
     parser.add_argument("--quiet", action="store_true")
 
+    parser.add_argument("--progress", action="store_true",
+                        help="Stream one readable line per action (\"writing setup_jobs.py\", \"running Quantum "
+                             "ESPRESSO ...\") and the agent's notes, instead of raw model output and JSON.")
     parser.add_argument("--pretty-print", action="store_true",
                         help="Print a readable run summary on stdout when done; the live step stream goes to stderr.")
     parser.add_argument("--summarize", metavar="PATH", default=None,
@@ -107,7 +112,8 @@ def main(argv=None) -> int:
             clear_dir=not args.keep,
             log_file=args.log_file,
             n_structures=args.structures,
-            verbose=not args.quiet,
+            verbose=not (args.quiet or args.progress),
+            on_step=ProgressPrinter() if args.progress and not args.quiet else None,
         )
     if args.pretty_print:
         try:

@@ -191,6 +191,7 @@ step** — a full run is 40–60 API calls.
 
 ```bash
 chem-llm TiO2 P4_2/mnm --name rutile --work-dir runs/tio2
+chem-llm TiO2 P4_2/mnm --progress                    # readable live stream
 chem-llm TiO2 P4_2/mnm --pretty-print > summary.txt   # stdout: just the run summary
 chem-llm C Fd-3m --pw-x /opt/qe/bin/pw.x --max-steps 60
 chem-llm --summarize runs/tio2               # summary of a past run (no GPU needed)
@@ -205,7 +206,18 @@ chem-llm-replay-copy 17 25                   # replay sandbox/test17 into sandbo
 (or `--config PATH`), otherwise the defaults.
 
 By default the CLI streams every step (the model's raw output, the tool call, the full tool
-result) to stdout. With `--pretty-print` that stream goes to stderr, and stdout gets only a
+result) to stdout. `--progress` streams one readable line per action instead, with the
+agent's notes:
+
+```
+[16 | 09:30] fetching a norm-conserving, scalar-relativistic PBEsol pseudopotential (stringent) for Ti ...
+             -> z_valence 12, recommended ecutwfc 42 Ha
+[21 | 13:02] running setup_jobs.py ...
+             -> FAILED: NameError: name 'Ecutwfc_RY' is not defined
+```
+
+It is formatted from the tool calls and their results, so the model does nothing differently.
+In Python: `agent.run(..., verbose=False, on_step=chem_llm.progress.ProgressPrinter())`. With `--pretty-print` that stream goes to stderr, and stdout gets only a
 readable summary when the run finishes. `--summarize PATH` prints the same summary for any
 recorded run (a work dir or `log.jsonl`; `--index N` picks an earlier run). The summary has
 four sections:
