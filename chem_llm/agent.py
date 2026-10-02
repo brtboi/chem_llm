@@ -327,7 +327,6 @@ class DFTAgent:
         log_file: str | Path | None = None,
         max_steps: int | None = None,
         n_structures: int = 51,
-        relativistic: str = "scalar",
         functional: str = "pbesol",
         task: str | None = None,
         hide_tools=("train_deepseudopot",),
@@ -358,7 +357,6 @@ class DFTAgent:
             spacegroup_number=spacegroup_number,
             spacegroup_name=spacegroup_name,
             n_structures=n_structures,
-            relativistic=relativistic,
             functional=functional,
         )
 

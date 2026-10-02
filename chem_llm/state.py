@@ -30,7 +30,7 @@ class AgentState:
     @staticmethod
     def _summarize_result(result) -> str:
         if isinstance(result, dict):
-            keys = ("output_path", "path", "selected_material_id", "space_group", "hints")
+            keys = ("output_path", "path", "selected_material_id", "space_group", "file", "recommended_ecutwfc")
             summary = {k: result[k] for k in keys if k in result}
             return json.dumps(summary) if summary else str(result)[:200]
         return str(result)[:200]

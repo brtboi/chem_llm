@@ -141,7 +141,6 @@ result = agent.run(
     clear_dir=True,
     log_file="runs/cspbbr3.jsonl",  # default: work_dir / log.jsonl
     n_structures=51,                # size of the perturbed ensemble
-    relativistic="scalar",          # or "fully" for spin-orbit
     functional="pbesol",
 )
 ```

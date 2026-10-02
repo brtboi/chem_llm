@@ -5,7 +5,6 @@ import sys
 from ase.io import write as ase_write
 from mp_api.client import MPRester
 from pseudohub import get_pseudo, get_hints
-from pseudohub.exceptions import InvalidParameterError
 # The Materials Project client (mp_api) returns structures as pymatgen
 # Structure objects -- that dependency is unavoidable here since it's baked
 # into mp_api's own return type, not something this codebase chooses. We
@@ -16,6 +15,7 @@ from pymatgen.io.ase import AseAtomsAdaptor
 # Everything machine-specific comes from the running agent's Settings, read
 # at call time -- see chem_llm.settings.active_settings.
 from ..settings import active_settings
+from .upf import read_upf_header
 
 TOOLS: list[dict] = []
 TOOL_DISPATCH: dict[str, callable] = {}
@@ -382,94 +382,86 @@ def generate_cif(
 @register_tool(
     "get_pseudopotential",
     (
-        "Fetch a pseudopotential file for an element from Pseudo-Dojo (via the "
-        "pseudohub package) and save it to disk. Also returns the recommended "
-        "plane-wave energy cutoff (ecut, in Ha) for the requested accuracy level, "
-        "which should be used when building the Quantum ESPRESSO input file. "
-        "Not every (kind, relativity, generator, accuracy) combination has a "
-        "corresponding Pseudo-Dojo table -- if the call fails, check the error "
-        "message's suggestions and retry with a valid combination."
+        "Fetch a pseudopotential for one element from Pseudo-Dojo (via pseudohub) "
+        "and save it to disk. Every parameter is required -- there are no defaults; "
+        "decide each one and say why in a note first. Returns (1) facts read from "
+        "the saved file itself: z_valence (the electrons this pseudopotential treats "
+        "as valence -- sum z_valence over the atoms for the system's electron "
+        "count), its pseudo_type, whether it is scalar- or fully-relativistic, and "
+        "its functional; and (2) Pseudo-Dojo's recommended wavefunction cutoff for "
+        "this same table, IN HARTREE (QE's ecutwfc is in Rydberg: 1 Ha = 2 Ry). "
+        "Not every (kind, relativity, generator, accuracy) combination exists -- "
+        "if the call fails, read the error's suggestions and retry."
     ),
     {
-        "element": (
-            "string or int. Element symbol (e.g. 'Si') or atomic number (e.g. 14)."
-        ),
-        "output_path": "string. Path (file or directory) to save the pseudopotential to. File type must match specified file format.",
-        "kind": "string (optional, default 'nc'). 'nc' or 'paw'.",
-        "relativity": (
-            "string (optional, default 'sr'). 'sr' (scalar-relativistic) or "
-            "'fr' (fully-relativistic; required for spin-orbit coupling)."
-        ),
-        "generator": (
-            "string (optional, default 'pbe'). DFT functional used to generate "
-            "the pseudopotential, e.g. 'pbe', 'pbesol', 'pw'."
-        ),
-        "accuracy": (
-            "string (optional, default 'standard'). 'standard' or 'stringent'."
-        ),
-        "format": (
-            "string (optional, default 'upf'). Pseudopotential file format, "
-            "e.g. 'upf', 'psp8'. Use 'upf' for Quantum ESPRESSO."
-        ),
-        "hint_level": (
-            "string (optional, default 'normal'). Accuracy level used to look up "
-            "the recommended ecut: 'low', 'normal', or 'high'."
-        ),
+        "element": "string or int. Element symbol (e.g. 'Si') or atomic number (e.g. 14).",
+        "output_path": "string. File or directory to save to; a file name's extension must match format.",
+        "kind": "string. 'nc' (norm-conserving) or 'paw'.",
+        "relativity": "string. 'sr' (scalar-relativistic) or 'fr' (fully-relativistic, includes spin-orbit).",
+        "generator": "string. Functional the pseudopotential was generated with, e.g. 'pbe', 'pbesol', 'pw'.",
+        "accuracy": "string. 'standard' or 'stringent'.",
+        "format": "string. File format, e.g. 'upf' (what Quantum ESPRESSO reads) or 'psp8'.",
+        "hint_level": "string. Which recommended cutoff to report as `value`: 'low', 'normal' or 'high'.",
     },
     remember_on=("element", "kind", "relativity", "generator", "accuracy", "format"),
 )
 def get_pseudopotential(
     element: str | int,
     output_path: str,
-    kind: str = "nc",
-    relativity: str = "sr",
-    generator: str = "pbe",
-    accuracy: str = "standard",
-    format: str = "upf",
-    hint_level: str = "normal",
+    kind: str,
+    relativity: str,
+    generator: str,
+    accuracy: str,
+    format: str,
+    hint_level: str,
 ):
+    spec = dict(kind=kind, relativity=relativity, generator=generator, accuracy=accuracy)
     output_path = Path(output_path).resolve()
     target_dir = output_path if output_path.is_dir() else output_path.parent
     target_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        saved_path = get_pseudo(
-            element,
-            kind=kind,
-            relativity=relativity,
-            generator=generator,
-            accuracy=accuracy,
-            format=format,
-            output=str(output_path),
-        )
+        saved_path = get_pseudo(element, format=format, output=str(output_path), **spec)
+    except Exception as e:  # InvalidParameterError carries the valid alternatives
+        return {"success": False, "stderr": str(e)}
 
+    result = {"success": True, "element": element, "output_path": str(saved_path), "requested": {**spec, "format": format}}
+
+    # Facts from the file itself -- the authority on what QE will actually use.
+    if str(saved_path).lower().endswith(".upf"):
         try:
-            hints = get_hints(element, level=hint_level)
-        except Exception:
-            hints = None
+            result["file"] = read_upf_header(saved_path)
+        except ValueError as e:
+            result["file_warning"] = str(e)
+        else:
+            wanted = {"sr": "scalar", "fr": "full"}.get(relativity)
+            if wanted and result["file"]["relativistic"] not in (None, wanted):
+                result["file_warning"] = (
+                    f"requested relativity={relativity!r} but the file says relativistic="
+                    f"{result['file']['relativistic']!r}"
+                )
 
-        return {
-            "success": True,
-            "element": element,
-            "kind": kind,
-            "relativity": relativity,
-            "generator": generator,
-            "accuracy": accuracy,
-            "format": format,
-            "output_path": str(saved_path),
-            "hints": hints,
-        }
-
-    except InvalidParameterError as e:
-        return {
-            "success": False,
-            "stderr": str(e),
+    # Recommended cutoffs from the hints table of the SAME kind/relativity/
+    # generator/accuracy as the file (pseudohub otherwise falls back to the
+    # PBE/standard table, whose cutoffs belong to a different pseudopotential).
+    # pseudohub's "n_valence" is the table's `nv`, a count of valence SHELLS,
+    # not electrons, so it is not passed on; use file.z_valence.
+    try:
+        hints = get_hints(element, level=hint_level, **spec)
+        raw = hints.get("raw", {})
+        result["recommended_ecutwfc"] = {
+            "value": hints.get("ecut"),
+            "level": hint_level,
+            "low": raw.get("hl"),
+            "normal": raw.get("hn"),
+            "high": raw.get("hh"),
+            "unit": "Ha",
         }
     except Exception as e:
-        return {
-            "success": False,
-            "stderr": str(e),
-        }
+        result["recommended_ecutwfc"] = None
+        result["hints_warning"] = f"no Pseudo-Dojo cutoff hints for this table: {e}"
+    return result
+
 
 # --- State-mutating tools (schemas only; behavior lives in agent_core) ---
 TOOLS.append({

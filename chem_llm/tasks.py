@@ -20,7 +20,7 @@ STEP 1: Fetch the base {compound} structure with generate_cif (space group {spac
 
 STEP 2: Write and run generate_structures.py: read the base CIF with ase.io.read, then write {n_structures} structures, structures/structure_000.cif through structure_{last_index:03d}.cif, where 000 is the unperturbed base and the rest are perturbed copies made with chemically reasonable random atomic displacements at room temperature plus a small random lattice strain. Put the chosen displacement magnitude and its justification in a code comment. Assert the nat/ntyp INVARIANT per structure.
 
-STEP 3: Fetch pseudopotentials for every element in {compound} with get_pseudopotential -- norm conserving, {relativistic} relativistic, {functional}, stringent, UPF -- into template/. Record the recommended cutoff it returns AND the unit that comes with it; you will need it in STEP 4, converted per INVARIANT 5.
+STEP 3: Fetch pseudopotentials for every element in {compound} with get_pseudopotential -- norm conserving, {functional}, stringent, UPF -- into template/. get_pseudopotential has no defaults: decide the relativity (scalar or fully relativistic) yourself from the pseudopotential DECISION RULE, and choose hint_level, writing both decisions and their reasons in a note before the first call. From each result record file.z_valence, file.relativistic, and the recommended cutoff AND the unit that comes with it; you will need them in STEP 4, converted per INVARIANT 5.
 
 STEP 4: Before writing setup_jobs.py, write a note deciding every pw.x setting for the SCF and bands calculations (calculation, prefix, outdir, pseudo_dir, ecutwfc/ecutrho, occupations, conv_thr, SCF k-point mesh, nbnd for bands) and the bands.x post-processing namelist (&BANDS: prefix, outdir, filband). For every option carrying a unit, write down the unit and any conversion you applied (INVARIANT 5). Use search_docs for anything you are unsure about.
 
@@ -48,7 +48,6 @@ def build_task(
     spacegroup_number: int | None = None,
     spacegroup_name: str = "",
     n_structures: int = 51,
-    relativistic: str = "scalar",
     functional: str = "pbesol",
     template: str = BAND_STRUCTURE_TASK,
 ) -> str:
@@ -69,6 +68,5 @@ def build_task(
         spacegroup_name=spacegroup_name,
         n_structures=n_structures,
         last_index=n_structures - 1,
-        relativistic=relativistic,
         functional=functional,
     )
