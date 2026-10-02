@@ -636,22 +636,37 @@ def _confirm_clear_dir(directory: Path) -> bool:
 
 
 def clear_directory(directory: Path) -> None:
-    """Delete every top-level entry in `directory` except *.jsonl log
-    files, after an interactive stdin confirmation. Raises RuntimeError if
-    the user declines, or if `directory` fails the dangerous-target guard.
+    """Delete everything in `directory` except *.jsonl log files -- at any
+    depth, so the log of a run kept in a subdirectory survives too -- after
+    an interactive stdin confirmation. Directories left empty are removed;
+    a directory that still holds a log keeps just that log. Raises
+    RuntimeError if the user declines, or if `directory` fails the
+    dangerous-target guard.
     """
     _guard_clear_target(directory)
 
     if not _confirm_clear_dir(directory):
         raise RuntimeError(f"clear_dir cancelled by user for {directory}")
 
+    _clear_keeping_logs(directory)
+
+
+def _clear_keeping_logs(directory: Path) -> bool:
+    """Remove everything under `directory` except *.jsonl files. Returns
+    whether anything was kept (so the caller knows if it may rmdir it)."""
+    kept = False
     for entry in directory.iterdir():
-        if entry.is_file() and entry.suffix == ".jsonl":
-            continue
-        if entry.is_dir():
-            shutil.rmtree(entry)
-        else:
-            entry.unlink()
+        if entry.is_symlink() or entry.is_file():
+            if entry.suffix == ".jsonl" and not entry.is_symlink():
+                kept = True
+            else:
+                entry.unlink()
+        elif entry.is_dir():
+            if _clear_keeping_logs(entry):
+                kept = True
+            else:
+                entry.rmdir()
+    return kept
 
 def copy_to_cwd(load_path) -> None:
     if load_path is None:
