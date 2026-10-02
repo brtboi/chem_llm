@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 from ase.io import write as ase_write
@@ -72,6 +73,23 @@ def make_dir(path: str):
         return {"success": False, "stderr": str(e)}
 
 
+# Files Quantum ESPRESSO writes; reading one that predates the inputs next to
+# it means reading the result of an earlier run.
+_QE_OUTPUT = re.compile(r"(\.out|^CRASH|\.bands\.dat.*|\.xml)$")
+
+
+def _stale_against_inputs(path: Path) -> list[str]:
+    """Input files (*.in) in the same directory modified after `path`, if
+    `path` is a QE output."""
+    if not _QE_OUTPUT.search(path.name):
+        return []
+    try:
+        mtime = path.stat().st_mtime
+        return sorted(f.name for f in path.parent.glob("*.in") if f.stat().st_mtime > mtime + 1)
+    except OSError:
+        return []
+
+
 @register_tool(
     "read_file",
     (
@@ -108,6 +126,13 @@ def read_file(path: str, start_line: int = 1, num_lines: int | None = None, max_
         "total_lines": total,
         "truncated": start > 0 or end < total or char_capped,
     }
+    stale = _stale_against_inputs(file_path)
+    if stale:
+        result["stale_warning"] = (
+            f"{file_path.name} is OLDER than {', '.join(stale)} in the same directory: it was written by an earlier "
+            "run, before those inputs were last changed, so it does not reflect them. Re-run "
+            "run_espresso_workflow to get output for the current inputs."
+        )
     if start >= total and total:
         result["hint"] = f"start_line {start + 1} is past the end of the file ({total} lines)."
     elif result["truncated"]:
@@ -183,6 +208,10 @@ def run_espresso_workflow(
     work_dir = Path(directory).resolve()
     if not work_dir.is_dir():
         return {"success": False, "stderr": f"{work_dir} is not a directory"}
+
+    # A CRASH file from an earlier failed run would otherwise survive a
+    # successful rerun and read as if this run had crashed.
+    (work_dir / "CRASH").unlink(missing_ok=True)
 
     # How to invoke QE on this machine comes from the agent's settings, not
     # from a hardcoded module name -- see chem_llm.settings.QESettings.
