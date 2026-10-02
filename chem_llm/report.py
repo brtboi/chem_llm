@@ -467,10 +467,13 @@ def summarize_run(
             queries = "; ".join(dict.fromkeys(str(g["args"].get("query", ""))[:70] for g in group))
             lines += _wrap(f"{target}: {len(group)} lookup(s) (step{'s' if len(group) > 1 else ''} "
                            f"{group[0]['step']}{'-' + str(group[-1]['step']) if len(group) > 1 else ''}): {queries}", 8)
+    from .kpath_check import unlabelled_endpoints
+
     corners, labelled = kpath_info.get("corners"), {i for i, _ in kpath_info.get("labels", [])}
-    if corners and labelled is not None and not set(corners) <= labelled:
+    missing = (unlabelled_endpoints(kpath_info["points"], corners, labelled)
+               if corners and kpath_info.get("labels") else [])
+    if missing and unlabelled_endpoints(kpath_info["points"], corners, labelled, offset=1):
         trouble = True
-        missing = [i for i in corners if i not in labelled]
         lines += _wrap(f"k-path labels look incomplete: the path has {len(corners)} segment endpoints "
                        f"(k-point indices {', '.join(map(str, corners))}) but band_labels.dat names "
                        f"{len(labelled)}; unlabelled: {', '.join(map(str, missing))}. Check the band plot's tick labels.", 4, "- ")

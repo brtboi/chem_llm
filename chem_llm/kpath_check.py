@@ -60,26 +60,53 @@ def segment_endpoints(points: np.ndarray) -> tuple[list[int], list[int]]:
 
     A break is a jump much larger than the typical spacing; the points on
     both sides of it are endpoints. A turn (change of direction) is an
-    endpoint; so are the first and last points.
+    endpoint; so are the first and last points. Paths often repeat the
+    junction point (segment end, then the next segment's start); repeated
+    points are collapsed before looking for turns, and every copy of an
+    endpoint is reported.
     """
     n = len(points)
     if n < 2:
         return list(range(n)), []
-    d = [math.dist(points[i], points[i + 1]) for i in range(n - 1)]
-    positive = sorted(x for x in d if x > 1e-9)
+    # collapse runs of identical consecutive points
+    groups = [[0]]
+    for i in range(1, n):
+        if math.dist(points[i], points[i - 1]) < 1e-9:
+            groups[-1].append(i)
+        else:
+            groups.append([i])
+    u = np.array([points[g[0]] for g in groups])
+    m = len(u)
+    d = [math.dist(u[i], u[i + 1]) for i in range(m - 1)]
+    positive = sorted(d)
     typical = positive[len(positive) // 2] if positive else 0.0
-    breaks = [i + 1 for i, x in enumerate(d) if typical and x > 3 * typical]
-    ends = {0, n - 1}
-    for b in breaks:
+    ubreaks = [i + 1 for i, x in enumerate(d) if typical and x > 3 * typical]
+    ends = {0, m - 1}
+    for b in ubreaks:
         ends |= {b - 1, b}
-    for i in range(1, n - 1):
-        if i in breaks or i + 1 in breaks or d[i - 1] < 1e-9 or d[i] < 1e-9:
+    for i in range(1, m - 1):
+        if i in ubreaks or i + 1 in ubreaks:
             continue
-        u = (points[i] - points[i - 1]) / d[i - 1]
-        w = (points[i + 1] - points[i]) / d[i]
-        if np.linalg.norm(u - w) > 1e-3:
+        a = (u[i] - u[i - 1]) / d[i - 1]
+        w = (u[i + 1] - u[i]) / d[i]
+        if np.linalg.norm(a - w) > 1e-3:
             ends.add(i)
-    return sorted(ends), breaks
+    return sorted(j for i in ends for j in groups[i]), [groups[b][0] for b in ubreaks]
+
+
+def unlabelled_endpoints(points: np.ndarray, ends: list[int], labelled: set[int], offset: int = 0) -> list[int]:
+    """Endpoints with no label, counting a repeated junction point (the same
+    coordinates at consecutive indices) as labelled if any copy is."""
+    out = []
+    for i in ends:
+        copies = {i}
+        for step in (-1, 1):
+            j = i + step
+            while 0 <= j < len(points) and math.dist(points[j], points[i]) < 1e-9:
+                copies.add(j); j += step
+        if not any(c + offset in labelled for c in copies):
+            out.append(i)
+    return out
 
 
 def _labels(text: str | None) -> list[tuple[int, str]]:
@@ -199,8 +226,8 @@ def check_bands_kpath(input_path: str | Path, labels_path: str | Path | None = N
                 wrong.append(f"index {i} is labelled {name} but the k-point there is {' / '.join(sorted(expected))}")
         if wrong:
             issues.append(f"k-path: {Path(labels_path).name} mislabels points: " + "; ".join(wrong[:6]) + ".")
-        missing = [i for i in ends if i not in labelled]
-        shifted = [i for i in ends if i + 1 not in labelled]  # a 1-based labels file
+        missing = unlabelled_endpoints(pts, ends, labelled)
+        shifted = unlabelled_endpoints(pts, ends, labelled, offset=1)  # a 1-based labels file
         if missing and shifted:
             issues.append(
                 f"k-path: {Path(labels_path).name} does not label segment endpoint(s) at k-point index "
