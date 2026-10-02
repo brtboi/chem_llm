@@ -74,22 +74,45 @@ def make_dir(path: str):
 
 @register_tool(
     "read_file",
-    "Read a file from disk (truncated if very large)",
-    {"path": "string"},
+    (
+        "Read a file: the whole file by default (up to a character cap), or num_lines "
+        "lines starting at start_line (1-based). The result reports total_lines and, "
+        "when anything was left out, which lines were shown. Do not read large numeric "
+        "outputs (bands.dat, .gnu files, a full pw.out) whole: read a few lines to learn "
+        "the format, then parse the numbers in a script."
+    ),
+    {
+        "path": "string",
+        "start_line": "int (optional). 1-based line to start at. Default 1.",
+        "num_lines": "int (optional). How many lines to return. Default: to the end of the file.",
+    },
 )
-def read_file(path: str, max_chars: int | None = None):
+def read_file(path: str, start_line: int = 1, num_lines: int | None = None, max_chars: int | None = None):
     max_chars = max_chars or active_settings().agent.read_max_chars
     file_path = Path(path)
     if not file_path.exists():
         return f"ERROR: {path} does not exist"
-    content = file_path.read_text(errors="replace")
-    truncated = len(content) > max_chars
-    return {
+    lines = file_path.read_text(errors="replace").splitlines(keepends=True)
+    total = len(lines)
+    start = max(int(start_line or 1), 1) - 1
+    stop = total if num_lines is None else start + max(int(num_lines), 0)
+    chunk = "".join(lines[start:stop])
+    char_capped = len(chunk) > max_chars
+    content = chunk[:max_chars]
+    end = start + content.count("\n") + (0 if content.endswith("\n") or not content else 1)
+    result = {
         "path": path,
-        "content": content[:max_chars],
-        "truncated": truncated,
-        "total_chars": len(content),
+        "content": content,
+        "start_line": start + 1,
+        "end_line": end,
+        "total_lines": total,
+        "truncated": start > 0 or end < total or char_capped,
     }
+    if start >= total and total:
+        result["hint"] = f"start_line {start + 1} is past the end of the file ({total} lines)."
+    elif result["truncated"]:
+        result["hint"] = f"Showing lines {start + 1}-{end} of {total}. Use start_line/num_lines to read other parts."
+    return result
 
 
 @register_tool(
