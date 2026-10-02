@@ -93,10 +93,12 @@ SYSTEM_PROMPT_TEMPLATE = (
     "known error is unresolved.\n"
     "4. Once a python runs without errors, note that it has been done successfully "
     "and avoid repeating tasks.\n"
-    "5. Do not call 'note' more than once in a row. If you already have a "
-    "plan, act on it instead of restating it.\n"
-    "6. Do not call the same 'search_docs' query more than once in a row. If you already have the information, "
-    "do not call the same search_docs again.\n"
+    "5. Do not call 'note' more than once in a row (the harness refuses a "
+    "second consecutive note). If you already have a plan, act on it instead "
+    "of restating it.\n"
+    "6. Do not repeat your previous 'search_docs' query (the harness refuses an "
+    "identical search; results never change). If you already have the information, "
+    "use it.\n"
     "7. As soon as the task has been completed and all required verification "
     "has succeeded, your VERY NEXT tool call MUST be 'done'. Do not perform "
     "additional tool calls, extra checks, or exploratory actions after the "
@@ -442,9 +444,43 @@ def parse_tool_call(text: str) -> dict:
     return json.loads(text)
 
 
+# Entries that are not actions the model took, and so do not break a run of
+# notes or separate two searches.
+_NOT_ACTIONS = ("refused", "parse_error", "api_error")
+
+
+def _refusal(tool: str, args: dict, state: AgentState) -> str | None:
+    """Harness-level guards against two loops the prompt rules alone did not
+    stop (a CsPbBr3 run spent 45 of 80 steps on notes, 13 in a row). Returns
+    the reason a call is refused, or None to let it run."""
+    actions = [e for e in state.history if e["tool"] not in _NOT_ACTIONS]
+    if tool == "note" and actions and actions[-1]["tool"] == "note":
+        return (
+            f"REFUSED: your previous action (step {actions[-1]['step']}) was already a note, and notes "
+            "may not be written twice in a row. Act on it now -- write_file, run_python, read_file, "
+            "run_espresso_workflow, search_docs with a new query, or done."
+        )
+    if tool == "search_docs":
+        last = next((e for e in reversed(actions) if e["tool"] == "search_docs"), None)
+        key = lambda a: (str(a.get("query", "")).strip().lower(), tuple(sorted(a.get("sources") or ())))
+        if last is not None and key(last["args"]) == key(args):
+            return (
+                f"REFUSED: identical to your search at step {last['step']}, and search results do not "
+                "change -- use those results, or search for something different."
+            )
+    return None
+
+
 def execute_tool(call: dict, state: AgentState):
     tool = call["tool"]
     args = call.get("args", {})
+
+    reason = _refusal(tool, args, state)
+    if reason is not None:
+        # Logged under its own name (not as a note), so it stays visible in a
+        # trimmed history and the model sees why nothing happened.
+        state.log("refused", {"tool": tool, **args}, reason)
+        return reason
 
     if tool == "note":
         state.add_note(args.get("text", ""))
