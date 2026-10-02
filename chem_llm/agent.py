@@ -139,7 +139,7 @@ class DFTAgent:
     pw_x, bands_x, qe_module, mpi_prefix, omp_num_threads, qe_timeout_seconds:
                 how to run Quantum ESPRESSO (settings.qe).
     docs:       a DocumentationIndex or a path to one (settings.doc_index_dir).
-    max_steps, max_history, max_new_tokens, temperature, do_sample:
+    max_steps, max_history, trim_history, max_new_tokens, temperature, do_sample:
                 agent-loop and generation parameters.
     """
 
@@ -163,6 +163,7 @@ class DFTAgent:
         work_root: str | Path | None = None,
         max_steps: int | None = None,
         max_history: int | None = None,
+        trim_history: bool | None = None,
         max_new_tokens: int | None = None,
         temperature: float | None = None,
         do_sample: bool | None = None,
@@ -193,7 +194,7 @@ class DFTAgent:
         override(s.model, backend=backend, qwen_model=model, max_new_tokens=max_new_tokens,
                  temperature=temperature, do_sample=do_sample, claude_model=claude_model,
                  claude_effort=claude_effort, claude_max_tokens=claude_max_tokens)
-        override(s.agent, max_steps=max_steps, max_history=max_history)
+        override(s.agent, max_steps=max_steps, max_history=max_history, trim_history=trim_history)
 
         if isinstance(docs, DocumentationIndex):
             s.doc_index_dir = docs.path
@@ -210,7 +211,7 @@ class DFTAgent:
 
             model           Qwen/Qwen3.8-27B, local ("qwen" backend)
             generation      max_new_tokens=5000, greedy (do_sample=False)
-            agent loop      max_steps=80, max_history=32, read_max_chars=10000
+            agent loop      max_steps=80, max_history=32, trim_history=True, read_max_chars=10000
             QE              pw.x / bands.x, serial, OMP_NUM_THREADS=1, 2 h timeout,
                             module espresso/7.5-libxc-7.0.0-cpu on Perlmutter
             model cache     $HF_HOME, else $PSCRATCH/huggingface on NERSC
@@ -277,6 +278,7 @@ class DFTAgent:
                     temperature=settings.model.temperature,
                     do_sample=settings.model.do_sample,
                     max_history=settings.agent.max_history,
+                    trim_history=settings.agent.trim_history,
                 )
 
             self._loaded = _LoadedModel(factory, name, backend)
@@ -302,7 +304,10 @@ class DFTAgent:
             def factory(settings: Settings, verbose: bool):
                 claude.max_tokens = settings.model.claude_max_tokens
                 claude.effort = settings.model.claude_effort
-                return make_claude_step_source(claude, verbose=verbose, max_history=settings.agent.max_history)
+                return make_claude_step_source(
+                    claude, verbose=verbose,
+                    max_history=settings.agent.max_history, trim_history=settings.agent.trim_history,
+                )
 
             self._loaded = _LoadedModel(factory, claude.model, backend)
 

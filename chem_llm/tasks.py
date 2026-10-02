@@ -35,7 +35,7 @@ Requirements:
 - Comment the code where nontrivial crystallographic operations are performed.
 
 DONE CRITERIA:
-- generate_structures.py, setup_jobs.py, and plot_bands.py all run end-to-end with empty stderr, and none of them import pymatgen.
+- generate_structures.py, setup_jobs.py, and plot_bands.py all run end-to-end with returncode 0, and none of them import pymatgen.
 - run_espresso_workflow returned success: true for calculations/000.
 - Read at least one generated CIF and calculations/000/pw.in; confirm each INVARIANT holds for that specific case.
 - The done summary must include: the Materials Project ID, the atom count before and after the primitive-cell reduction, an outline of the workflow, which ASE functions you used for structure and QE I/O, the band gap you obtained, any scientific assumptions with a quick justification, and anything that needs expert review.

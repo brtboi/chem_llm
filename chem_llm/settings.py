@@ -21,7 +21,7 @@ Perlmutter, so `DFTAgent()` with no arguments reproduces it:
 
     model           Qwen/Qwen3.8-27B (local; backend "qwen")
     generation      max_new_tokens=5000, greedy (do_sample=False)
-    agent loop      max_steps=80, max_history=32, read_max_chars=10000
+    agent loop      max_steps=80, max_history=32, trim_history=True, read_max_chars=10000
     Quantum ESPRESSO pw.x / bands.x, serial, OMP_NUM_THREADS=1, 2 h timeout,
                     module espresso/7.5-libxc-7.0.0-cpu  (on Perlmutter only)
     model cache     $HF_HOME, else $PSCRATCH/huggingface (on NERSC), else ~/.cache
@@ -153,9 +153,15 @@ class ModelSettings:
 @dataclass
 class AgentSettings:
     max_steps: int = 80
-    # Tool results kept verbatim in the prompt; older ones are summarised.
+    # Recent tool calls shown in the prompt (a count of entries, not tokens).
     max_history: int = 32
-    # read_file truncates to this many characters.
+    # Drop provably dead material from those recent calls: notes (already in
+    # the Notes section), superseded file versions and reads, and the failed
+    # attempts / doc searches of a fix that has since run successfully -- and
+    # add a Progress ledger. Only the prompt view changes; the full history is
+    # still logged. See chem_llm/history.py.
+    trim_history: bool = True
+    # Hard cap on the characters a single read_file returns.
     read_max_chars: int = 10000
 
 

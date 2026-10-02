@@ -50,7 +50,8 @@ SYSTEM_PROMPT_TEMPLATE = (
     "already fetched) "
     "unless you are intentionally fixing a bug or redoing a failed attempt.\n"
     "2. Before calling 'done', you MUST have executed (run_python) every "
-    ".py file you wrote, and confirmed its stderr was empty. If a script "
+    ".py file you wrote, and confirmed it exited with returncode 0 (stderr "
+    "may still hold harmless warnings; a traceback means it failed). If a script "
     "produces an output file (e.g. a .cif, .pwi, or .txt file), you must "
     "also read_file that output and visually confirm its contents look "
     "correct for the task. Do not assume success just because stdout/"
@@ -72,7 +73,7 @@ SYSTEM_PROMPT_TEMPLATE = (
     "valid range, an input-file card's required format) -- do this "
     "proactively, before drawing a conclusion or writing it down, not only "
     "after something has already failed.\n"
-    "3a. WHEN SOMETHING FAILS -- a non-empty run_python stderr, or any tool "
+    "3a. WHEN SOMETHING FAILS -- a run_python with a nonzero returncode, or any tool "
     "returning success: false -- your VERY NEXT call must be search_docs, "
     "before any write_file that edits the thing that failed. Do not tweak a "
     "value and re-run hoping the error goes away. Search for the IDENTIFIER "
@@ -385,10 +386,10 @@ SYSTEM_PROMPT_TEMPLATE = (
 )
 
 
-def build_prompt(state: AgentState, tokenizer, max_history: int = MAX_HISTORY):
+def build_prompt(state: AgentState, tokenizer, max_history: int = MAX_HISTORY, trim_history: bool = False):
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT_TEMPLATE},
-        {"role": "user", "content": state.context_summary(max_history=max_history)},
+        {"role": "user", "content": state.context_summary(max_history=max_history, trim=trim_history)},
     ]
     return tokenizer.apply_chat_template(
         messages,
@@ -486,6 +487,7 @@ def make_llm_step_source(
     temperature: float = TEMPERATURE,
     do_sample: bool = DO_SAMPLE,
     max_history: int = MAX_HISTORY,
+    trim_history: bool = False,
 ):
     """Build a `next_tool_call(state, step)` source for `run_step_loop` that
     asks the model to generate each step, same as the original inline
@@ -497,7 +499,7 @@ def make_llm_step_source(
     passes its own settings.
     """
     def next_tool_call(state: AgentState, step: int):
-        prompt = build_prompt(state, tokenizer, max_history=max_history)
+        prompt = build_prompt(state, tokenizer, max_history=max_history, trim_history=trim_history)
         output = generate(
             prompt, model, tokenizer,
             max_new_tokens=max_new_tokens, temperature=temperature, do_sample=do_sample,

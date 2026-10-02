@@ -63,7 +63,7 @@ Perlmutter. `DFTAgent.default_settings()` returns them as an editable object.
 |---|---|
 | model | `Qwen/Qwen3.8-27B`, local (`backend="qwen"`) |
 | generation | `max_new_tokens=5000`, greedy (`do_sample=False`) |
-| agent loop | `max_steps=80`, `max_history=32`, `read_max_chars=10000` |
+| agent loop | `max_steps=80`, `max_history=32`, `trim_history=True`, `read_max_chars=10000` |
 | Quantum ESPRESSO | `pw.x` / `bands.x`, serial, `OMP_NUM_THREADS=1`, 2 h timeout per step |
 | QE module | `espresso/7.5-libxc-7.0.0-cpu` on Perlmutter, none elsewhere |
 | model cache | `$HF_HOME`, else `$PSCRATCH/huggingface` on NERSC, else `~/.cache/huggingface` |
@@ -100,10 +100,24 @@ Precedence is **keyword argument > `Settings` field > environment / `.env` > def
 
 - `qe` — `QESettings`: `pw_x`, `bands_x`, `module`, `mpi_prefix`, `omp_num_threads`, `timeout_seconds`
 - `model` — `ModelSettings`: `backend`, `qwen_model`, `max_new_tokens`, `temperature`, `do_sample`, and `claude_*`
-- `agent` — `AgentSettings`: `max_steps`, `max_history`, `read_max_chars`
+- `agent` — `AgentSettings`: `max_steps`, `max_history`, `trim_history`, `read_max_chars`
 
 At the top level it holds the credentials (`mp_api_key`, `hf_token`, `anthropic_api_key`) and
 the paths `hf_home`, `doc_index_dir` and `work_root`.
+
+**History trimming.** The prompt shows the agent its last `max_history` tool calls. With
+`trim_history=True` (the default) it drops the provably dead parts of those calls:
+
+- note entries, which are already in the Notes section;
+- versions of a file that were later rewritten, and reads that were later repeated;
+- once a script runs successfully, its failed attempts and the doc searches made to fix them.
+  These collapse to a single line that keeps the error that was fixed.
+
+It also adds a Progress ledger of which scripts ran, which are failing, the QE status and the
+files read. Nothing is hidden just for being old: an output the agent may still be using stays
+until it's superseded or leaves the window. Replayed over eight logged runs, it cut the
+median prompt 16% and the worst 19% (71K to 58K tokens). Only the prompt changes; the logged
+history stays complete.
 
 The agent copies the `Settings` it is given, so edit `agent.settings` once an agent exists.
 Generation and loop parameters are read when each run starts, so they can change between runs

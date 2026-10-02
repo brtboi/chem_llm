@@ -98,7 +98,7 @@ class ClaudeModel:
         return "".join(block.text for block in response.content if block.type == "text").strip()
 
 
-def make_claude_step_source(claude: ClaudeModel, verbose: bool = True, max_history: int = MAX_HISTORY):
+def make_claude_step_source(claude: ClaudeModel, verbose: bool = True, max_history: int = MAX_HISTORY, trim_history: bool = False):
     """Build a `next_tool_call(state, step)` source for `run_step_loop`,
     the Claude-backed counterpart of agent_core.make_llm_step_source.
 
@@ -108,7 +108,7 @@ def make_claude_step_source(claude: ClaudeModel, verbose: bool = True, max_histo
     """
     def next_tool_call(state: AgentState, step: int):
         try:
-            output = claude.generate(SYSTEM_PROMPT_TEMPLATE, state.context_summary(max_history=max_history))
+            output = claude.generate(SYSTEM_PROMPT_TEMPLATE, state.context_summary(max_history=max_history, trim=trim_history))
         except _TERMINAL_ERRORS as e:
             # No credits, bad key, revoked permissions: every later step
             # would fail identically. Stop the loop instead of spending the

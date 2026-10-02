@@ -94,7 +94,7 @@ def read_file(path: str, max_chars: int | None = None):
 
 @register_tool(
     "run_python",
-    "Execute a python file, returns stdout/stderr",
+    "Execute a python file, returns stdout/stderr and the exit code (0 = success)",
     {"path": "string"},
 )
 def run_python(path: str):
@@ -106,7 +106,7 @@ def run_python(path: str):
         # process happened to inherit.
         env=active_settings().subprocess_env(),
     )
-    return {"stdout": result.stdout, "stderr": result.stderr}
+    return {"stdout": result.stdout, "stderr": result.stderr, "returncode": result.returncode}
 
 @register_tool(
     "run_espresso_workflow",

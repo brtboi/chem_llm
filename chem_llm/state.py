@@ -1,6 +1,7 @@
 import datetime
 import json
 
+from .history import progress_ledger, run_succeeded, trimmed_view
 from .tools import REMEMBER_FIELDS
 
 class AgentState:
@@ -43,8 +44,8 @@ class AgentState:
             self.consecutive_notes = 0
         if tool == "write_file":
             self.files[args.get("path", "?")] = "written"
-        if tool == "run_python" and isinstance(result, dict) and result.get("stderr"):
-            self.last_errors[args.get("path", "?")] = result["stderr"]
+        if tool == "run_python" and not run_succeeded(result):
+            self.last_errors[args.get("path", "?")] = result.get("stderr", "") if isinstance(result, dict) else str(result)
         elif tool == "run_python":
             self.last_errors.pop(args.get("path", "?"), None)
 
@@ -64,10 +65,17 @@ class AgentState:
     def add_note(self, text: str):
         self.scratchpad.append(text)
 
-    def context_summary(self, max_history: int = 6) -> str:
-        """Compact summary fed back into the prompt each turn."""
-        recent = self.history[-max_history:]
+    def context_summary(self, max_history: int = 6, trim: bool = False) -> str:
+        """Compact summary fed back into the prompt each turn.
+
+        trim: show a trimmed view of the recent calls plus a Progress ledger
+        (see chem_llm/history.py). self.history itself is never modified.
+        """
+        recent = trimmed_view(self.history, max_history) if trim else self.history[-max_history:]
         lines = [f"Task: {self.task}"]
+        if trim and self.history:
+            lines.append("Progress so far (whole run):")
+            lines.extend(f"  - {line}" for line in progress_ledger(self.history))
         if self.files:
             lines.append(f"Known files: {json.dumps(self.files)}")
             lines.append(
