@@ -221,6 +221,8 @@ def _summary_sections(text: str | None) -> dict[str, str]:
     """The done summary's 'HEADING:' sections (newer runs write them)."""
     if not text:
         return {}
+    # markdown headings ("### Scientific Assumptions") -> "Scientific Assumptions:"
+    text = re.sub(r"(?m)^\s*#{1,6}\s*(.+?)\s*:?\s*$", r"\1:", text)
     parts = re.split(r"(?m)^\s*([A-Z][A-Z0-9 /&()'-]{3,}|[A-Z][A-Za-z0-9 /&()'-]{3,60}(?=:\s*$)):", text)
     return {parts[i].strip().upper(): parts[i + 1].strip() for i in range(1, len(parts) - 1, 2)}
 
@@ -491,7 +493,7 @@ def summarize_run(
         trouble = True
         for head, body in own.items():
             lines.append(f"    - agent's own {head.lower()}:")
-            for item in [l.strip(" -*") for l in body.splitlines() if l.strip(" -*")][:8]:
+            for item in [l.replace("**", "").strip(" -*") for l in body.splitlines() if l.strip(" -*")][:8]:
                 lines += _wrap(item, 8, "* ")
     elif final_result:
         caveats = _doubt_sentences([(None, final_result)], limit=4)
