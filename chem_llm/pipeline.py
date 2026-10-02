@@ -42,6 +42,22 @@ class RunResult:
     plot: Path | None = None
     state: Any = None              # the full AgentState
 
+    def report(self) -> str:
+        """A readable summary of the run: what the agent did, its results and
+        key choices in order, and where it struggled (chem_llm.report)."""
+        from .report import summarize_run
+
+        return summarize_run(
+            self.state.history if self.state is not None else [],
+            self.work_dir,
+            final_result=self.summary,
+            completed=self.completed,
+            runtime_seconds=self.runtime_seconds,
+            model=self.model,
+            compound=self.compound,
+            spacegroup=self.spacegroup,
+        )
+
     @property
     def ok(self) -> bool:
         """A run is only good if the physics landed, not merely if the

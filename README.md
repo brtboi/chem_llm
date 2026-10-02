@@ -190,7 +190,9 @@ step** — a full run is 40–60 API calls.
 
 ```bash
 chem-llm TiO2 P4_2/mnm --name rutile --work-dir runs/tio2
+chem-llm TiO2 P4_2/mnm --pretty-print > summary.txt   # stdout: just the run summary
 chem-llm C Fd-3m --pw-x /opt/qe/bin/pw.x --max-steps 60
+chem-llm --summarize runs/tio2               # summary of a past run (no GPU needed)
 chem-llm --build-docs                        # build the documentation index
 chem-llm --help
 
@@ -200,6 +202,29 @@ chem-llm-replay-copy 17 25                   # replay sandbox/test17 into sandbo
 
 `chem-llm` reads `config.yaml` from the current directory or its parents when one exists
 (or `--config PATH`), otherwise the defaults.
+
+By default the CLI streams every step (the model's raw output, the tool call, the full tool
+result) to stdout. With `--pretty-print` that stream goes to stderr, and stdout gets only a
+readable summary when the run finishes. `--summarize PATH` prints the same summary for any
+recorded run (a work dir or `log.jsonl`; `--index N` picks an earlier run). The summary has
+three sections:
+
+1. **What the agent did:** the Materials Project and Pseudo-Dojo data it pulled, every script
+   it wrote (how many versions and runs, and how each ended), and its Quantum ESPRESSO runs.
+2. **Results and key choices, in the order they were made:** structure, displacement and
+   strain parameters, pseudopotentials and their valence, cutoffs (against the recommended
+   values), SCF settings, k-path, DFT status, and the band gap computed from the output next
+   to the one the agent reported.
+3. **Uncertainties and difficulties:**
+   - failed runs and the errors fixed, rewrite loops, and QE inputs regenerated without
+     re-running QE;
+   - where the documentation lookups clustered, and calls the harness refused;
+   - incomplete k-path labels;
+   - notes where the agent flagged doubt, and its own stated assumptions and review items.
+
+It is built deterministically from the run's log and the files in its work dir, so every value
+is read from a tool result or a file, never generated. In Python, the same summary is
+`result.report()`.
 
 ## Repository layout
 
