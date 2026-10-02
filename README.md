@@ -207,17 +207,27 @@ By default the CLI streams every step (the model's raw output, the tool call, th
 result) to stdout. With `--pretty-print` that stream goes to stderr, and stdout gets only a
 readable summary when the run finishes. `--summarize PATH` prints the same summary for any
 recorded run (a work dir or `log.jsonl`; `--index N` picks an earlier run). The summary has
-three sections:
+four sections:
 
-1. **What the agent did:** the Materials Project and Pseudo-Dojo data it pulled, every script
-   it wrote (how many versions and runs, and how each ended), and its Quantum ESPRESSO runs.
-2. **Results and key choices, in the order they were made:** structure, displacement and
-   strain parameters, pseudopotentials and their valence, cutoffs (against the recommended
-   values), SCF settings, k-path, DFT status, and the band gap computed from the output next
-   to the one the agent reported.
-3. **Uncertainties and difficulties:**
-   - failed runs and the errors fixed, rewrite loops, and QE inputs regenerated without
-     re-running QE;
+1. **What the agent did:** step by step, the Materials Project and Pseudo-Dojo data it
+   pulled, every script it wrote (how many versions and runs, and how each ended), each
+   validation, and its Quantum ESPRESSO runs.
+2. **DFT setup**, written for a physicist or chemist reproducing the calculation:
+   - structure: source, the cell used and its positions;
+   - pseudopotentials: type, relativistic treatment, functional, accuracy table, valence,
+     recommended cutoff;
+   - pw.x settings: exchange-correlation, spin-orbit, cutoffs, occupations, k-mesh,
+     convergence threshold;
+   - bands: the k-path (named by symmetry), nbnd, the electron count, the band gap;
+   - the perturbed-structure ensemble (displacements measured from the structures);
+   - the Quantum ESPRESSO version and parallel setup.
+3. **Agent and harness**, for CS / LLM engineers: the base model and decoding settings, the
+   run's tool-call counts, how the prompt is built, the tools, context management, the
+   harness guards, and the QE launch command. Runs record their configuration for this
+   section.
+4. **Errors, uncertainties and difficulties:**
+   - failed runs and the errors fixed, validator findings, rewrite loops, and QE inputs
+     regenerated without re-running QE;
    - where the documentation lookups clustered, and calls the harness refused;
    - incomplete k-path labels;
    - notes where the agent flagged doubt, and its own stated assumptions and review items.

@@ -162,6 +162,46 @@ def _stabilizer_order(k_frac: np.ndarray, recip_ops: list[np.ndarray]) -> int:
     return count
 
 
+def path_string(input_path: str | Path) -> str | None:
+    """The k-path of a bands input as seekpath names, e.g.
+    'GAMMA-X-M-GAMMA-Z-R-A-Z | X-R | M-A'. Points are named by symmetry
+    from the k-point coordinates, not from any labels file; an endpoint
+    that matches no named point is shown as '?'. None if not applicable."""
+    input_path = Path(input_path)
+    try:
+        text = input_path.read_text(errors="replace")
+        kind, pts = read_kpoints(text)
+        if kind not in ("crystal", "tpiba") or len(pts) < 3:
+            return None
+        from ase.io import read
+        import spglib
+        atoms = read(input_path, format="espresso-in")
+        cell = np.array(atoms.cell[:])
+        if kind == "tpiba":
+            pts = pts @ cell.T / np.linalg.norm(cell[0])
+        ds = spglib.get_symmetry_dataset((cell, atoms.get_scaled_positions(), atoms.get_atomic_numbers()), symprec=1e-3)
+        ops = [np.linalg.inv(r).T for r in ds.rotations] if ds is not None else [np.eye(3)]
+        named = _named_points(atoms)
+        import seekpath
+        raw = {n: np.array(c) for n, c in seekpath.get_path(
+            (cell, atoms.get_scaled_positions(), atoms.get_atomic_numbers()), symprec=1e-3)["point_coords"].items()}
+    except Exception:
+        return None
+    ends, breaks = segment_endpoints(pts)
+    out, prev = [], None
+    for i in ends:
+        if prev is not None and math.dist(pts[i], pts[prev]) < 1e-9:
+            continue  # a repeated junction point
+        # an exact match (mod G) first: equivalent points such as fcc's U and K
+        # share a symmetry class but keep their own names on the path
+        exact = sorted({n for pool in (raw, named) for n, k in pool.items() if _equivalent(pts[i], k, [np.eye(3)])})
+        names = exact or sorted(n for n, k in named.items() if _equivalent(pts[i], k, ops))
+        name = min(names, key=len) if names else "?"
+        out.append((" | " if i in breaks else "-" if out else "") + name)
+        prev = i
+    return "".join(out)
+
+
 def check_bands_kpath(input_path: str | Path, labels_path: str | Path | None = None) -> list[str]:
     """Issues with the k-path of a pw.x bands input (calculation='bands').
     Returns [] for inputs this does not apply to (SCF meshes, *_b lists)."""
