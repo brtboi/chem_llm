@@ -333,6 +333,7 @@ class DFTAgent:
         task: str | None = None,
         hide_tools=("train_deepseudopot",),
         verbose: bool = True,
+        on_step=None,
     ) -> RunResult:
         """Run the full workflow for one compound.
 
@@ -340,6 +341,11 @@ class DFTAgent:
         `spacegroup` uses Materials Project formatting ('P4_2/mnm',
         'Fd-3m'). Output goes to `work_dir`, defaulting to
         settings.work_root/<compound>.
+
+        verbose prints the raw stream (each step's model output, tool call
+        and full result). on_step is an observer told about each step as it
+        happens -- e.g. chem_llm.progress.ProgressPrinter() for one readable
+        line per action; pass verbose=False with it.
         """
         # Removes the tools from the registry for the rest of the process --
         # agent_core serialises the tool list into the system prompt once, at
@@ -366,6 +372,7 @@ class DFTAgent:
         kwargs = dict(
             log_extra={"config": config},
             step_source=self._loaded.step_source_factory(s, verbose),
+            observer=on_step,
             model_name=self._loaded.name,
             work_dir=work_dir,
             max_steps=max_steps or s.agent.max_steps,

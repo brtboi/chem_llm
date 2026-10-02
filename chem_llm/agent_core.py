@@ -565,7 +565,7 @@ def make_llm_step_source(
     return next_tool_call
 
 
-def run_step_loop(state: AgentState, next_tool_call, max_steps: int, verbose: bool = True) -> None:
+def run_step_loop(state: AgentState, next_tool_call, max_steps: int, verbose: bool = True, observer=None) -> None:
     """Drive `state` through up to `max_steps` tool calls, one per step,
     obtained from `next_tool_call(state, step)`. Mutates `state` in place.
 
@@ -574,21 +574,36 @@ def run_step_loop(state: AgentState, next_tool_call, max_steps: int, verbose: bo
     parse failure as a note) and no tool should be executed, or raise
     `StopIteration` to end the loop early (a replay source runs out of
     recorded calls before `max_steps`).
+
+    `observer`, if given, is told about each step as it happens: its
+    `start(step, tool_call)` before a tool runs, and its
+    `finish(step, entry)` for every history entry the step logged (tool
+    results, refusals, parse or API errors). See chem_llm.progress.
     """
+    def report(step: int, before: int) -> None:
+        if observer is not None:
+            for entry in state.history[before:]:
+                observer.finish(step, entry)
+
     for step in range(1, max_steps + 1):
         if verbose:
             print(f"\n=== STEP {step} ===")
+        before = len(state.history)
 
         try:
             tool_call = next_tool_call(state, step)
         except StopIteration:
+            report(step, before)
             break
 
         if tool_call is None:
+            report(step, before)
             continue
 
         if verbose:
             print("TOOL CALL:\n", tool_call)
+        if observer is not None:
+            observer.start(step, tool_call)
 
         try:
             result = execute_tool(tool_call, state)
@@ -598,6 +613,7 @@ def run_step_loop(state: AgentState, next_tool_call, max_steps: int, verbose: bo
 
         if verbose:
             print("TOOL RESULT:\n", result)
+        report(step, before)
 
         if state.done:
             break
@@ -756,6 +772,7 @@ def run_agent(
     step_source=None,
     model_name: str = MODEL_NAME,
     log_extra: dict | None = None,
+    observer=None,
 ) -> AgentState:
     """Run the agent live: the model generates each tool call. Executes in
     `work_dir` (defaults to config.WORK_DIR) and logs to `log_file`
@@ -782,7 +799,7 @@ def run_agent(
     state = AgentState(task)
 
     source = step_source or make_llm_step_source(model, tokenizer, verbose)
-    run_step_loop(state, source, max_steps, verbose)
+    run_step_loop(state, source, max_steps, verbose, observer=observer)
 
     if log_file:
         print("logging to...", log_file)
