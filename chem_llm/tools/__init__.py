@@ -288,7 +288,9 @@ def run_espresso_workflow(
     "generate_cif",
     (
         "Download a crystal structure CIF from the Materials Project. "
-        "If multiple structures match, the first matching result is selected. "
+        "If multiple structures match the space group, the most stable one is "
+        "selected (lowest energy above the convex hull); the result lists the "
+        "other candidates. "
         "Space group must be specified using spacegroup_symbol and/or "
         "spacegroup_number. If both are provided, they must refer to the same "
         "space group. Space group symbols must use Materials Project Hermann-Mauguin "
@@ -328,7 +330,7 @@ def generate_cif(
         with MPRester(active_settings().mp_api_key) as mpr:
             docs = mpr.materials.summary.search(
                 formula=composition,
-                fields=["material_id", "structure", "symmetry"],
+                fields=["material_id", "structure", "symmetry", "energy_above_hull"],
             )
 
         if not docs:
@@ -371,6 +373,11 @@ def generate_cif(
                 ),
             }
 
+        # Several polymorphs can share a space group (graphite: mp-48 plus a
+        # 12-atom and a 4-atom variant); take the most stable, not whichever
+        # the API happened to return first.
+        docs = sorted(docs, key=lambda d: (d.energy_above_hull if d.energy_above_hull is not None else float("inf"),
+                                          len(d.structure)))
         # Verify symbol and number consistency if both were supplied
         selected_doc = docs[0]
 
@@ -403,6 +410,7 @@ def generate_cif(
         return {
             "success": True,
             "selected_material_id": str(selected_doc.material_id),
+            "energy_above_hull_eV_per_atom": selected_doc.energy_above_hull,
             "candidate_material_ids": candidate_material_ids,
             "space_group": {
                 "symbol": selected_doc.symmetry.symbol,
