@@ -62,7 +62,7 @@ Perlmutter. `DFTAgent.default_settings()` returns them as an editable object.
 | | default |
 |---|---|
 | model | `Qwen/Qwen3.8-27B`, local (`backend="qwen"`) |
-| generation | `max_new_tokens=5000`, greedy (`do_sample=False`) |
+| generation | `max_new_tokens=5000`, sampled at `temperature=0.3` (`do_sample=True`); set `do_sample=False` for reproducible greedy runs |
 | agent loop | `max_steps=80`, `max_history=32`, `trim_history=True`, `read_max_chars=10000` |
 | Quantum ESPRESSO | `pw.x` / `bands.x`, `OMP_NUM_THREADS=1`, 2 h timeout per step |
 | QE on Perlmutter | GPU build `espresso/7.5-libxc-7.0.0-gpu-cu13`, one MPI rank per GPU: `srun -n 4 -c 32 --gpus-per-task=1 --gpu-bind=closest pw.x -nk 4` |

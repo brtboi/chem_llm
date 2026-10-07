@@ -211,7 +211,7 @@ class DFTAgent:
         project was developed with on NERSC Perlmutter.
 
             model           Qwen/Qwen3.8-27B, local ("qwen" backend)
-            generation      max_new_tokens=5000, greedy (do_sample=False)
+            generation      max_new_tokens=5000, sampled at temperature 0.3
             agent loop      max_steps=80, max_history=32, trim_history=True, read_max_chars=10000
             QE              pw.x / bands.x, OMP_NUM_THREADS=1, 2 h timeout; on Perlmutter
                             the GPU build, one MPI rank per GPU via srun, pw.x -nk 4;

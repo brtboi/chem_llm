@@ -20,7 +20,7 @@ The defaults are the configuration this project was developed with on NERSC
 Perlmutter, so `DFTAgent()` with no arguments reproduces it:
 
     model           Qwen/Qwen3.8-27B (local; backend "qwen")
-    generation      max_new_tokens=5000, greedy (do_sample=False)
+    generation      max_new_tokens=5000, sampled at temperature 0.3
     agent loop      max_steps=80, max_history=32, trim_history=True, read_max_chars=10000
     Quantum ESPRESSO pw.x / bands.x, OMP_NUM_THREADS=1, 2 h timeout; on Perlmutter
                     the GPU build (module espresso/7.5-libxc-7.0.0-gpu-cu13) on
@@ -190,8 +190,12 @@ class ModelSettings:
     # Local Qwen
     qwen_model: str = "Qwen/Qwen3.8-27B"
     max_new_tokens: int = 5000
-    temperature: float = 0.0   # only used when do_sample is true
-    do_sample: bool = False
+    # Light sampling. Greedy decoding (do_sample=False) is deterministic, so
+    # an agent stuck in a loop regenerates the same output from nearly the
+    # same context -- a ZnO run rewrote an identical script 5 times. A low
+    # temperature keeps tool calls well formed while letting it break out.
+    temperature: float = 0.3   # only used when do_sample is true
+    do_sample: bool = True
 
     # Claude API
     claude_model: str = "claude-opus-4-8"
