@@ -182,7 +182,9 @@ SYSTEM_PROMPT_TEMPLATE = (
     "to run if bands.x computed a different k-point list than kpath.json "
     "(so a plot can never silently mismatch the calculation). Use its x (path "
     "length) for the band curves, draw each of its segments as a separate "
-    "line (no line across a discontinuity), put a vertical line and a tick "
+    "line -- segments are slice objects: `for s in ax['segments']: "
+    "plt.plot(x[s], E[s, band])`, never x[start:end+1] -- (no line across a "
+    "discontinuity), put a vertical line and a tick "
     "label at every entry of its ticks, and never build ticks from k-point "
     "indices or typed labels. Choose the y-range deliberately: semicore "
     "bands sit tens of eV below the valence manifold, so after aligning to "
@@ -268,7 +270,7 @@ SYSTEM_PROMPT_TEMPLATE = (
     "semiconductor\n\n"
     "RULE: bands plot construction\n"
     "  Use chem_llm.kpath.plot_axis per INVARIANT 4 with plain matplotlib: "
-    "one ax.plot per band per segment, ax.axvline at every tick x, "
+    "one ax.plot(x[s], E[s, band]) per band per segment slice s, ax.axvline at every tick x, "
     "ax.set_xticks/ax.set_xticklabels from ticks, ax.set_xlim(x[0], x[-1]).\n\n"
     f"Available tools:\n{json.dumps(TOOLS, indent=2)}"
 )
@@ -346,7 +348,8 @@ def _refusal(tool: str, args: dict, state: AgentState) -> str | None:
         if current is not None and current == args.get("content"):
             return (
                 f"REFUSED: {args['path']} already has exactly this content, so writing it changes nothing. "
-                "If you diagnosed a bug, the fix is not in this version yet -- change the code to apply it."
+                "If you have not run it since writing it, run it now: only an actual error shows there is a bug. "
+                "If you diagnosed a real bug, the fix is not in this version yet -- change the code to apply it."
             )
     if tool == "search_docs":
         last = next((e for e in reversed(actions) if e["tool"] == "search_docs"), None)

@@ -17,7 +17,9 @@ fixing them. Here the whole path comes from one call, and both ends use it:
 
     # plot_bands.py
     ax = plot_axis("calculations/000/kpath.json", "calculations/000/000.bands.dat")
-    ax["x"], ax["energies"], ax["ticks"], ax["segments"]
+    x, E = ax["x"], ax["energies"]
+    for s in ax["segments"]:              # slice objects: use them as x[s], E[s, band]
+        plt.plot(x[s], E[s, band])
 
 The path is seekpath's (Hinuma et al. convention), with points spaced evenly
 in reciprocal space, so the x-axis is the true path length and breaks add no
@@ -153,6 +155,10 @@ def plot_axis(kpath_file: str | Path, bands_file: str | Path) -> dict:
 
     bands_file is bands.x's primary filband output (e.g. 000.bands.dat).
     Returns {"x", "energies" (nk, nbnd, eV), "ticks", "segments", "path"}.
+    segments are Python slice objects -- one continuous line each, used as
+    x[s] and energies[s, band]. (Plain (start, stop) pairs were misread as
+    inclusive by four of five agent scripts, which then drew a connector
+    across each discontinuity.)
     Raises ValueError if the bands were not computed on kpath_file's k-points
     (different count, or different k-point lengths) -- i.e. if bands.in was not
     written from the same k-path.
@@ -173,4 +179,4 @@ def plot_axis(kpath_file: str | Path, bands_file: str | Path) -> dict:
         raise ValueError(f"the k-points in {bands_file} differ from {kpath_file} (max |dk| {worst:.4f} 1/A): "
                          "bands.in was not written from this k-path, or pw.x ran on a different cell")
     return {"x": np.asarray(kp["x"]), "energies": energies, "ticks": kp["ticks"],
-            "segments": [tuple(s) for s in kp["segments"]], "path": kp["path"]}
+            "segments": [slice(a, b) for a, b in kp["segments"]], "path": kp["path"]}
