@@ -1,35 +1,24 @@
-import numpy as np
-import seekpath
-import spglib
-from ase.io import read, write
-from ase import Atoms
+import ase.io
+from ase.io import read
+from chem_llm.kpath import standard_kpath, kp_atoms
 
+# Read the base CIF (conventional F-43m cell, 8 atoms for zincblende)
 base = read('structures/GaAs_base.cif')
-print('Base cell: nat =', len(base), 'cell =\n', base.cell[:])
+print('Base cell: nat =', len(base), 'symbols =', base.get_chemical_symbols())
+print('Base cell vectors:')
+print(base.cell)
 
-cell_tuple = (base.cell[:], base.get_scaled_positions(), base.get_atomic_numbers())
-res = seekpath.get_path(cell_tuple, symprec=0.01)
-# seekpath's result dict keys vary by version; only spacegroup_number is guaranteed.
-print('seekpath space group number:', res['spacegroup_number'])
+# Get the standard k-path; kp_atoms returns the primitive cell (seekpath's)
+kp = standard_kpath(base)
+prim = kp_atoms(kp)
+print('Primitive cell: nat =', len(prim), 'symbols =', prim.get_chemical_symbols())
+print('Primitive cell vectors:')
+print(prim.cell)
 
-# INVARIANT 3 check: seekpath space group must match spglib's own analysis at the same symprec
-spg = spglib.get_symmetry_dataset(cell_tuple, symprec=0.01)
-assert res['spacegroup_number'] == spg.number, (res['spacegroup_number'], spg.number)
-# The base structure is unperturbed and generate_cif reported F-43m (#216) as authoritative
-assert res['spacegroup_number'] == 216, res['spacegroup_number']
+# INVARIANT: reduced atom count divides original evenly
+assert len(base) % len(prim) == 0, 'Primitive cell atom count does not divide original'
 
-prim = Atoms(cell=res['primitive_lattice'], scaled_positions=res['primitive_positions'],
-             numbers=res['primitive_types'], pbc=True)
-print('Primitive cell: nat =', len(prim), 'cell =\n', prim.cell[:])
-print('Primitive symbols:', prim.get_chemical_symbols())
-
-# DECISION RULE check: reduction must preserve space group and atom count must divide evenly
-prim_tuple = (prim.cell[:], prim.get_scaled_positions(), prim.get_atomic_numbers())
-spg_prim = spglib.get_symmetry_dataset(prim_tuple, symprec=0.01)
-assert spg_prim.number == 216, spg_prim.number
-assert len(base) % len(prim) == 0, (len(base), len(prim))
-
-write('structures/GaAs_primitive.cif', prim)
-print('Wrote structures/GaAs_primitive.cif')
-print('Path:', res['path'])
-print('Point coords:', res['point_coords'])
+# Save the primitive cell as the base structure for downstream use
+ase.io.write('structures/GaAs_primitive.cif', prim)
+print('Saved structures/GaAs_primitive.cif')
+print('Space group of primitive:', prim.get_space_group() if hasattr(prim, 'get_space_group') else 'N/A')

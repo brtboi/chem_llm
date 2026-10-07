@@ -1,50 +1,29 @@
 import numpy as np
-import seekpath
-import spglib
-from ase.io import read
-from ase import Atoms
+from ase.io import read, write
+from chem_llm.kpath import standard_kpath, kp_atoms
+from spglib import get_symmetry_dataset
 
-# Read the base CIF
-atoms = read('structures/base_C.cif')
-print(f"Original cell: {atoms.cell}")
-print(f"Original atom count: {len(atoms)}")
-print(f"Original species: {atoms.get_chemical_symbols()}")
+# Read the base CIF (mp-48, graphite, P6_3/mmc #194)
+base = read('structures/base_C.cif')
+print('Base cell: nat =', len(base), 'cell =\n', base.cell)
 
-# Build cell_tuple for seekpath
-cell_tuple = (atoms.cell[:], atoms.get_scaled_positions(), atoms.get_atomic_numbers())
+# Reduce to the primitive cell using seekpath (same code as get_kpath).
+# The primitive cell is what the k-path refers to and what we run DFT on.
+kp = standard_kpath(base)
+prim = kp_atoms(kp)
+print('Primitive cell: nat =', len(prim), 'cell =\n', prim.cell)
 
-# Get path with symprec=0.01 (matching pymatgen default, avoiding spglib's tight 1e-5)
-res = seekpath.get_path(cell_tuple, symprec=0.01)
-print(f"Space group number from seekpath: {res['spacegroup_number']}")
+# DECISION RULE checks: atom count divides evenly; space group unchanged.
+assert len(base) % len(prim) == 0, 'primitive atom count must divide original'
 
-# Verify with spglib directly
-spg_dataset = spglib.get_symmetry_dataset(cell_tuple, symprec=0.01)
-print(f"Space group number from spglib: {spg_dataset.number}")
-assert res['spacegroup_number'] == spg_dataset.number, "Space group mismatch between seekpath and spglib"
+# spglib expects (lattice, scaled_positions, numbers), not an ASE Atoms object.
+sg_base = get_symmetry_dataset((base.cell.array, base.get_scaled_positions(), base.get_atomic_numbers()), symprec=1e-5)
+sg_prim = get_symmetry_dataset((prim.cell.array, prim.get_scaled_positions(), prim.get_atomic_numbers()), symprec=1e-5)
+print('Space group base:', sg_base['international'], 'number', sg_base['number'])
+print('Space group prim:', sg_prim['international'], 'number', sg_prim['number'])
+assert sg_base['number'] == sg_prim['number'] == 194, 'space group changed by reduction'
 
-# The primitive cell from seekpath
-prim_cell = res['primitive_lattice']
-prim_pos = res['primitive_positions']
-prim_types = res['primitive_types']
-print(f"\nPrimitive cell: {prim_cell}")
-print(f"Primitive atom count: {len(prim_types)}")
-print(f"Primitive species: {prim_types}")
-
-# Assert the reduced atom count divides the original evenly
-assert len(atoms) % len(prim_types) == 0, "Reduced atom count does not divide original evenly"
-
-# Build the primitive Atoms object
-prim = Atoms(cell=prim_cell, scaled_positions=prim_pos, numbers=prim_types, pbc=True)
-print(f"\nPrimitive Atoms object:")
-print(f"  nat = {len(prim)}")
-print(f"  ntyp = {len(set(prim.get_chemical_symbols()))}")
-print(f"  cell = {prim.cell}")
-print(f"  positions = {prim.get_positions()}")
-
-# Save the primitive cell for downstream use
-prim.write('structures/primitive_C.cif')
-print("\nSaved primitive cell to structures/primitive_C.cif")
-
-# Print the k-path for reference
-print(f"\nK-path: {res['path']}")
-print(f"Point coords: {res['point_coords']}")
+# Save the primitive cell as the base structure for the rest of the workflow
+write('structures/base_C_prim.cif', prim)
+print('Saved structures/base_C_prim.cif with', len(prim), 'atoms')
+print('k-path:', kp['path'])

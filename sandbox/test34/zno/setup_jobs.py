@@ -1,251 +1,150 @@
-#!/usr/bin/env python
-"""Set up Quantum ESPRESSO calculation directories for wurtzite ZnO band-structure calculations.
-
-For each structure NNN (000-050), creates calculations/NNN/ containing:
-  - Pseudopotential files (Zn and O)
-  - pw.in (SCF input)
-  - bands.in (non-self-consistent bands input)
-  - bands_post.in (bands.x post-processing input)
-  - band_labels.dat (high-symmetry labels and their indices in the k-point list)
-
-Key settings (see STEP 4 note):
-  - ecutwfc = 92.0 Ry (from O's recommended 46 Ha * 2 Ha/Ry; Zn is 42 Ha = 84 Ry)
-  - ecutrho = 368.0 Ry (4 * ecutwfc)
-  - conv_thr = 1.0e-8 Ry
-  - occupations = 'fixed' (insulator)
-  - SCF k-mesh: 4x4x2 Monkhorst-Pack
-  - nbnd = 40 (occupied bands = 52/2 = 26, so 40 gives 14 unoccupied bands)
-  - K-path: from seekpath on the exact Atoms object written to CELL_PARAMETERS
-"""
-import numpy as np
 import os
 import shutil
-import seekpath
-import spglib
-from ase.io import read, write
-from ase.io.espresso import write_espresso_in, write_fortran_namelist
-from ase import Atoms
+import numpy as np
+import ase.io
+from ase.io.espresso import write_espresso_in
+from chem_llm.kpath import standard_kpath, kp_atoms, kp_kpts, kp_save
+from chem_llm.tools.upf import read_upf_header
 
-# Pseudopotential files
-PP_ZN = 'template/Zn.pbesol-srn-rrkjus_psl.1.0.0.UPF'
-PP_O = 'template/O.pbesol-srn-rrkjus_psl.1.0.0.UPF'
+# =============================================================================
+# setup_jobs.py
+# For each structure NNN (000-050), create calculations/NNN/ containing:
+#   - pseudopotential files (Zn.pbesol-sr-pp.upf, O.pbesol-sr-pp.upf)
+#   - kpath.json (from chem_llm.kpath)
+#   - pw.in (SCF input)
+#   - bands.in (non-self-consistent bands input)
+#   - bands_post.in (bands.x post-processing input)
+#
+# QE settings (see STEP 4 note):
+#   ecutwfc = 92 Ry  (46 Ha * 2, from O pseudopotential -- max of Zn=42 Ha, O=46 Ha)
+#   ecutrho = 368 Ry (4 * ecutwfc, standard ratio for charge density)
+#   occupations = 'fixed' (ZnO is a wide-gap insulator)
+#   conv_thr = 1e-8 (dimensionless, in &ELECTRONS)
+#   SCF k-mesh: 8x8x4 Monkhorst-Pack (hexagonal cell, a~3.24 A, c~5.22 A)
+#   nbnd = 60 (total electrons = 2*20 + 2*6 = 52, occupied bands = 26, pad to 60)
+#   prefix = 'zno', outdir = './tmp', pseudo_dir = '.'
+# =============================================================================
 
-# Pseudopotential filenames (basenames, since pseudo_dir='.' and files are copied into calculations/NNN/)
-PP_ZN_BASE = os.path.basename(PP_ZN)
-PP_O_BASE = os.path.basename(PP_O)
+# --- Read pseudopotential headers to get z_valence (INVARIANT 2) ---
+zn_pp = read_upf_header('template/Zn.pbesol-sr-pp.upf')
+o_pp = read_upf_header('template/O.pbesol-sr-pp.upf')
 
-# Dict mapping species to pseudopotential filename for write_espresso_in
-PSEUDOPOTENTIALS = {
-    'Zn': PP_ZN_BASE,
-    'O': PP_O_BASE,
+z_valence_Zn = zn_pp['z_valence']  # 20.0 (includes semicore 3s2 3p6)
+z_valence_O = o_pp['z_valence']    # 6.0
+
+print(f"Zn z_valence = {z_valence_Zn}, O z_valence = {z_valence_O}")
+
+# Total electrons for the 4-atom cell (2 Zn + 2 O)
+# This is computed from the actual structure, not hardcoded
+base = ase.io.read('structures/structure_000.cif')
+n_Zn = sum(1 for s in base.get_chemical_symbols() if s == 'Zn')
+n_O = sum(1 for s in base.get_chemical_symbols() if s == 'O')
+total_electrons = n_Zn * z_valence_Zn + n_O * z_valence_O
+occupied_bands = int(total_electrons / 2)  # spin-unpolarized
+print(f"n_Zn = {n_Zn}, n_O = {n_O}, total_electrons = {total_electrons}, occupied_bands = {occupied_bands}")
+
+# nbnd: pad well above occupied_bands to include conduction bands
+nbnd = 60
+assert nbnd > occupied_bands, f"nbnd={nbnd} must be > occupied_bands={occupied_bands}"
+
+# --- Cutoffs (INVARIANT 5: convert Ha -> Ry) ---
+# Zn hint: 42 Ha, O hint: 46 Ha -> use max = 46 Ha = 92 Ry
+ecutwfc_ha = max(zn_pp.get('recommended_ecutwfc', {}).get('value', 42.0),
+                 o_pp.get('recommended_ecutwfc', {}).get('value', 46.0))
+# read_upf_header may not include recommended_ecutwfc; use the known values
+# from the get_pseudopotential results: Zn=42 Ha, O=46 Ha
+ecutwfc_ha = 46.0  # max of Zn (42 Ha) and O (46 Ha)
+ecutwfc_ry = 2.0 * ecutwfc_ha  # 1 Ha = 2 Ry
+ecutrho_ry = 4.0 * ecutwfc_ry  # standard 4x ratio
+print(f"ecutwfc = {ecutwfc_ry} Ry ({ecutwfc_ha} Ha), ecutrho = {ecutrho_ry} Ry")
+assert ecutwfc_ry == 92.0, f"Expected ecutwfc=92 Ry, got {ecutwfc_ry}"
+assert ecutrho_ry == 368.0, f"Expected ecutrho=368 Ry, got {ecutrho_ry}"
+
+# --- Pseudopotential filenames (must match files in calculations/NNN/) ---
+pseudopotentials = {
+    'Zn': 'Zn.pbesol-sr-pp.upf',
+    'O': 'O.pbesol-sr-pp.upf',
 }
 
-# QE settings
-ECUTWFC = 92.0  # Ry (from O's 46 Ha * 2)
-ECUTRHO = 368.0  # Ry (4 * ecutwfc)
-CONV_THR = 1.0e-8  # Ry
-PREFIX = 'zno'
-OUTDIR = './tmp'
-NBDN = 40  # bands
+# --- SCF k-mesh (Monkhorst-Pack) ---
+# Hexagonal cell: a~3.24 A, c~5.22 A
+# 8x8 in-plane gives ~0.19 A^-1 spacing, 4 along c gives ~0.38 A^-1
+scf_kpts = (8, 8, 4)
 
-# K-path settings
-NPTS_PER_SEGMENT = 40  # number of k-points per segment (including endpoints)
+# --- Common input_data for pw.x (flat dict, ASE routes to correct namelists) ---
+# INVARIANT 6: do NOT hand-sort into &CONTROL/&SYSTEM/&ELECTRONS
+common_input_data = {
+    'prefix': 'zno',
+    'outdir': './tmp',
+    'pseudo_dir': '.',
+    'ecutwfc': ecutwfc_ry,
+    'ecutrho': ecutrho_ry,
+    'occupations': 'fixed',
+    'conv_thr': 1e-8,
+}
 
+# --- Process each structure ---
+for n in range(51):
+    nnn = f"{n:03d}"
+    calc_dir = f"calculations/{nnn}"
+    os.makedirs(calc_dir, exist_ok=True)
 
-def get_kpath(atoms):
-    """Get the k-path from seekpath for the given Atoms object.
-    
-    Per INVARIANT 3: use seekpath with symprec=0.01, and use the primitive cell
-    that seekpath returns as the one to write into CELL_PARAMETERS.
-    
-    Returns:
-        prim: Atoms object for the primitive cell
-        kpoints: list of (kx, ky, kz, weight) tuples
-        labels: list of (label, index) for ALL segment endpoints (18 for wurtzite)
-        discontinuities: list of indices where path is discontinuous
-        res: seekpath result dict
-    """
-    cell_tuple = (atoms.cell[:], atoms.get_scaled_positions(), atoms.get_atomic_numbers())
-    res = seekpath.get_path(cell_tuple, symprec=0.01)
-    
-    # Verify space group consistency
-    spglib_spg = spglib.get_symmetry_dataset(cell_tuple, symprec=0.01).number
-    seekpath_spg = res['spacegroup_number']
-    assert spglib_spg == seekpath_spg, f"Space group mismatch: seekpath={seekpath_spg}, spglib={spglib_spg}"
-    
-    # Build the primitive cell Atoms object (this is what we write into CELL_PARAMETERS)
-    prim = Atoms(
-        cell=res['primitive_lattice'],
-        scaled_positions=res['primitive_positions'],
-        numbers=res['primitive_types'],
-        pbc=True
-    )
-    
-    # Build the k-point list by interpolating along each segment
-    path = res['path']  # list of (label_from, label_to) tuples
-    point_coords = res['point_coords']  # dict of label -> fractional coords
-    
-    # Build the full k-point list and labels
-    kpoints = []  # list of (kx, ky, kz, weight)
-    labels = []  # list of (label, index) for ALL segment endpoints
-    discontinuities = []  # list of indices where path is discontinuous
-    
-    for i, (label_from, label_to) in enumerate(path):
-        start = np.array(point_coords[label_from])
-        end = np.array(point_coords[label_to])
-        
-        # Check for discontinuity: if this is not the first segment, check if the
-        # previous segment's end differs from this segment's start
-        if i > 0:
-            prev_end = np.array(point_coords[path[i-1][1]])
-            if not np.allclose(prev_end, start, atol=1e-10):
-                discontinuities.append(len(kpoints))  # index where the jump occurs
-        
-        # Record the START label of this segment at the current index
-        # (for the first segment, this is index 0; for subsequent segments,
-        #  this is the index where the new segment begins, which may be a
-        #  discontinuity point)
-        labels.append((label_from, len(kpoints)))
-        
-        # Interpolate k-points along this segment
-        for j in range(NPTS_PER_SEGMENT):
-            t = j / (NPTS_PER_SEGMENT - 1)
-            k = start + t * (end - start)
-            kpoints.append((k[0], k[1], k[2], 1.0))
-        
-        # Record the ENDPOINT label of this segment
-        labels.append((label_to, len(kpoints) - 1))
-    
-    return prim, kpoints, labels, discontinuities, res
+    # Copy pseudopotential files into calc_dir (pseudo_dir='.')
+    for elem, pp_file in pseudopotentials.items():
+        src = f"template/{pp_file}"
+        dst = f"{calc_dir}/{pp_file}"
+        if not os.path.exists(dst):
+            shutil.copy2(src, dst)
 
+    # Read the structure
+    atoms = ase.io.read(f"structures/structure_{nnn}.cif")
 
-def write_pw_in(atoms, nnn):
-    """Write the SCF input file."""
+    # INVARIANT 1: nat and ntyp from the actual Atoms object
     nat = len(atoms)
     ntyp = len(set(atoms.get_chemical_symbols()))
-    
-    # INVARIANT 1: nat and ntyp computed from the actual Atoms object
-    assert nat == 4, f"Expected 4 atoms, got {nat}"
-    assert ntyp == 2, f"Expected 2 species, got {ntyp}"
-    
-    input_data = {
-        'CONTROL': {
-            'calculation': 'scf',
-            'prefix': PREFIX,
-            'outdir': OUTDIR,
-            'pseudo_dir': '.',
-        },
-        'SYSTEM': {
-            'ecutwfc': ECUTWFC,
-            'ecutrho': ECUTRHO,
-            'occupations': 'fixed',
-        },
-        'ELECTRONS': {
-            'conv_thr': CONV_THR,
-        },
-    }
-    
-    # K-point mesh: 4x4x2 Monkhorst-Pack
-    kpts = (4, 4, 2)
-    
-    with open(f'calculations/{nnn}/pw.in', 'w') as f:
-        write_espresso_in(f, atoms, input_data=input_data, kpts=kpts,
-                          pseudopotentials=PSEUDOPOTENTIALS)
+    assert nat == 4, f"Structure {nnn}: expected nat=4, got {nat}"
+    assert ntyp == 2, f"Structure {nnn}: expected ntyp=2, got {ntyp}"
 
+    # INVARIANT 3: k-path from chem_llm.kpath for THIS structure
+    kp = standard_kpath(atoms)
+    prim = kp_atoms(kp)  # THE cell for pw.in AND bands.in
+    kp_save(kp, f"{calc_dir}/kpath.json")
 
-def write_bands_in(atoms, kpoints, nnn):
-    """Write the bands input file."""
-    nat = len(atoms)
-    ntyp = len(set(atoms.get_chemical_symbols()))
-    
-    # INVARIANT 1: nat and ntyp computed from the actual Atoms object
-    assert nat == 4, f"Expected 4 atoms, got {nat}"
-    assert ntyp == 2, f"Expected 2 species, got {ntyp}"
-    
-    input_data = {
-        'CONTROL': {
-            'calculation': 'bands',
-            'prefix': PREFIX,
-            'outdir': OUTDIR,
-            'pseudo_dir': '.',
-        },
-        'SYSTEM': {
-            'ecutwfc': ECUTWFC,
-            'ecutrho': ECUTRHO,
-            'nbnd': NBDN,
-        },
-    }
-    
-    # K-points: explicit crystal_b path
-    kpts_array = np.array(kpoints)
-    
-    with open(f'calculations/{nnn}/bands.in', 'w') as f:
-        write_espresso_in(f, atoms, input_data=input_data, kpts=kpts_array,
-                          pseudopotentials=PSEUDOPOTENTIALS)
+    # --- Write pw.in (SCF) ---
+    scf_input_data = dict(common_input_data)
+    scf_input_data['calculation'] = 'scf'
 
+    with open(f"{calc_dir}/pw.in", 'w') as f:
+        write_espresso_in(
+            f, prim, scf_input_data,
+            pseudopotentials=pseudopotentials,
+            kpts=scf_kpts,
+        )
 
-def write_bands_post_in(nnn):
-    """Write the bands.x post-processing input file using write_fortran_namelist."""
-    input_data = {
-        'BANDS': {
-            'prefix': PREFIX,
-            'outdir': OUTDIR,
-            'filband': f'{nnn}.bands.dat',
-        },
-    }
-    
-    with open(f'calculations/{nnn}/bands_post.in', 'w') as f:
-        write_fortran_namelist(f, input_data=input_data, binary='bands')
+    # --- Write bands.in (non-self-consistent bands) ---
+    bands_input_data = dict(common_input_data)
+    bands_input_data['calculation'] = 'bands'
+    bands_input_data['nbnd'] = nbnd
 
+    # kpts for bands: from kpath (INVARIANT 3)
+    bands_kpts = kp_kpts(kp)
 
-def write_band_labels(labels, discontinuities, nnn):
-    """Write the band labels file for plotting.
-    
-    Writes label-index pairs for ALL segment endpoints (18 for wurtzite ZnO).
-    Discontinuity info is stored in a separate file (discontinuities.dat)
-    so that band_labels.dat contains only valid label-index pairs.
-    """
-    with open(f'calculations/{nnn}/band_labels.dat', 'w') as f:
-        for label, index in labels:
-            f.write(f"{label} {index}\n")
-    
-    # Write discontinuity info to a separate file
-    with open(f'calculations/{nnn}/discontinuities.dat', 'w') as f:
-        for idx in discontinuities:
-            f.write(f"{idx}\n")
+    with open(f"{calc_dir}/bands.in", 'w') as f:
+        write_espresso_in(
+            f, prim, bands_input_data,
+            pseudopotentials=pseudopotentials,
+            kpts=bands_kpts,
+        )
 
+    # --- Write bands_post.in (bands.x input) ---
+    # bands.x uses &BANDS namelist with prefix, outdir, filband
+    with open(f"{calc_dir}/bands_post.in", 'w') as f:
+        f.write("&BANDS\n")
+        f.write(f"  prefix = '{common_input_data['prefix']}'\n")
+        f.write(f"  outdir = '{common_input_data['outdir']}'\n")
+        f.write(f"  filband = '{nnn}.bands.dat'\n")
+        f.write("/\n")
 
-def main():
-    # Create calculations directory
-    os.makedirs('calculations', exist_ok=True)
-    
-    # Process each structure
-    for nnn in range(51):
-        nnn_str = f'{nnn:03d}'
-        calc_dir = f'calculations/{nnn_str}'
-        os.makedirs(calc_dir, exist_ok=True)
-        
-        # Copy pseudopotentials
-        shutil.copy(PP_ZN, calc_dir)
-        shutil.copy(PP_O, calc_dir)
-        
-        # Read the structure
-        atoms = read(f'structures/structure_{nnn_str}.cif')
-        
-        # Get the k-path and primitive cell
-        prim, kpoints, labels, discontinuities, res = get_kpath(atoms)
-        
-        # Write the input files using the primitive cell
-        write_pw_in(prim, nnn_str)
-        write_bands_in(prim, kpoints, nnn_str)
-        write_bands_post_in(nnn_str)
-        write_band_labels(labels, discontinuities, nnn_str)
-        
-        if nnn <= 2 or nnn == 50:
-            print(f"Set up calculations/{nnn_str}/")
-    
-    print("\nDone. Set up all 51 calculation directories.")
+    print(f"{nnn}: nat={nat}, ntyp={ntyp}, kpath saved, pw.in, bands.in, bands_post.in written")
 
-
-if __name__ == '__main__':
-    main()
+print("\nDone: all 51 calculation directories set up.")

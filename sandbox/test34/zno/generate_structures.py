@@ -1,106 +1,125 @@
-#!/usr/bin/env python
-"""Generate 51 perturbed wurtzite ZnO structures for DFT band-structure calculations.
-
-Structure 000 is the unperturbed primitive cell.
-Structures 001-050 have random atomic displacements (thermal motion) and small random lattice strain.
-
-Temperature choice: 300 K (room temperature).
-Wurtzite ZnO (alpha-ZnO) is the thermodynamically stable phase at room temperature
-and remains stable up to ~1000 C. It is the natural phase found in nature (zincite).
-
-Displacement amplitudes (Debye-Waller U values, mean-square displacements in A^2):
-  - Zn: U = 0.005 A^2  -> RMS = sqrt(0.005) = 0.0707 A
-  - O:  U = 0.008 A^2  -> RMS = sqrt(0.008) = 0.0894 A
-Oxygen is lighter (16 amu vs 65 amu) and more weakly bound in the wurtzite lattice,
-so it has a larger mean-square displacement. These U values are representative of
-experimental neutron diffraction data for wurtzite ZnO at 300 K.
-
-Lattice strain: small random strain of ~0.5% per axis (Gaussian, sigma=0.005).
-This represents the kind of small lattice distortion that occurs in real crystals
-due to defects, impurities, and thermal fluctuations.
-
-Units:
-  - U values are in A^2 (mean-square displacement)
-  - RMS displacement = sqrt(U) in A
-  - Strain is dimensionless (fractional change in lattice parameter)
-"""
+import ase.io
 import numpy as np
-from ase.io import read, write
-from ase import Atoms
-import os
 
-# Read the primitive cell
-atoms_base = read('structures/zno_primitive.cif')
-print(f"Base structure: {len(atoms_base)} atoms")
-print(f"Cell:\n{atoms_base.cell[:].tolist()}")
-print(f"Chemical formula: {atoms_base.get_chemical_formula()}")
+# =============================================================================
+# generate_structures.py
+# Generates 51 wurtzite ZnO structures: structure_000.cif (unperturbed base)
+# and structure_001.cif .. structure_050.cif (perturbed copies with thermal
+# displacements + small random lattice strain).
+#
+# Temperature choice: 300 K (room temperature).
+# Wurtzite ZnO is the thermodynamically stable phase at ambient conditions.
+# The competing zincblende (sphalerite) phase is only ~1-2 kJ/mol higher in
+# energy at 0 K and does not become the stable phase until very high
+# pressures (>10 GPa) or temperatures well above 1000 K. At 300 K wurtzite
+# is unambiguously the ground-state structure, so 300 K is the correct
+# temperature for thermal-displacement amplitudes.
+#
+# Displacement amplitudes (Einstein model):
+#   RMS displacement per axis:  u_rms = sqrt(3 * k_B * T / M)
+#   where k_B = 1.380649e-23 J/K, T = 300 K, M = atomic mass in kg.
+#   The crystallographic mean-square displacement parameter is U = u_rms^2
+#   (in A^2). We displace each atom by a Gaussian with standard deviation
+#   u_rms (in A) along each Cartesian axis independently.
+#
+#   O  (Z=8,  M = 15.999 g/mol = 15.999e-3 kg):
+#       u_rms = sqrt(3 * 1.380649e-23 * 300 / 15.999e-3) = sqrt(7.745e-19)
+#             = 8.80e-10 m = 0.880 A
+#       U_O   = u_rms^2 = 0.774 A^2
+#
+#   Zn (Z=30, M = 65.38 g/mol = 65.38e-3 kg):
+#       u_rms = sqrt(3 * 1.380649e-23 * 300 / 65.38e-3) = sqrt(1.903e-19)
+#             = 4.36e-10 m = 0.436 A
+#       U_Zn  = u_rms^2 = 0.190 A^2
+#
+#   O moves ~2x more than Zn because it is ~4x lighter (u_rms ~ 1/sqrt(M)).
+#
+# Lattice strain: small random strain tensor with per-axis magnitude ~0.5%
+# (i.e. strain components drawn uniformly from [-0.005, +0.005]). This is
+# representative of the kind of lattice distortion that would arise from
+# thermal expansion fluctuations or small defects, without changing the
+# crystal structure type.
+# =============================================================================
 
-# Debye-Waller U values (mean-square displacements in A^2) at 300 K
-# Zn: U = 0.005 A^2, O: U = 0.008 A^2
-# RMS displacement = sqrt(U) in A
-U_Zn = 0.005  # A^2
-U_O = 0.008   # A^2
-rms_Zn = np.sqrt(U_Zn)  # A
-rms_O = np.sqrt(U_O)    # A
-print(f"\nDisplacement amplitudes (RMS = sqrt(U)):")
-print(f"  Zn: U = {U_Zn} A^2, RMS = {rms_Zn:.4f} A")
-print(f"  O:  U = {U_O} A^2, RMS = {rms_O:.4f} A")
+k_B = 1.380649e-23  # J/K
+T = 300.0           # K
 
-# Random strain: sigma = 0.005 (0.5%)
-strain_sigma = 0.005
+# Atomic masses in kg
+M_O = 15.999e-3
+M_Zn = 65.38e-3
 
-# Set random seed for reproducibility
-np.random.seed(42)
+# RMS displacement per axis in Angstrom (1 A = 1e-10 m)
+# u_rms [A] = sqrt(3 * k_B * T / M) / 1e-10
+u_rms_O = np.sqrt(3 * k_B * T / M_O) / 1e-10   # ~0.880 A
+u_rms_Zn = np.sqrt(3 * k_B * T / M_Zn) / 1e-10  # ~0.436 A
 
-# Create output directory
-os.makedirs('structures', exist_ok=True)
+# Mean-square displacement parameters U in A^2 (for reference / comments)
+U_O = u_rms_O ** 2    # ~0.774 A^2
+U_Zn = u_rms_Zn ** 2  # ~0.190 A^2
 
-# Write structure 000 (unperturbed)
-write('structures/structure_000.cif', atoms_base)
-print("\nWrote structures/structure_000.cif (unperturbed)")
+print(f"T = {T} K")
+print(f"O:  u_rms = {u_rms_O:.4f} A,  U = {U_O:.4f} A^2")
+print(f"Zn: u_rms = {u_rms_Zn:.4f} A,  U = {U_Zn:.4f} A^2")
 
-# Generate perturbed structures 001-050
-for i in range(1, 51):
-    atoms = atoms_base.copy()
-    
-    # Apply random lattice strain
-    # Strain tensor: small random diagonal strain
-    strain = np.random.normal(0, strain_sigma, size=3)
-    # Apply strain to cell vectors
-    cell = atoms.cell[:].copy()
-    for axis in range(3):
-        cell[axis] *= (1 + strain[axis])
-    atoms.cell = cell
-    
-    # Apply random atomic displacements
-    # Each atom gets a Gaussian displacement with species-specific RMS
-    positions = atoms.get_positions().copy()
-    for j, atom in enumerate(atoms):
-        symbol = atom.symbol
-        if symbol == 'Zn':
-            rms = rms_Zn
-        elif symbol == 'O':
-            rms = rms_O
-        else:
-            rms = 0.05  # default
-        # Gaussian displacement in each Cartesian direction
-        disp = np.random.normal(0, rms, size=3)
-        positions[j] += disp
-    atoms.positions = positions
-    
-    # INVARIANT 1: assert nat/ntyp consistency
-    nat = len(atoms)
-    ntyp = len(set(atoms.get_chemical_symbols()))
-    assert nat == 4, f"Structure {i:03d}: expected 4 atoms, got {nat}"
-    assert ntyp == 2, f"Structure {i:03d}: expected 2 species, got {ntyp}"
-    
-    # Write the structure
-    fname = f'structures/structure_{i:03d}.cif'
-    write(fname, atoms)
-    
-    if i <= 3 or i == 50:
-        print(f"Wrote {fname}")
+# Read the base (unperturbed) structure
+base = ase.io.read('structures/structure_000.cif')
+print(f"Base structure: nat = {len(base)}, symbols = {base.get_chemical_symbols()}")
 
-print("\nDone. Generated 51 structures (000-050).")
-print("Structure 000: unperturbed primitive cell")
-print("Structures 001-050: perturbed with thermal displacements + random strain")
+# INVARIANT 1: nat and ntyp must be computed from the actual Atoms object
+nat = len(base)
+typ = len(set(base.get_chemical_symbols()))
+print(f"nat = {nat}, ntyp = {typ}")
+
+# Build a per-atom RMS displacement array
+# Each atom gets its species-specific u_rms
+u_rms_per_atom = np.array([
+    u_rms_O if sym == 'O' else u_rms_Zn
+    for sym in base.get_chemical_symbols()
+])
+
+rng = np.random.default_rng(seed=42)  # reproducible
+
+# Structure 000: unperturbed base
+ase.io.write('structures/structure_000.cif', base)
+print("Wrote structures/structure_000.cif (unperturbed)")
+
+for n in range(1, 51):
+    atoms = base.copy()
+
+    # --- Thermal displacements (Gaussian, per-axis, per-species amplitude) ---
+    # Displace in Cartesian coordinates: each axis gets an independent
+    # Gaussian with std = u_rms for that species.
+    pos = atoms.get_positions().copy()  # Cartesian, Angstrom
+    for i in range(nat):
+        pos[i] += rng.normal(0.0, u_rms_per_atom[i], size=3)
+    atoms.set_positions(pos)
+
+    # --- Small random lattice strain ---
+    # Strain tensor: symmetric, per-axis components ~ U[-0.005, 0.005]
+    # This is a small perturbation (~0.5%) that does not change the structure type.
+    strain = np.zeros((3, 3))
+    for i in range(3):
+        for j in range(i, 3):
+            val = rng.uniform(-0.005, 0.005)
+            strain[i, j] = val
+            strain[j, i] = val  # symmetric strain tensor
+
+    # Apply strain to the cell: new_cell = (I + strain) @ old_cell
+    # In ASE, cell vectors are rows of cell.array.
+    # If we think of the cell as a matrix C (rows = vectors),
+    # a strain tensor epsilon transforms positions as x' = (I + eps) x,
+    # so the new cell is C' = (I + eps) @ C  (matrix multiplication).
+    old_cell = np.array(atoms.cell.array)  # 3x3, rows = cell vectors
+    new_cell = (np.eye(3) + strain) @ old_cell
+    atoms.set_cell(new_cell, scale_atoms=True)  # scale_atoms=True keeps fractional coords fixed
+
+    # INVARIANT 1: verify nat/ntyp are unchanged after perturbation
+    assert len(atoms) == nat, f"Structure {n:03d}: nat changed from {nat} to {len(atoms)}"
+    assert len(set(atoms.get_chemical_symbols())) == typ, \
+        f"Structure {n:03d}: ntyp changed from {typ} to {len(set(atoms.get_chemical_symbols()))}"
+
+    fname = f'structures/structure_{n:03d}.cif'
+    ase.io.write(fname, atoms)
+    print(f"Wrote {fname} (nat={len(atoms)}, ntyp={len(set(atoms.get_chemical_symbols()))})")
+
+print("\nDone: 51 structures written (structure_000.cif .. structure_050.cif)")

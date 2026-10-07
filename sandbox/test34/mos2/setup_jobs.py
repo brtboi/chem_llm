@@ -1,261 +1,167 @@
 import os
 import shutil
 import numpy as np
-import seekpath
-import spglib
-from ase.io import read, write
+import ase.io
 from ase.io.espresso import write_espresso_in
-from ase import Atoms
+from chem_llm.kpath import standard_kpath, kp_atoms, kp_kpts, kp_save
+from chem_llm.tools.upf import read_upf_header
 
 # =============================================================================
-# setup_jobs.py
-# For each structure NNN (000-050), create calculations/NNN/ containing:
-#   - pseudopotential files (Mo.pbesol_upf, S.pbesol_upf)
-#   - pw.in (SCF input)
-#   - bands.in (non-self-consistent bands input with explicit k-path)
-#   - bands_post.in (bands.x post-processing input)
-#   - band_labels.dat (high-symmetry labels and their indices in the k-point list)
+# STEP 5: setup_jobs.py
+# For each structure NNN (000-050), create calculations/NNN/ with:
+#   - pseudopotential files (Mo.upf, S.upf)
+#   - kpath.json (from chem_llm.kpath)
+#   - pw.in (SCF input, written with write_espresso_in)
+#   - bands.in (bands input, written with write_espresso_in)
+#   - bands_post.in (bands.x input, written manually)
 # =============================================================================
 
-# --- Pseudopotential files ---
-# Mo: z_valence=14, recommended ecutwfc=40.0 Ha = 80.0 Ry (INVARIANT 5: 1 Ha = 2 Ry)
-# S:  z_valence=6,  recommended ecutwfc=26.0 Ha = 52.0 Ry
-# Use the maximum: ecutwfc = 80.0 Ry (Mo dominates)
-# ecutrho = 4 * ecutwfc = 320.0 Ry (standard 4x ratio for charge density)
+# --- Pseudopotential setup ---
+# From STEP 3:
+#   Mo: z_valence=14, recommended ecutwfc=40.0 Ha
+#   S:  z_valence=6,  recommended ecutwfc=26.0 Ha
+# INVARIANT 5: 1 Ha = 2 Ry, so ecutwfc in Ry = 2 * hint_ha
+# Mo is the limiting element: ecutwfc = 2 * 40.0 = 80.0 Ry
+# ecutrho = 4 * ecutwfc = 320.0 Ry (standard practice)
 
-ECUTWFC_RY = 80.0   # Ry
-ECUTRHO_RY = 320.0  # Ry
+# Read z_valence from the actual UPF files (INVARIANT 2)
+mo_upf = read_upf_header('template/Mo.upf')
+s_upf = read_upf_header('template/S.upf')
 
-# --- SCF settings ---
-# calculation = 'scf'
-# prefix = 'mos2' (consistent across SCF and bands)
-# outdir = './tmp' (relative to calculations/NNN, where pw.x runs)
-# pseudo_dir = './' (pseudopotential files are in calculations/NNN/)
-# occupations = 'fixed' (insulator, 2H MoS2 is a semiconductor)
-# conv_thr = 1.0e-8 Ry (tight convergence for band structure)
-# kpts = (4, 4, 1) Monkhorst-Pack grid (hexagonal: 4x4 in-plane, 1 along c)
-# nspin = 1 (non-magnetic, spin-unpolarized)
+z_valence_Mo = mo_upf['z_valence']
+z_valence_S = s_upf['z_valence']
+print(f'Mo z_valence: {z_valence_Mo}')
+print(f'S  z_valence: {z_valence_S}')
 
-# --- Bands settings ---
-# calculation = 'bands'
-# nbnd = 40 (occupied bands = 28 from 56 electrons / 2; pad to 40 for conduction bands)
-# kpts = explicit k-path array (n_kpts, 4) from seekpath, crystal coordinates
+# Total valence electrons for Mo2S4 (2 Mo + 4 S)
+n_Mo = 2
+n_S = 4
+total_electrons = n_Mo * z_valence_Mo + n_S * z_valence_S
+occupied_bands = int(total_electrons / 2)  # spin-unpolarized
+print(f'Total valence electrons: {total_electrons}')
+print(f'Occupied bands: {occupied_bands}')
 
-NBND = 40
+# nbnd for bands calculation: pad well above occupied bands
+# to capture conduction bands. 40 is well above 26 (14 conduction bands).
+# Reduced from 60 to 40 to avoid GPU memory issues with 267 k-points.
+nbnd = 40
+assert nbnd > occupied_bands, f'nbnd={nbnd} must be > occupied_bands={occupied_bands}'
 
-# --- K-path interpolation ---
-# 20 points per segment for smooth band structure
-POINTS_PER_SEGMENT = 20
+# ecutwfc in Ry (INVARIANT 5: 1 Ha = 2 Ry)
+ecutwfc_ry = 2.0 * 40.0  # Mo is limiting: 40.0 Ha -> 80.0 Ry
+ecutrho_ry = 4.0 * ecutwfc_ry  # 320.0 Ry
+print(f'ecutwfc = {ecutwfc_ry} Ry')
+print(f'ecutrho = {ecutrho_ry} Ry')
 
-# --- Pseudopotential filenames ---
-PP_MO = 'Mo.pbesol_upf'
-PP_S = 'S.pbesol_upf'
+# --- SCF k-point mesh ---
+# For a 6-atom primitive cell with a=3.19 A, c=13.38 A:
+# 12x12x2 gives ~0.25 A^-1 in-plane, ~0.15 A^-1 out-of-plane.
+# Reasonable density for a semiconductor band-structure SCF.
+scf_kpts = (12, 12, 2)
 
-# --- Template directory with pseudopotentials ---
-TEMPLATE_DIR = 'template'
+# --- Common pw.x settings ---
+prefix = 'mos2'
+outdir = './tmp'
+pseudo_dir = '.'  # pseudopotential files are in calculations/NNN/
 
-# --- Structures directory ---
-STRUCTURES_DIR = 'structures'
+# --- Pseudopotential filenames (relative to calculations/NNN/) ---
+pseudopotentials = {
+    'Mo': 'Mo.upf',
+    'S': 'S.upf',
+}
 
-# --- Calculations directory ---
-CALC_DIR = 'calculations'
+# --- Number of structures ---
+n_structures = 51
 
+for i in range(n_structures):
+    nnn = f'{i:03d}'
+    calc_dir = f'calculations/{nnn}'
+    os.makedirs(calc_dir, exist_ok=True)
 
-def get_kpath(atoms):
-    """
-    Derive the k-path from the exact ASE Atoms object using seekpath.
-    Returns:
-      - prim: the primitive cell Atoms object (to use in CELL_PARAMETERS)
-      - kpts_array: (n_kpts, 4) array of k-points in crystal coordinates
-      - label_indices: list of (label, index_in_kpts_list) pairs
-      - discontinuities: list of indices where the path jumps
-    """
-    cell_tuple = (atoms.cell[:], atoms.get_scaled_positions(), atoms.get_atomic_numbers())
-    
-    # Use symprec=0.01 (matching pymatgen's default) to avoid under-detecting symmetry
-    res = seekpath.get_path(cell_tuple, symprec=0.01)
-    
-    # Verify space group consistency between seekpath and spglib
-    spg_dataset = spglib.get_symmetry_dataset(cell_tuple, symprec=0.01)
-    assert res['spacegroup_number'] == spg_dataset.number, \
-        f"Space group mismatch: seekpath={res['spacegroup_number']}, spglib={spg_dataset.number}"
-    
-    # Build the primitive cell from seekpath's own reduced cell
-    prim = Atoms(
-        cell=res['primitive_lattice'],
-        scaled_positions=res['primitive_positions'],
-        numbers=res['primitive_types'],
-        pbc=True
-    )
-    
-    # res['point_coords'] is a DICT mapping label -> [x, y, z] fractional coords
-    # (confirmed via diagnose_seekpath.py: type is dict, keys are label strings)
-    point_coords = res['point_coords']
-    
-    # Build the explicit k-point list by interpolating each segment
-    # res['path'] is a list of (label_from, label_to) tuples
-    kpts_list = []
-    label_indices = []  # (label, index_in_kpts_list)
-    discontinuities = []  # indices where the path jumps
-    
-    for i_seg, (label_from, label_to) in enumerate(res['path']):
-        coord_from = np.array(point_coords[label_from])
-        coord_to = np.array(point_coords[label_to])
-        
-        # Check for discontinuity: if this is not the first segment and the
-        # previous segment's end differs from this segment's start
-        if i_seg > 0:
-            prev_label_to = res['path'][i_seg - 1][1]
-            prev_coord_to = np.array(point_coords[prev_label_to])
-            if not np.allclose(coord_from, prev_coord_to, atol=1e-6):
-                # Discontinuity: record the index where the jump occurs
-                discontinuities.append(len(kpts_list))
-        
-        # Record the start label for EVERY segment (INVARIANT 3: every segment
-        # must contribute its own start point, and the label must be recorded)
-        label_indices.append((label_from, len(kpts_list)))
-        
-        # Interpolate from coord_from to coord_to
-        # Include the start point for every segment (INVARIANT 3)
-        for i in range(POINTS_PER_SEGMENT + 1):
-            t = i / POINTS_PER_SEGMENT
-            kpt = coord_from + t * (coord_to - coord_from)
-            kpts_list.append(kpt)
-        
-        # Record the label at the end of this segment
-        label_indices.append((label_to, len(kpts_list) - 1))
-    
-    # Convert to array: (n_kpts, 4) with weight column = 1.0
-    kpts_array = np.zeros((len(kpts_list), 4))
-    for i, kpt in enumerate(kpts_list):
-        kpts_array[i, :3] = kpt
-        kpts_array[i, 3] = 1.0  # weight (unused for non-self-consistent bands)
-    
-    return prim, kpts_array, label_indices, discontinuities
+    # Copy pseudopotential files into calculations/NNN/
+    for elem in ['Mo', 'S']:
+        src = f'template/{elem}.upf'
+        dst = f'{calc_dir}/{elem}.upf'
+        if not os.path.exists(dst):
+            shutil.copy2(src, dst)
 
+    # Read the structure
+    atoms = ase.io.read(f'structures/structure_{nnn}.cif')
 
-def write_pw_in(atoms, calc_dir, calculation, kpts, nbnd=None):
-    """
-    Write a pw.x input file using write_espresso_in.
-    """
-    # Build the input_data dict (flat, let ASE route to correct namelists)
-    input_data = {
-        'calculation': calculation,
-        'prefix': 'mos2',
-        'outdir': './tmp',
-        'pseudo_dir': './',
-        'ecutwfc': ECUTWFC_RY,
-        'ecutrho': ECUTRHO_RY,
+    # INVARIANT 1: nat and ntyp from the actual Atoms object
+    nat = len(atoms)
+    ntyp = len(set(atoms.get_chemical_symbols()))
+    assert nat == 6, f'Structure {nnn}: expected 6 atoms, got {nat}'
+    assert ntyp == 2, f'Structure {nnn}: expected 2 species, got {ntyp}'
+
+    # INVARIANT 3: k-path from chem_llm.kpath for THIS structure
+    kp = standard_kpath(atoms)
+    prim = kp_atoms(kp)  # THE cell for pw.in AND bands.in
+    kpts_bands = kp_kpts(kp)  # k-points for bands.in
+
+    # Save kpath.json (holds labels, ticks, segments)
+    kp_save(kp, f'{calc_dir}/kpath.json')
+
+    # --- Write pw.in (SCF) ---
+    # INVARIANT 6: pass a FLAT input_data dict; ASE routes each key
+    # to its correct namelist via Namelist(...).to_nested(binary='pw')
+    scf_input_data = {
+        'calculation': 'scf',
+        'prefix': prefix,
+        'outdir': outdir,
+        'pseudo_dir': pseudo_dir,
+        'ecutwfc': ecutwfc_ry,
+        'ecutrho': ecutrho_ry,
         'occupations': 'fixed',
         'conv_thr': 1.0e-8,
-        'nspin': 1,
     }
-    
-    if calculation == 'bands':
-        input_data['nbnd'] = nbnd
-    
-    # Pseudopotential filenames
-    pseudos = {'Mo': PP_MO, 'S': PP_S}
-    
-    # Write the input file
-    in_file = os.path.join(calc_dir, 'pw.in' if calculation == 'scf' else 'bands.in')
-    write_espresso_in(in_file, atoms, input_data, pseudos, kpts=kpts)
 
+    write_espresso_in(
+        f'{calc_dir}/pw.in',
+        prim,
+        input_data=scf_input_data,
+        pseudopotentials=pseudopotentials,
+        kpts=scf_kpts,
+    )
 
-def write_bands_post_in(calc_dir, nnn):
-    """
-    Write the bands.x post-processing input file.
-    """
-    # bands.x input format:
-    # &BANDS
-    #   prefix = 'mos2'
-    #   outdir = './tmp'
-    #   filband = 'NNN.bands.dat'
-    # /
-    
-    content = f"""&BANDS
-  prefix = 'mos2'
-  outdir = './tmp'
-  filband = '{nnn}.bands.dat'
+    # --- Write bands.in (non-self-consistent bands) ---
+    bands_input_data = {
+        'calculation': 'bands',
+        'prefix': prefix,
+        'outdir': outdir,
+        'pseudo_dir': pseudo_dir,
+        'ecutwfc': ecutwfc_ry,
+        'ecutrho': ecutrho_ry,
+        'occupations': 'fixed',
+        'conv_thr': 1.0e-8,
+        'nbnd': nbnd,
+    }
+
+    write_espresso_in(
+        f'{calc_dir}/bands.in',
+        prim,
+        input_data=bands_input_data,
+        pseudopotentials=pseudopotentials,
+        kpts=kpts_bands,
+    )
+
+    # --- Write bands_post.in (bands.x input) ---
+    # bands.x uses a simple namelist &BANDS with prefix, outdir, filband
+    filband = f'{nnn}.bands.dat'
+    bands_post_content = f"""&BANDS
+    prefix = '{prefix}'
+    outdir = '{outdir}'
+    filband = '{filband}'
 /
 """
-    with open(os.path.join(calc_dir, 'bands_post.in'), 'w') as f:
-        f.write(content)
+    with open(f'{calc_dir}/bands_post.in', 'w') as f:
+        f.write(bands_post_content)
 
+    if i < 3 or i == n_structures - 1:
+        print(f'Set up {calc_dir}/: pw.in, bands.in, bands_post.in, kpath.json, Mo.upf, S.upf')
 
-def write_band_labels(calc_dir, label_indices, discontinuities):
-    """
-    Write band_labels.dat with high-symmetry labels and their indices.
-    Format: one line per label: "LABEL INDEX"
-    For discontinuities, label with both sides: "LABEL1|LABEL2 INDEX"
-    """
-    # Create a dict of index -> label(s)
-    index_to_labels = {}
-    for label, idx in label_indices:
-        if idx in index_to_labels:
-            # Multiple labels at the same index (discontinuity)
-            index_to_labels[idx] += f"|{label}"
-        else:
-            index_to_labels[idx] = label
-    
-    with open(os.path.join(calc_dir, 'band_labels.dat'), 'w') as f:
-        for idx in sorted(index_to_labels.keys()):
-            f.write(f"{index_to_labels[idx]} {idx}\n")
-
-
-def main():
-    # Create the calculations directory
-    os.makedirs(CALC_DIR, exist_ok=True)
-    
-    # Process each structure
-    for nnn in range(51):
-        nnn_str = f"{nnn:03d}"
-        struct_file = os.path.join(STRUCTURES_DIR, f"structure_{nnn_str}.cif")
-        calc_dir = os.path.join(CALC_DIR, nnn_str)
-        
-        # Create the calculation directory
-        os.makedirs(calc_dir, exist_ok=True)
-        
-        # Copy pseudopotential files
-        for pp_file in [PP_MO, PP_S]:
-            src = os.path.join(TEMPLATE_DIR, pp_file)
-            dst = os.path.join(calc_dir, pp_file)
-            shutil.copy2(src, dst)
-        
-        # Read the structure
-        atoms = read(struct_file)
-        
-        # Derive the k-path from this exact structure (INVARIANT 3)
-        prim, kpts_array, label_indices, discontinuities = get_kpath(atoms)
-        
-        # INVARIANT 1: assert nat/ntyp from the actual Atoms object
-        nat = len(prim)
-        ntyp = len(set(prim.get_chemical_symbols()))
-        assert nat == len(atoms), f"Structure {nnn_str}: nat mismatch after reduction"
-        assert ntyp == len(set(atoms.get_chemical_symbols())), \
-            f"Structure {nnn_str}: ntyp mismatch after reduction"
-        
-        # Write SCF input (pw.in)
-        # kpts = (4, 4, 1) Monkhorst-Pack grid
-        write_pw_in(prim, calc_dir, 'scf', kpts=(4, 4, 1))
-        
-        # Write bands input (bands.in)
-        # kpts = explicit k-path array
-        write_pw_in(prim, calc_dir, 'bands', kpts=kpts_array, nbnd=NBND)
-        
-        # Write bands.x post-processing input
-        write_bands_post_in(calc_dir, nnn_str)
-        
-        # Write band labels
-        write_band_labels(calc_dir, label_indices, discontinuities)
-        
-        print(f"Setup complete for structure {nnn_str}: "
-              f"nat={nat}, ntyp={ntyp}, "
-              f"kpts={kpts_array.shape[0]}, "
-              f"discontinuities={len(discontinuities)}")
-    
-    print(f"\nDone. Set up 51 calculation directories in {CALC_DIR}/")
-
-
-if __name__ == '__main__':
-    main()
+print(f'\nDone: set up {n_structures} calculation directories (000-050)')
+print(f'  ecutwfc = {ecutwfc_ry} Ry, ecutrho = {ecutrho_ry} Ry')
+print(f'  SCF kpts = {scf_kpts}')
+print(f'  nbnd = {nbnd} (occupied bands = {occupied_bands})')
+print(f'  prefix = {prefix}, outdir = {outdir}')
