@@ -490,15 +490,17 @@ def _section_agent(history, config, model, completed, runtime_seconds, by_tool) 
                    " inputs, run QE, plot) with done criteria. No examples or templates: the agent writes every script.")
     _bullet(lines, "tools: deterministic Python functions, each returning JSON -- Materials Project fetch, Pseudo-Dojo fetch"
                    " (reports z_valence/relativity/functional parsed from the downloaded UPF and the matching recommended"
-                   " cutoff), file read/write, Python execution (exit code), a QE input validator (namelists, nat/ntyp,"
-                   " k-path symmetry and labels), a QE runner, and a documentation search (BM25 + embeddings + reranker"
+                   " cutoff), a k-path tool (seekpath's standard path, shared by the QE input and the plot), file"
+                   " read/write, Python execution (exit code), a QE input validator (namelists, nat/ntyp, k-path),"
+                   " a QE runner, and a documentation search (BM25 + embeddings + reranker"
                    " over the ASE and QE docs). Facts the model is weak at come from tools, not from its memory.")
     ctx = f"last {cfg['max_history']} tool calls" if cfg.get("max_history") else "most recent tool calls"
     trim = cfg.get("trim_history")
     _bullet(lines, f"context: each step re-prompts with the task, notes, files written, unresolved errors and the {ctx}"
                    + ("; trim_history on (superseded file versions, resolved failures and duplicate notes dropped, plus"
                       " a progress ledger)" if trim else "; trim_history off" if trim is False else ""))
-    _bullet(lines, "harness guards: a second consecutive note or a repeated doc search is refused; model output that is"
+    _bullet(lines, "harness guards: a second consecutive note, a repeated doc search, or rewriting a file with identical"
+                   " content is refused; model output that is"
                    " not a valid tool call is fed back as an error; results (gap, convergence, outputs) are re-derived"
                    " from files on disk rather than trusted from the agent's own summary")
     issues = [f"{calls['parse_error']} unparseable output(s)" if calls.get("parse_error") else "",

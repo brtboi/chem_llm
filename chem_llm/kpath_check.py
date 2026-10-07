@@ -202,6 +202,29 @@ def path_string(input_path: str | Path) -> str | None:
     return "".join(out)
 
 
+def _check_against_kpath_json(atoms, pts: np.ndarray, kpath_json: Path) -> list[str]:
+    """bands.in written from chem_llm.kpath: the cell and every k-point must
+    be exactly the ones in kpath.json (which also carries the labels)."""
+    import json
+
+    kp = json.loads(kpath_json.read_text())
+    issues = []
+    ref_cell = np.asarray(kp["cell"])
+    if not np.allclose(np.asarray(atoms.cell[:]), ref_cell, atol=1e-4):
+        issues.append(
+            f"k-path: the cell in this input differs from the one in {kpath_json.name}. The path's fractional "
+            "k-points refer to that cell -- write kp_atoms(kp) into BOTH pw.in and bands.in.")
+    ref = np.asarray(kp["kpoints"])
+    if len(pts) != len(ref):
+        issues.append(f"k-path: K_POINTS has {len(pts)} points but {kpath_json.name} has {len(ref)} -- write "
+                      "kpts=kp_kpts(kp) unchanged.")
+    elif not np.allclose(pts, ref, atol=1e-6):
+        i = int(np.argmax(np.abs(pts - ref).max(axis=1)))
+        issues.append(f"k-path: K_POINTS differ from {kpath_json.name} (first at index {i}: {pts[i].round(5).tolist()} "
+                      f"vs {np.round(ref[i], 5).tolist()}) -- write kpts=kp_kpts(kp) unchanged.")
+    return issues
+
+
 def check_bands_kpath(input_path: str | Path, labels_path: str | Path | None = None) -> list[str]:
     """Issues with the k-path of a pw.x bands input (calculation='bands').
     Returns [] for inputs this does not apply to (SCF meshes, *_b lists)."""
@@ -219,6 +242,10 @@ def check_bands_kpath(input_path: str | Path, labels_path: str | Path | None = N
         atoms = read(input_path, format="espresso-in")
     except Exception as e:  # unreadable structure: report, don't guess
         return [f"k-path: could not read the structure from {input_path.name} to check the path ({e})"]
+
+    kpath_json = input_path.parent / "kpath.json"
+    if kpath_json.exists():
+        return _check_against_kpath_json(atoms, pts, kpath_json)
 
     cell = np.array(atoms.cell[:])
     if kind == "tpiba":

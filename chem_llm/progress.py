@@ -74,6 +74,8 @@ def describe_call(call: dict) -> str:
         return f"searching the documentation: \"{_one_line(a.get('query'), 70)}\""
     if tool == "validate_qe_input":
         return f"validating the QE input {a.get('path', '?')}"
+    if tool == "get_kpath":
+        return f"getting the standard k-path for {_name(a.get('structure_path'))}"
     if tool == "run_espresso_workflow":
         return f"running Quantum ESPRESSO in {a.get('directory', '?')} (SCF, bands, bands.x)"
     if tool == "train_deepseudopot":
@@ -95,7 +97,10 @@ def describe_result(entry: dict) -> str:
         err = r if isinstance(r, str) else r.get("stderr") or r
         return f"FAILED: {_last_line(err, 160)}"
     if tool == "generate_cif" and ok:
-        return f"{r.get('selected_material_id')}, saved {_name(r.get('output_path'))}"
+        gap = f", MP gap {r['band_gap_eV']:.2f} eV" if isinstance(r.get("band_gap_eV"), (int, float)) else ""
+        return f"{r.get('selected_material_id')}{gap}, saved {_name(r.get('output_path'))}"
+    if tool == "get_kpath" and ok:
+        return f"{r.get('spacegroup')}: {r.get('path')} ({r.get('n_kpoints')} k-points)"
     if tool == "get_pseudopotential" and ok:
         f, rec = r.get("file") or {}, r.get("recommended_ecutwfc") or {}
         parts = [f"z_valence {f['z_valence']:g}" if f.get("z_valence") is not None else "",

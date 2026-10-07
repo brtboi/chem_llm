@@ -131,9 +131,10 @@ def _extract_card_lines(text: str, card: str) -> list[str]:
         "with the cards in the same file. (3) For a bands input "
         "(calculation='bands'): every segment endpoint of the k-path is a real "
         "high-symmetry point (a missing segment start after a discontinuity "
-        "shows up as an endpoint that is not one), and the band_labels.dat "
-        "next to it labels every endpoint with the right name. Call this on "
-        "every pw.in-style file (SCF and bands inputs) right after writing it, "
+        "shows up as an endpoint that is not one); if a kpath.json from "
+        "chem_llm.kpath sits next to it, that the cell and every k-point are "
+        "exactly the ones in it. Call this on every pw.in-style file (SCF and "
+        "bands inputs) right after writing it, "
         "and again after any edit to it, before run_espresso_workflow or done."
     ),
     {"path": "string. Path to the QE input file to validate."},
