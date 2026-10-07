@@ -1,0 +1,156 @@
+chem_llm run summary -- MoS2 (P6_3/mmc)
+=======================================
+completed in 65 steps, 65.7 min | Qwen/Qwen3.8-27B
+work dir: /pscratch/sd/b/brenthu/chem_llm/sandbox/test34/mos2
+band gap: 1.209 eV (computed from the bands output)
+plot:     calculations/000/bands_000.pdf
+
+1. What the agent did
+    step  2  fetched the MoS2 structure (P6_3/mmc) from the Materials Project: mp-2815 ->
+             structures/MoS2_base.cif
+    step  4  wrote reduce_primitive.py: 2 versions, run 3x (1 failed) -> OK at step 32
+    step 15  wrote generate_structures.py: 1 version, run 1x -> OK at step 16
+    step 18  fetched the Mo pseudopotential from Pseudo-Dojo -> Mo.pbesol_upf
+    step 19  fetched the S pseudopotential from Pseudo-Dojo -> S.pbesol_upf
+    step 26  wrote setup_jobs.py: 3 versions, run 3x (1 failed) -> OK at step 44
+    step 35  wrote diagnose_seekpath.py: 1 version, run 1x -> OK at step 36
+    step 40  validated calculations/000/pw.in: OK
+    step 41  validated calculations/000/bands.in: issues ['k-path: band_labels.dat does not label
+             segment endpoint(s) at k-point index 147, 168 (the path has 18 endpoints: 0, 20, 21,
+             41, 42, 62, 63, 83, 84, 104, 105, 125, 126, 146, 147, 167, 168, 188). Write one entry
+             per endpoint, including repeated points such as a second GAMMA and both sides of every
+             discontinuity.']
+    step 45  validated calculations/000/bands.in: OK
+    step 47  ran Quantum ESPRESSO in calculations/000: OK (scf, bands_scf, bands_post)
+    step 49  wrote check_electrons.py: 1 version, run 2x (1 failed) -> OK at step 51
+    step 55  wrote plot_bands.py: 2 versions, run 2x -> OK at step 61
+             8 documentation lookup(s) along the way (where they clustered: section 4)
+
+2. DFT setup (to reproduce the calculation)
+    Structure
+      - source: Materials Project mp-2815 (MoS2, P6_3/mmc #194)
+      - cell used for DFT: Mo2S4, 6 atoms, P6_3/mmc (#194); a, b, c = 3.1922, 3.1922, 13.3783 A;
+        alpha, beta, gamma = 90.00, 90.00, 120.00 deg; volume 118.065 A^3
+      - fractional positions: Mo (0.6667, 0.3333, 0.2500); Mo (0.3333, 0.6667, 0.7500); S (0.6667,
+        0.3333, 0.6331); S (0.3333, 0.6667, 0.3669); S (0.6667, 0.3333, 0.8669); S (0.3333, 0.6667,
+        0.1331)
+    Pseudopotentials (Pseudo-Dojo)
+      - Mo: Mo.pbesol_upf -- norm-conserving, scalar-relativistic, PBESOL, stringent table;
+        z_valence 14; recommended ecutwfc 40.0 Ha (80 Ry)
+      - S: S.pbesol_upf -- norm-conserving, scalar-relativistic, PBESOL, stringent table; z_valence
+        6; recommended ecutwfc 26.0 Ha (52 Ry)
+    pw.x settings
+      - exchange-correlation: PBESOL (taken from the pseudopotentials)
+      - spin-orbit coupling: off
+      - cutoffs: ecutwfc = 80.0 Ry, ecutrho = 320.0 Ry (largest recommended: 40 Ha = 80 Ry)
+      - occupations = fixed, nspin = 1
+      - SCF k-mesh: 4 x 4 x 1 Monkhorst-Pack, shift 0 0 0 (4 irreducible k-points)
+      - SCF convergence: conv_thr = 1e-08 Ry
+    Band structure
+      - k-path: GAMMA-M-K-GAMMA-A-L-H-A | L-M | H-K (189 k-points, K_POINTS crystal; points named
+        from their coordinates by symmetry)
+      - nbnd = 40 in the bands calculation
+      - 52 electrons -> 26 occupied bands (two electrons per band)
+      - band gap: 1.209 eV (computed here from the bands output; DFT band gaps are typically
+        underestimated)
+      - SCF converged; all three QE stages (SCF, bands, bands.x) finished
+    Perturbed-structure ensemble
+      - temperature: 300.0 K (as set in generate_structures.py)
+      - measured over 50 structures: per-axis RMS displacement Mo 0.035, S 0.056 A; RMS strain 0.39%
+      - 51 structures; DFT was run on structure_000 (unperturbed) only
+    Software
+      - Quantum ESPRESSO v.7.5 (pw.x, bands.x); 4 MPI process(es) x 1 thread(s), GPU on
+
+3. Agent and harness (for CS / LLM engineers)
+    - base model: Qwen/Qwen3.8-27B (local open-weights model via transformers, bf16, sharded across
+      the node's GPUs)
+    - decoding: max_new_tokens 5000, do_sample False; greedy decoding is deterministic, so a rerun
+      of the same prompt repeats the same trajectory
+    - run: completed in 65 steps of 80 allowed, 65.7 min; 62 tool calls: note 20, run_python 12,
+      write_file 10, search_docs 8, read_file 4, validate_qe_input 3, get_pseudopotential 2,
+      generate_cif 1, run_espresso_workflow 1, done 1
+    - prompt: a fixed system prompt (36,676 chars) -- agent protocol (one JSON tool call per step),
+      numbered working rules, INVARIANTS the agent's scripts must assert in code (atom/species
+      counts and electron count read from the actual structure and pw.out, never from memory; k-path
+      from seekpath on the cell in use; unit conversions), and DECISION RULES (relativistic
+      treatment, k-path source, primitive cell, plotting) -- plus a task prompt (6,576 chars) giving
+      a 7-step workflow (fetch structure, perturb, pseudopotentials, decide settings, write inputs,
+      run QE, plot) with done criteria. No examples or templates: the agent writes every script.
+    - tools: deterministic Python functions, each returning JSON -- Materials Project fetch, Pseudo-
+      Dojo fetch (reports z_valence/relativity/functional parsed from the downloaded UPF and the
+      matching recommended cutoff), file read/write, Python execution (exit code), a QE input
+      validator (namelists, nat/ntyp, k-path symmetry and labels), a QE runner, and a documentation
+      search (BM25 + embeddings + reranker over the ASE and QE docs). Facts the model is weak at
+      come from tools, not from its memory.
+    - context: each step re-prompts with the task, notes, files written, unresolved errors and the
+      last 32 tool calls; trim_history on (superseded file versions, resolved failures and duplicate
+      notes dropped, plus a progress ledger)
+    - harness guards: a second consecutive note or a repeated doc search is refused; model output
+      that is not a valid tool call is fed back as an error; results (gap, convergence, outputs) are
+      re-derived from files on disk rather than trusted from the agent's own summary
+    - protocol issues this run: 3 refused call(s)
+    - QE launch command: module load espresso/7.5-libxc-7.0.0-gpu-cu13 && srun -n 4 -c 32 --gpus-
+      per-task=1 --gpu-bind=closest pw.x -in pw.in > pw.out 2>&1
+
+4. Errors, uncertainties and difficulties
+    - reduce_primitive.py: 1 failed run(s), fixed at step 32
+        step 5: KeyError: 'path_labels'
+    - setup_jobs.py: 1 failed run(s), fixed at step 44
+        step 27: numpy._core._exceptions._UFuncNoLoopError: ufunc 'subtract' did not contain a loop
+        with signature matching types (dtype('<U1'), dtype('<U5')
+    - check_electrons.py: 1 failed run(s), fixed at step 51
+        step 49: /pscratch/sd/b/brenthu/chem_llm/.venv/bin/python: can't open file
+        '/pscratch/sd/b/brenthu/chem_llm/sandbox/test34/mos2/check_electrons.py':
+    - validator flagged calculations/000/bands.in at step 41: k-path: band_labels.dat does not label
+      segment endpoint(s) at k-point index 147, 168 (the path has 18 endpoints: 0, 20, 21, 41, 42,
+      62, 63, 83, 84, 104, 105, 125, 126, 146, 147, 167, 168, 188). Write one entry per endpoint,
+      including repeated points such as a second GAMMA and both sides of every discontinuity.
+    - documentation lookups, grouped by what the agent did next:
+        setup_jobs.py: 3 lookup(s) (steps 21-24): write_espresso_in input_data structure kpoints
+        calculation bands; bands.x input file BANDS namelist filband prefix outdir; bands.x BANDS
+        namelist prefix variable
+        reduce_primitive.py: 2 lookup(s) (steps 6-9): seekpath get_path return value keys
+        path_labels point_coords; seekpath get_path return dictionary keys path point_coords
+        primitive_l
+        reduce_primitive.py: 2 lookup(s) (steps 28-30): seekpath get_path point_coords return value
+        format; seekpath get_path return dictionary keys point_coords path_labels
+        diagnose_seekpath.py: 1 lookup(s) (step 33): seekpath get_path return value point_coords
+        list of arrays
+    - harness refused 3 call(s) as loops: step 7 (search_docs), step 8 (search_docs), step 14 (note)
+    - notes where the agent flagged doubt or an assumption:
+        step 29: The problem is that `res['point_coords']` does NOT correspond to `labels_in_order`
+                 in the order I assumed.
+        step 29: seekpath's `point_coords` is a list of coordinates for the unique points in the
+                 path, but the mapping to labels is different from what I assumed.
+        step 34: The bug in setup_jobs.py get_kpath: I assumed res['point_coords'] is a list of
+                 coordinate arrays aligned with labels_in_order, but the reduce_primitive.py output
+                 shows it is actually a list of LABEL STRINGS (GAMMA, A, K, H, H_2, M
+        step 48: Let me first read the relevant lines from pw.out to verify the electron count.
+        step 62: Now I need to verify the done criteria: (1) all three scripts ran with returncode 0
+                 -- generate_structures.py (step 16), setup_jobs.py (step 44), plot_bands.py (step
+                 61) -- all confirmed.
+        step 62: (4) The done summary must include: MP ID (mp-2815), atom count before/after
+                 primitive reduction (6 -> 6), workflow outline, ASE functions used, band gap (1.209
+                 eV), scientific assumptions, expert review items.
+    - agent's own scientific assumptions:
+        * T=300K for thermal displacements: 2H MoS2 is the stable phase at room temperature and
+          below; the 1T phase is only stable at high temperatures or with specific substrates.
+        * S moves more than Mo (U_S=0.008 A^2 vs U_Mo=0.003 A^2): S is lighter (32 vs 96 amu) and
+          the S-Mo bond is more ionic/weakly bound than the Mo-Mo interactions.
+        * ecutwfc=80 Ry (from Mo's 40 Ha recommendation, the higher of the two elements): standard
+          practice is to use the maximum recommended cutoff across all elements.
+        * occupations='fixed': 2H MoS2 is a semiconductor with a ~1.2 eV gap, so no smearing is
+          needed.
+        * kpts=(4,4,1) MP grid for SCF: hexagonal lattice, 4x4 in-plane is reasonable for a 6-atom
+          cell, 1 along c since the structure is 2D-like (c ~13.4 A).
+        * nbnd=40: 26 occupied bands (52 electrons / 2), padded to 40 to include conduction bands.
+    - agent's own expert review items:
+        * The PBEsol gap of 1.209 eV is at the low end of the experimental range; a hybrid
+          functional (HSE06) or GW calculation would give a more accurate gap.
+        * The thermal displacement amplitudes (U values) are approximate; a proper molecular
+          dynamics run would give more realistic displacements.
+        * The 4x4x1 k-point mesh for SCF may be slightly under-converged for a precise band
+          structure; a 6x6x1 or 8x8x1 mesh would be more conservative.
+        * The perturbed structures (001-050) have lower symmetry (P1) due to the random
+          displacements, so their k-paths are shorter (7 segments vs 9 for the unperturbed
+          structure). This is expected and correct per INVARIANT 3.
