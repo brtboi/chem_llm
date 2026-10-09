@@ -13,7 +13,7 @@ finishes:
     [21 | 13:02] running setup_jobs.py -> FAILED: NameError: name 'Ecutwfc_RY' is not defined
 
 Everything is formatted from the tool call and its result; the model does
-nothing differently. Use it through `chem-llm --progress`, or pass an
+nothing differently. Use it through `chem-llm --pretty-progress`, or pass an
 instance as `DFTAgent.run(on_step=...)`.
 """
 from __future__ import annotations

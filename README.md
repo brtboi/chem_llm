@@ -191,11 +191,12 @@ step** — a full run is 40–60 API calls.
 
 ```bash
 chem-llm TiO2 P4_2/mnm --name rutile --work-dir runs/tio2
-chem-llm TiO2 P4_2/mnm --progress                    # readable live stream
-chem-llm TiO2 P4_2/mnm --pretty-print > summary.txt   # stdout: just the run summary
+chem-llm TiO2 P4_2/mnm --pretty-progress                # readable live stream
+chem-llm TiO2 P4_2/mnm --summarize > summary.txt        # stdout: just the summary at the end
+chem-llm TiO2 P4_2/mnm --pretty-progress --summarize    # both: progress on stderr, summary on stdout
 chem-llm C Fd-3m --pw-x /opt/qe/bin/pw.x --max-steps 60
-chem-llm --summarize runs/tio2               # summary of a past run (no GPU needed)
-chem-llm --build-docs                        # build the documentation index
+chem-llm --summarize-log runs/tio2                      # summary of a past run (no GPU needed)
+chem-llm --build-docs                                   # build the documentation index
 chem-llm --help
 
 chem-llm-replay sandbox/test27               # re-execute a logged run's tool calls, no LLM
@@ -205,9 +206,32 @@ chem-llm-replay-copy 17 25                   # replay sandbox/test17 into sandbo
 `chem-llm` reads `config.yaml` from the current directory or its parents when one exists
 (or `--config PATH`), otherwise the defaults.
 
+### Flags
+
+| flag | what it does |
+|---|---|
+| `compound spacegroup` | required: e.g. `TiO2 P4_2/mnm`, `C P6_3/mmc` (Materials Project notation) |
+| `--spacegroup-number N`, `--name NAME` | optional: help pick the structure / label it in the prompt |
+| `--work-dir DIR` | where to run (default `<work_root>/<compound>`) |
+| `--keep` | keep existing files; **by default the work dir is cleared, except `*.jsonl` logs** |
+| `--log-file F` | run record somewhere other than `<work_dir>/log.jsonl` |
+| `--pretty-progress` | readable live stream instead of raw model output (below) |
+| `--summarize` | print the four-part summary when the run ends; the live stream goes to stderr |
+| `--quiet` | print nothing during the run |
+| `--model`, `--backend {qwen,claude}` | the model; `claude` bills per step |
+| `--max-steps N`, `--structures N` | step limit (80), size of the perturbed ensemble (51) |
+| `--pw-x`, `--bands-x`, `--qe-module` | where Quantum ESPRESSO comes from |
+| `--summarize-log PATH [--index N]` | summary of a recorded run (work dir or `log.jsonl`), then exit |
+| `--build-docs` | build the documentation search index, then exit |
+
+Decoding (`temperature`, `do_sample`), history (`max_history`, `trim_history`) and the QE
+launch (`mpi_prefix`, `pw_args`) have no flags: set them in `config.yaml`.
+
+### Live output
+
 By default the CLI streams every step (the model's raw output, the tool call, the full tool
-result) to stdout. `--progress` streams one readable line per action instead, with the
-agent's notes:
+result). `--pretty-progress` streams one readable line per action instead, with the agent's
+notes:
 
 ```
 [16 | 09:30] fetching a norm-conserving, scalar-relativistic PBEsol pseudopotential (stringent) for Ti ...
@@ -217,10 +241,14 @@ agent's notes:
 ```
 
 It is formatted from the tool calls and their results, so the model does nothing differently.
-In Python: `agent.run(..., verbose=False, on_step=chem_llm.progress.ProgressPrinter())`. With `--pretty-print` that stream goes to stderr, and stdout gets only a
-readable summary when the run finishes. `--summarize PATH` prints the same summary for any
-recorded run (a work dir or `log.jsonl`; `--index N` picks an earlier run). The summary has
-four sections:
+In Python: `agent.run(..., verbose=False, on_step=chem_llm.progress.ProgressPrinter())`.
+
+### Run summary
+
+`--summarize` prints a summary when the run finishes; everything streamed during the run goes
+to stderr, so `> file` captures only the summary. `--summarize-log PATH` prints the same
+summary for any recorded run (`--index N` picks an earlier run in that log). It has four
+sections:
 
 1. **What the agent did:** step by step, the Materials Project and Pseudo-Dojo data it
    pulled, every script it wrote (how many versions and runs, and how each ended), each

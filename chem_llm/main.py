@@ -1,16 +1,17 @@
 """Command-line entry point: `chem-llm <compound> <spacegroup>`.
 
     chem-llm TiO2 P4_2/mnm --name rutile --work-dir runs/tio2
-    chem-llm TiO2 P4_2/mnm --progress                 # readable live stream
-    chem-llm TiO2 P4_2/mnm --pretty-print > summary.txt
+    chem-llm TiO2 P4_2/mnm --pretty-progress            # readable live stream
+    chem-llm TiO2 P4_2/mnm --summarize > summary.txt    # summary at the end
     chem-llm C Fd-3m --model Qwen/Qwen3.8-27B --pw-x /opt/qe/bin/pw.x
-    chem-llm --summarize runs/tio2          # summary of a past run (no GPU)
+    chem-llm --summarize-log runs/tio2                  # summary of a past run (no GPU)
     chem-llm --build-docs
 
---pretty-print: when the run finishes, print a readable summary -- what the
-agent did, its results and key choices in order, and where it struggled --
-instead of the raw step-by-step stream, which goes to stderr. stdout then
-holds only the summary.
+--pretty-progress: stream one readable line per action and the agent's notes
+instead of raw model output and JSON.
+--summarize: when the run finishes, print the four-part summary on stdout;
+everything streamed during the run goes to stderr, so stdout holds only the
+summary.
 
 A thin wrapper over DFTAgent for a single run; for a sweep, build one agent
 in Python and call `run()` per compound so the model loads once.
@@ -50,15 +51,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--structures", type=int, default=51, help="Size of the perturbed ensemble.")
     parser.add_argument("--quiet", action="store_true")
 
-    parser.add_argument("--progress", action="store_true",
+    parser.add_argument("--pretty-progress", action="store_true",
                         help="Stream one readable line per action (\"writing setup_jobs.py\", \"running Quantum "
                              "ESPRESSO ...\") and the agent's notes, instead of raw model output and JSON.")
-    parser.add_argument("--pretty-print", action="store_true",
-                        help="Print a readable run summary on stdout when done; the live step stream goes to stderr.")
-    parser.add_argument("--summarize", metavar="PATH", default=None,
+    parser.add_argument("--summarize", action="store_true",
+                        help="Print the four-part run summary on stdout when done; anything streamed during the run "
+                             "goes to stderr.")
+    parser.add_argument("--summarize-log", metavar="PATH", default=None,
                         help="Print the summary of a recorded run (a work dir or log.jsonl) and exit.")
     parser.add_argument("--index", type=int, default=-1,
-                        help="With --summarize: which recorded run in the log (default -1, the latest).")
+                        help="With --summarize-log: which recorded run in the log (default -1, the latest).")
     parser.add_argument("--build-docs", action="store_true",
                         help="Build the documentation index and exit.")
     return parser
@@ -66,13 +68,13 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
-    if args.summarize:
+    if args.summarize_log:
         from .report import summarize_log
 
         try:
-            print(summarize_log(args.summarize, index=args.index), end="")
+            print(summarize_log(args.summarize_log, index=args.index), end="")
         except (OSError, ValueError, IndexError) as e:
-            print(f"chem-llm: cannot summarize {args.summarize}: {e}", file=sys.stderr)
+            print(f"chem-llm: cannot summarize {args.summarize_log}: {e}", file=sys.stderr)
             return 2
         return 0
 
@@ -99,9 +101,9 @@ def main(argv=None) -> int:
         print(f"note: no documentation index at {docs.path}; run `chem-llm --build-docs` for better results",
               file=sys.stderr)
 
-    # With --pretty-print the live stream (every step's raw output, tool call
+    # With --summarize the live stream (every step's raw output, tool call
     # and result) goes to stderr, so stdout carries only the final summary.
-    stream = contextlib.redirect_stdout(sys.stderr) if args.pretty_print else contextlib.nullcontext()
+    stream = contextlib.redirect_stdout(sys.stderr) if args.summarize else contextlib.nullcontext()
     with stream:
         result = agent.run(
             args.compound,
@@ -112,16 +114,16 @@ def main(argv=None) -> int:
             clear_dir=not args.keep,
             log_file=args.log_file,
             n_structures=args.structures,
-            verbose=not (args.quiet or args.progress),
-            on_step=ProgressPrinter() if args.progress and not args.quiet else None,
+            verbose=not (args.quiet or args.pretty_progress),
+            on_step=ProgressPrinter() if args.pretty_progress and not args.quiet else None,
         )
-    if args.pretty_print:
+    if args.summarize:
         try:
             print(result.report(), end="")
         except Exception as e:  # the run is logged; never leave stdout empty
             print(result)
             print(f"(could not build the run summary: {type(e).__name__}: {e}; "
-                  f"retry with: chem-llm --summarize {result.work_dir})")
+                  f"retry with: chem-llm --summarize-log {result.work_dir})")
         return 0 if result.ok else 1
     print(result)
     print("work dir:", result.work_dir)
