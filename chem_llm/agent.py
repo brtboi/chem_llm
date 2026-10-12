@@ -17,12 +17,15 @@ it, so a sweep pays the (multi-minute) load cost once rather than per
 compound.
 
 The default backend is the local Qwen3 model, which runs on your own GPU
-and costs nothing. The Claude API backend is opt-in (`backend="claude"`)
-and spends real money per run.
+and costs nothing -- loaded in-process ("qwen") or served by vLLM ("vllm",
+several times faster; see scripts/serve_vllm.sh). The Claude API backend is
+opt-in (`backend="claude"`) and spends real money per run. Any LangChain
+chat model can also be passed as `llm=` (tests use a scripted fake one).
 """
 from __future__ import annotations
 
 import os
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -131,7 +134,10 @@ class DFTAgent:
     cases where writing a Settings would be overkill:
 
     model:      HuggingFace id of the local model (settings.model.qwen_model).
-    backend:    "qwen" (local, free) or "claude" (API, paid, opt-in).
+    backend:    "qwen" (local, in-process), "vllm" (local model on a vLLM
+                server, settings.model.vllm_url) or "claude" (API, paid, opt-in).
+    llm:        any LangChain chat model to drive the agent instead of a
+                backend, e.g. a fake one in tests (chem_llm.testing).
     hf_home:    where model weights are cached. On a cluster point this at
                 scratch -- the weights are tens of GB.
     hf_token, mp_api_key, anthropic_api_key:
@@ -172,6 +178,8 @@ class DFTAgent:
         claude_model: str | None = None,
         claude_effort: str | None = None,
         claude_max_tokens: int | None = None,
+        vllm_url: str | None = None,
+        llm=None,
     ):
         if settings is None:
             settings = self.default_settings()
@@ -194,7 +202,7 @@ class DFTAgent:
                  omp_num_threads=omp_num_threads, timeout_seconds=qe_timeout_seconds)
         override(s.model, backend=backend, qwen_model=model, max_new_tokens=max_new_tokens,
                  temperature=temperature, do_sample=do_sample, claude_model=claude_model,
-                 claude_effort=claude_effort, claude_max_tokens=claude_max_tokens)
+                 claude_effort=claude_effort, claude_max_tokens=claude_max_tokens, vllm_url=vllm_url)
         override(s.agent, max_steps=max_steps, max_history=max_history, trim_history=trim_history)
 
         if isinstance(docs, DocumentationIndex):
@@ -202,6 +210,7 @@ class DFTAgent:
         elif docs is not None:
             s.doc_index_dir = Path(docs).expanduser().resolve()
 
+        self._llm = llm
         self._loaded: _LoadedModel | None = None
 
     # ------------------------------------------------------------------
@@ -230,13 +239,17 @@ class DFTAgent:
 
     @property
     def backend(self) -> str:
-        return self._loaded.backend if self._loaded else self.settings.model.backend.lower()
+        if self._loaded:
+            return self._loaded.backend
+        return "custom" if self._llm is not None else self.settings.model.backend.lower()
 
     @property
     def model_name(self) -> str:
         if self._loaded:
             return self._loaded.name
-        return self.settings.model.qwen_model if self.backend == "qwen" else self.settings.model.claude_model
+        if self._llm is not None:
+            return _llm_name(self._llm)
+        return self.settings.model.claude_model if self.backend == "claude" else self.settings.model.qwen_model
 
     @property
     def docs(self) -> DocumentationIndex:
@@ -244,25 +257,59 @@ class DFTAgent:
         return DocumentationIndex.from_settings(self.settings)
 
     # ------------------------------------------------------------------
-    def load(self) -> None:
-        """Download/load the model. Called automatically by the first
-        `run()`; call it yourself to pay the cost up front.
+    def load(self) -> float | None:
+        """Download/load the model (or connect to the vLLM server). Called
+        automatically by the first `run()`; call it yourself to pay the cost
+        up front. Returns the seconds it took, or None if already loaded.
 
         The backend and model id are fixed from here on: changing
         settings.model.backend / qwen_model afterwards needs a new agent.
         Generation parameters are still read at the start of each run.
         """
         if self._loaded is not None:
-            return
+            return None
+        started = time.perf_counter()
+        self._load()
+        return time.perf_counter() - started
+
+    def _load(self) -> None:
+        from .agent_core import make_chat_step_source, retry_on_error
 
         s = self.settings
         backend = s.model.backend.lower()
 
-        if backend == "qwen":
+        if self._llm is not None:
+            llm = self._llm
+
+            def factory(settings: Settings, verbose: bool):
+                return make_chat_step_source(llm, verbose, max_history=settings.agent.max_history,
+                                             trim_history=settings.agent.trim_history, on_error=retry_on_error())
+
+            self._loaded = _LoadedModel(factory, _llm_name(llm), "custom")
+
+        elif backend == "vllm":
+            from .llm import check_server, vllm_chat_model
+
+            served = check_server(s.model.vllm_url)
+            name = s.model.qwen_model
+            if name not in served:
+                raise ValueError(f"the vLLM server at {s.model.vllm_url} serves {served}, not {name!r}; "
+                                 "set model.qwen_model to one of those, or restart the server with MODEL=" + name)
+
+            def factory(settings: Settings, verbose: bool):
+                m = settings.model
+                llm = vllm_chat_model(m.vllm_url, name, max_tokens=m.max_new_tokens,
+                                      temperature=m.temperature, do_sample=m.do_sample)
+                return make_chat_step_source(llm, verbose, max_history=settings.agent.max_history,
+                                             trim_history=settings.agent.trim_history, on_error=retry_on_error())
+
+            self._loaded = _LoadedModel(factory, name, backend)
+
+        elif backend == "qwen":
             import torch
             from transformers import AutoModelForCausalLM, AutoTokenizer
 
-            from .agent_core import make_llm_step_source
+            from .llm import TransformersChatModel
 
             name = s.model.qwen_model
             # token=None downloads anonymously, which is all a public
@@ -274,14 +321,14 @@ class DFTAgent:
             model = AutoModelForCausalLM.from_pretrained(name, device_map="auto", dtype=torch.bfloat16, **hub)
 
             def factory(settings: Settings, verbose: bool):
-                return make_llm_step_source(
-                    model, tokenizer, verbose,
+                llm = TransformersChatModel(
+                    hf_model=model, tokenizer=tokenizer, model_name=name,
                     max_new_tokens=settings.model.max_new_tokens,
                     temperature=settings.model.temperature,
                     do_sample=settings.model.do_sample,
-                    max_history=settings.agent.max_history,
-                    trim_history=settings.agent.trim_history,
                 )
+                return make_chat_step_source(llm, verbose, max_history=settings.agent.max_history,
+                                             trim_history=settings.agent.trim_history)
 
             self._loaded = _LoadedModel(factory, name, backend)
 
@@ -314,7 +361,7 @@ class DFTAgent:
             self._loaded = _LoadedModel(factory, claude.model, backend)
 
         else:
-            raise ValueError(f"Unknown backend {s.model.backend!r}; expected 'qwen' or 'claude'")
+            raise ValueError(f"Unknown backend {s.model.backend!r}; expected 'qwen', 'vllm' or 'claude'")
 
     # ------------------------------------------------------------------
     def run(
@@ -351,7 +398,7 @@ class DFTAgent:
         # agent_core serialises the tool list into the system prompt once, at
         # import time, so a later run cannot put them back.
         _hide_tools(hide_tools)
-        self.load()
+        load_s = self.load()
 
         from .agent_core import run_agent
 
@@ -370,7 +417,8 @@ class DFTAgent:
 
         config = self.run_config(prompt)
         kwargs = dict(
-            log_extra={"config": config},
+            log_extra={"config": config, **({"model_load_s": round(load_s, 1)} if load_s else {})},
+            outcome=_outcome,
             step_source=self._loaded.step_source_factory(s, verbose),
             observer=on_step,
             model_name=self._loaded.name,
@@ -399,7 +447,8 @@ class DFTAgent:
             os.chdir(previous_cwd)
 
         found = _inspect_outputs(work_dir)
-        runtime = _runtime_from_log(log_path or work_dir / "log.jsonl")
+        record = _last_record(log_path or work_dir / "log.jsonl")
+        runtime = record.get("runtime", 0.0)
 
         return RunResult(
             compound=compound,
@@ -418,6 +467,7 @@ class DFTAgent:
             plot=found.get("plot"),
             state=state,
             config=config,
+            metrics=record.get("metrics"),
         )
 
     def run_config(self, task: str | None = None) -> dict:
@@ -428,13 +478,17 @@ class DFTAgent:
         from .tools import TOOLS
 
         s = self.settings
-        decoding = ({"max_new_tokens": s.model.max_new_tokens, "do_sample": s.model.do_sample,
-                     **({"temperature": s.model.temperature} if s.model.do_sample else {})}
-                    if self.backend == "qwen" else
-                    {"max_tokens": s.model.claude_max_tokens, "effort": s.model.claude_effort})
+        if self.backend == "claude":
+            decoding = {"max_tokens": s.model.claude_max_tokens, "effort": s.model.claude_effort}
+        elif self.backend == "custom":
+            decoding = {}
+        else:
+            decoding = {"max_new_tokens": s.model.max_new_tokens, "do_sample": s.model.do_sample,
+                        **({"temperature": s.model.temperature} if s.model.do_sample else {})}
         return {
             "backend": self.backend,
             "model": self.model_name,
+            **({"vllm_url": s.model.vllm_url} if self.backend == "vllm" else {}),
             "decoding": decoding,
             "max_steps": s.agent.max_steps,
             "max_history": s.agent.max_history,
@@ -453,12 +507,24 @@ class DFTAgent:
         return f"DFTAgent(backend={self.backend!r}, model={self.model_name!r}, {loaded})"
 
 
-def _runtime_from_log(log_file: Path) -> float:
+def _llm_name(llm) -> str:
+    return getattr(llm, "model_name", None) or getattr(llm, "model", None) or type(llm).__name__
+
+
+def _outcome(work_dir: Path) -> dict:
+    """What the run left on disk, for its log record (see RunResult)."""
+    found = _inspect_outputs(work_dir)
+    keys = ("band_gap", "scf_converged", "dft_finished", "n_atoms", "n_electrons", "plot")
+    return {k: (str(found[k]) if k == "plot" and found.get(k) else found.get(k)) for k in keys}
+
+
+def _last_record(log_file: Path) -> dict:
+    """The run record just appended to log_file ({} if there is none)."""
     if not log_file.exists():
-        return 0.0
+        return {}
     import json
 
     try:
-        return json.loads(log_file.read_text().strip().splitlines()[-1]).get("runtime", 0.0)
+        return json.loads(log_file.read_text().strip().splitlines()[-1])
     except (ValueError, IndexError):
-        return 0.0
+        return {}

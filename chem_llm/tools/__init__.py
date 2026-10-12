@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import time
 
 import numpy as np
 import sys
@@ -284,6 +285,7 @@ def run_espresso_workflow(
 
     completed = []
     outputs = {}
+    timings = {}  # seconds per stage, for the run's timing breakdown
     for name, exe, args, in_file, out_file in steps:
         if not (work_dir / in_file).exists():
             return {
@@ -300,10 +302,12 @@ def run_espresso_workflow(
         # minutes. Serial runs (no mpi_prefix) have no k-point parallelism
         # to hand those cores to, so the configured default is 1 thread.
         env = {**settings.subprocess_env(), "OMP_NUM_THREADS": str(qe.omp_num_threads)}
+        started = time.perf_counter()
         result = subprocess.run(
             ["bash", "-c", command], cwd=work_dir, capture_output=True, text=True,
             env=env, timeout=qe.timeout_seconds,
         )
+        timings[name] = round(time.perf_counter() - started, 1)
         outputs[name] = str(work_dir / out_file)
 
         if result.returncode != 0:
@@ -314,6 +318,7 @@ def run_espresso_workflow(
                 "stderr": f"{name} ({exe} -in {in_file}) exited with code {result.returncode}",
                 "completed_steps": completed,
                 "outputs": outputs,
+                "timings_s": timings,
                 "output_tail": tail,
                 # module-load / shell-level errors (e.g. Lmod failures) never
                 # reach out_file since they occur before the redirection's
@@ -330,6 +335,7 @@ def run_espresso_workflow(
         "directory": str(work_dir),
         "completed_steps": completed,
         "outputs": outputs,
+        "timings_s": timings,
     }
 
 @register_tool(

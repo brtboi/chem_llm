@@ -20,6 +20,9 @@ Sections:
   4. Errors, uncertainties and difficulties -- failed attempts and their
      errors, validator findings, where documentation lookups clustered,
      refusals, notes that flag doubt, the agent's own caveats.
+  5. Where the time went -- wall time split into model generation, Quantum
+     ESPRESSO, the agent's scripts and the other tools; tokens per call;
+     QE time per stage; time per workflow STEP (chem_llm.telemetry).
 """
 from __future__ import annotations
 
@@ -30,6 +33,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .history import run_succeeded
+from .telemetry import format_timing
 
 __all__ = ["summarize_run", "summarize_log", "load_log_entry"]
 
@@ -619,12 +623,14 @@ def summarize_run(
     compound: str | None = None,
     spacegroup: str | None = None,
     config: dict | None = None,
+    metrics: dict | None = None,
 ) -> str:
     """Plain-text summary of one run. `history` is AgentState.history.
 
     finished_at: the run's end time (epoch seconds). When given, files in
     the work dir modified after it belong to a later run and are ignored.
     config: DFTAgent.run_config() for the run, if recorded.
+    metrics: chem_llm.telemetry.run_metrics() for the run, if recorded.
     """
     from .pipeline import _inspect_outputs
 
@@ -664,6 +670,7 @@ def summarize_run(
     lines += _section_setup(history, work_dir, calc, stale, found, scripts, by_tool, final_result, finished_at)
     lines += _section_agent(history, config, model, completed, runtime_seconds, by_tool)
     lines += _section_difficulties(history, work_dir, scripts, by_tool, final_result, completed, kpath_info)
+    lines += ["", "5. Where the time went"] + format_timing(metrics)
     return "\n".join(lines) + "\n"
 
 
@@ -704,4 +711,5 @@ def summarize_log(path: str | Path, index: int = -1) -> str:
         model=entry.get("model"),
         finished_at=finished_at,
         config=entry.get("config"),
+        metrics=entry.get("metrics"),
     )

@@ -1,5 +1,6 @@
 import datetime
 import json
+import uuid
 
 from .history import progress_ledger, run_succeeded, trimmed_view
 from .tools import REMEMBER_FIELDS
@@ -8,6 +9,8 @@ class AgentState:
     def __init__(self, task: str):
         self.task = task
         self.created_at = datetime.datetime.now().isoformat()
+        # sortable and unique: links this run's log record to its trace lines
+        self.run_id = datetime.datetime.now().strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:6]
         self.history: list[dict] = []           # full tool call/result log
         self.files: dict[str, str] = {}         # path -> last known status
         self.last_errors: dict[str, str] = {}   # path -> last stderr/exception
@@ -16,6 +19,8 @@ class AgentState:
         self.consecutive_notes = 0
         self.done = False
         self.final_result = None
+        self.steps: list[dict] = []             # per-step timing/token records (chem_llm.telemetry)
+        self.llm_usage: dict | None = None      # token counts of the latest model call
 
     @staticmethod
     def _memory_key(tool: str, args: dict) -> str | None:
@@ -123,4 +128,5 @@ class AgentState:
             "scratchpad": self.scratchpad,
             "done": self.done,
             "final_result": self.final_result,
+            "steps": self.steps,
         }

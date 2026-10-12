@@ -5,9 +5,9 @@ Model loading lives in main.py (the entry point) and is passed in here so
 this module has no import-time side effects and can be reused/tested with a
 different model or a mock.
 
-The step loop (`run_step_loop`) is decoupled from *where* each tool call
-comes from: `run_agent` below drives it with an LLM-backed source, while
-`chem_llm.replay` drives the exact same loop with a source that reads
+The step loop (`run_step_loop`, a LangGraph graph -- see chem_llm.graph) is
+decoupled from *where* each tool call comes from: `run_agent` below drives
+it with an LLM-backed source, while `chem_llm.replay` drives the exact same loop with a source that reads
 recorded calls out of a past run's log.jsonl instead. Both share the same
 tool execution/logging code path, so a replay is a real re-run of the
 recorded tools (not a replay of their recorded results).
@@ -276,7 +276,20 @@ SYSTEM_PROMPT_TEMPLATE = (
 )
 
 
+def build_messages(state: AgentState, max_history: int = MAX_HISTORY, trim_history: bool = False) -> list:
+    """The two-message prompt every step sends: the fixed system prompt, and
+    the agent's working memory (AgentState.context_summary) as the user turn."""
+    from langchain_core.messages import HumanMessage, SystemMessage
+
+    return [
+        SystemMessage(SYSTEM_PROMPT_TEMPLATE),
+        HumanMessage(state.context_summary(max_history=max_history, trim=trim_history)),
+    ]
+
+
 def build_prompt(state: AgentState, tokenizer, max_history: int = MAX_HISTORY, trim_history: bool = False):
+    """build_messages rendered through a tokenizer's chat template (what the
+    local transformers backend generates from)."""
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT_TEMPLATE},
         {"role": "user", "content": state.context_summary(max_history=max_history, trim=trim_history)},
@@ -416,32 +429,45 @@ def generate(
     return decoded.strip()
 
 
-def make_llm_step_source(
-    model,
-    tokenizer,
+def make_chat_step_source(
+    llm,
     verbose: bool = True,
     *,
-    max_new_tokens: int = MAX_NEW_TOKENS,
-    temperature: float = TEMPERATURE,
-    do_sample: bool = DO_SAMPLE,
     max_history: int = MAX_HISTORY,
     trim_history: bool = False,
+    on_error=None,
 ):
-    """Build a `next_tool_call(state, step)` source for `run_step_loop` that
-    asks the model to generate each step, same as the original inline
-    run_agent loop. A JSON parse failure is logged as a 'parse_error' step
-    (fed back as a note so the model can self-correct) and reported to the
-    loop as a no-op step rather than a tool call.
+    """Build a `next_tool_call(state, step)` source for `run_step_loop` from
+    any LangChain chat model (see chem_llm.llm).
 
-    The keyword defaults are the legacy chem_llm.config values; DFTAgent
-    passes its own settings.
+    Each step sends build_messages(state) and parses one tool call out of
+    the reply. A reply that is not a tool call is logged as a 'parse_error'
+    step (fed back as a note so the model can self-correct) and reported to
+    the loop as a no-op step. Token counts from the reply's usage_metadata
+    are left in state.llm_usage for the step's timing record.
+
+    on_error(state, step, exc): what to do when the model call raises --
+    return None to skip the step, or raise StopIteration to end the run.
+    Without it the exception propagates.
     """
     def next_tool_call(state: AgentState, step: int):
-        prompt = build_prompt(state, tokenizer, max_history=max_history, trim_history=trim_history)
-        output = generate(
-            prompt, model, tokenizer,
-            max_new_tokens=max_new_tokens, temperature=temperature, do_sample=do_sample,
-        )
+        messages = build_messages(state, max_history=max_history, trim_history=trim_history)
+        try:
+            reply = llm.invoke(messages, config={"run_name": f"step {step}", "metadata": {"step": step}})
+        except Exception as e:
+            if on_error is None:
+                raise
+            return on_error(state, step, e)
+        usage = getattr(reply, "usage_metadata", None) or {}
+        cached = (usage.get("input_token_details") or {}).get("cache_read")
+        state.llm_usage = {
+            "prompt_tokens": usage.get("input_tokens"),
+            "completion_tokens": usage.get("output_tokens"),
+            "cached_tokens": cached,
+            "prompt_chars": sum(len(m.content) for m in messages),
+        }
+        output = reply.content if isinstance(reply.content, str) else str(reply.content)
+        output = output.strip()
         if verbose:
             print("RAW MODEL OUTPUT:\n", output)
         try:
@@ -454,9 +480,49 @@ def make_llm_step_source(
     return next_tool_call
 
 
-def run_step_loop(state: AgentState, next_tool_call, max_steps: int, verbose: bool = True, observer=None) -> None:
+def retry_on_error(max_consecutive: int = 3):
+    """An on_error for make_chat_step_source: log the failure as an
+    'api_error' step and carry on, but end the run after `max_consecutive`
+    failures in a row (a dead server fails every step the same way)."""
+    def on_error(state: AgentState, step: int, exc: Exception):
+        state.log("api_error", {"error_type": type(exc).__name__}, str(exc)[:2000])
+        recent = state.history[-max_consecutive:]
+        if len(recent) == max_consecutive and all(e["tool"] == "api_error" for e in recent):
+            state.add_note(f"Step {step}: the model failed {max_consecutive} times in a row; stopping.")
+            raise StopIteration
+        return None
+
+    return on_error
+
+
+def make_llm_step_source(
+    model,
+    tokenizer,
+    verbose: bool = True,
+    *,
+    max_new_tokens: int = MAX_NEW_TOKENS,
+    temperature: float = TEMPERATURE,
+    do_sample: bool = DO_SAMPLE,
+    max_history: int = MAX_HISTORY,
+    trim_history: bool = False,
+):
+    """make_chat_step_source for a transformers model/tokenizer pair loaded
+    in this process. The keyword defaults are the legacy chem_llm.config
+    values; DFTAgent passes its own settings."""
+    from .llm import TransformersChatModel
+
+    llm = TransformersChatModel(hf_model=model, tokenizer=tokenizer, max_new_tokens=max_new_tokens,
+                                temperature=temperature, do_sample=do_sample,
+                                model_name=getattr(getattr(model, "config", None), "_name_or_path", "local"))
+    return make_chat_step_source(llm, verbose, max_history=max_history, trim_history=trim_history)
+
+
+def run_step_loop(state: AgentState, next_tool_call, max_steps: int, verbose: bool = True, observer=None,
+                  recorder=None) -> str | None:
     """Drive `state` through up to `max_steps` tool calls, one per step,
-    obtained from `next_tool_call(state, step)`. Mutates `state` in place.
+    obtained from `next_tool_call(state, step)`. Mutates `state` in place
+    and returns why the loop stopped ("done", "max_steps",
+    "source_exhausted"). The loop is a LangGraph graph: chem_llm.graph.
 
     `next_tool_call` should return a `{"tool": ..., "args": ...}` dict for
     the step, `None` if it already handled the step itself (e.g. logged a
@@ -468,46 +534,18 @@ def run_step_loop(state: AgentState, next_tool_call, max_steps: int, verbose: bo
     `start(step, tool_call)` before a tool runs, and its
     `finish(step, entry)` for every history entry the step logged (tool
     results, refusals, parse or API errors). See chem_llm.progress.
+
+    `recorder`, a telemetry.StepRecorder, times each step (one is made if
+    not given, so state.steps is always filled).
     """
-    def report(step: int, before: int) -> None:
-        if observer is not None:
-            for entry in state.history[before:]:
-                observer.finish(step, entry)
+    from .graph import run_graph
+    from .telemetry import StepRecorder
 
-    for step in range(1, max_steps + 1):
-        if verbose:
-            print(f"\n=== STEP {step} ===")
-        before = len(state.history)
-
-        try:
-            tool_call = next_tool_call(state, step)
-        except StopIteration:
-            report(step, before)
-            break
-
-        if tool_call is None:
-            report(step, before)
-            continue
-
-        if verbose:
-            print("TOOL CALL:\n", tool_call)
-        if observer is not None:
-            observer.start(step, tool_call)
-
-        try:
-            result = execute_tool(tool_call, state)
-        except Exception as e:
-            result = f"ERROR executing {tool_call.get('tool')}: {e}"
-            state.log(tool_call.get("tool", "unknown"), tool_call.get("args", {}), result)
-
-        if verbose:
-            print("TOOL RESULT:\n", result)
-        report(step, before)
-
-        if state.done:
-            break
-    else:
+    stop = run_graph(state, next_tool_call, max_steps, verbose=verbose, observer=observer,
+                     recorder=recorder or StepRecorder(state))
+    if stop == "max_steps" and not state.done:
         state.add_note("Max steps reached without explicit 'done' call.")
+    return stop
 
 
 # Directories clear_dir refuses to touch: the target itself, or the target
@@ -621,15 +659,22 @@ def prepare_work_dir(work_dir: Path, clear_dir: bool = False, load_path=None, lo
 
 
 def build_log_entry(state: AgentState, start_time: float, work_dir: Path, clear_dir: bool, load_path, model_name: str, extra: dict | None = None) -> dict:
+    from .rundiff import prompt_snapshot
+    from .telemetry import run_metrics
+
+    runtime = time.perf_counter() - start_time
     entry = {
+        "run_id": state.run_id,
         "timestamp": datetime.now().isoformat(),
         "model": model_name,
         "work_dir": str(work_dir),
         "clear_dir": clear_dir,
         "load_path": bool(load_path),
-        "runtime": time.perf_counter() - start_time,
+        "runtime": runtime,
         "num_steps": len(state.history),
         "completed": state.done,
+        "prompt": prompt_snapshot(SYSTEM_PROMPT_TEMPLATE, state.task),
+        "metrics": run_metrics(state, runtime, model_load_s=(extra or {}).get("model_load_s")),
         "final_state": state.to_dict(),
     }
     if extra:
@@ -662,6 +707,8 @@ def run_agent(
     model_name: str = MODEL_NAME,
     log_extra: dict | None = None,
     observer=None,
+    trace: bool = True,
+    outcome=None,
 ) -> AgentState:
     """Run the agent live: the model generates each tool call. Executes in
     `work_dir` (defaults to config.WORK_DIR) and logs to `log_file`
@@ -674,6 +721,11 @@ def run_agent(
     `step_source` (with `model_name` for the log) to drive the same loop
     from something else -- see chem_llm.claude_backend for the Claude API
     backend, which differs only in how the text is generated.
+
+    trace: append each step to trace.jsonl (next to the log) as it finishes,
+    so a run killed mid-way still leaves its trajectory and timings.
+    outcome: optional callable(work_dir) -> dict, recorded as the log's
+    "outcome" (e.g. the band gap read back from disk).
     """
     if log_file is _UNSET:
         log_file = work_dir / "log.jsonl"
@@ -684,14 +736,26 @@ def run_agent(
         log_file.parent.mkdir(parents=True, exist_ok=True)
         log_file.touch(exist_ok=True)
 
+    from .telemetry import StepRecorder
+
     start_time = time.perf_counter()
     state = AgentState(task)
+    trace_file = None
+    if log_file and trace:
+        trace_file = log_file.with_name("trace.jsonl") if log_file.name == "log.jsonl" else log_file.with_suffix(".trace.jsonl")
+    recorder = StepRecorder(state, trace_file=trace_file, run_id=state.run_id)
 
     source = step_source or make_llm_step_source(model, tokenizer, verbose)
-    run_step_loop(state, source, max_steps, verbose, observer=observer)
+    run_step_loop(state, source, max_steps, verbose, observer=observer, recorder=recorder)
 
     if log_file:
         print("logging to...", log_file)
-        append_log(log_file, build_log_entry(state, start_time, work_dir, clear_dir, load_path, model_name, extra=log_extra))
+        entry = build_log_entry(state, start_time, work_dir, clear_dir, load_path, model_name, extra=log_extra)
+        if outcome is not None:
+            try:
+                entry["outcome"] = outcome(work_dir)
+            except Exception as e:  # never lose the run record over this
+                entry["outcome"] = {"error": f"{type(e).__name__}: {e}"}
+        append_log(log_file, entry)
 
     return state

@@ -42,6 +42,7 @@ class RunResult:
     plot: Path | None = None
     state: Any = None              # the full AgentState
     config: dict | None = None     # DFTAgent.run_config() for this run
+    metrics: dict | None = None    # telemetry.run_metrics(): time per phase, tokens
 
     def report(self) -> str:
         """A readable summary of the run: what the agent did, its results and
@@ -58,6 +59,7 @@ class RunResult:
             compound=self.compound,
             spacegroup=self.spacegroup,
             config=self.config,
+            metrics=self.metrics,
         )
 
     @property

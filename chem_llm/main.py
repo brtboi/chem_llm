@@ -4,12 +4,14 @@
     chem-llm TiO2 P4_2/mnm --pretty-progress            # readable live stream
     chem-llm TiO2 P4_2/mnm --summarize > summary.txt    # summary at the end
     chem-llm C Fd-3m --model Qwen/Qwen3.8-27B --pw-x /opt/qe/bin/pw.x
+    chem-llm TiO2 P4_2/mnm --backend vllm               # model on a vLLM server (scripts/serve_vllm.sh)
     chem-llm --summarize-log runs/tio2                  # summary of a past run (no GPU)
+    chem-llm --diff-runs runs/tio2@0 runs/tio2          # compare two recorded runs
     chem-llm --build-docs
 
 --pretty-progress: stream one readable line per action and the agent's notes
 instead of raw model output and JSON.
---summarize: when the run finishes, print the four-part summary on stdout;
+--summarize: when the run finishes, print the run summary on stdout;
 everything streamed during the run goes to stderr, so stdout holds only the
 summary.
 
@@ -42,8 +44,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--keep", action="store_true", help="Keep existing files in the work dir.")
 
     parser.add_argument("--model", default=None, help="Local model id (default: from config, else Qwen3).")
-    parser.add_argument("--backend", default=None, choices=["qwen", "claude"],
-                        help="qwen runs locally and costs nothing; claude bills per step.")
+    parser.add_argument("--backend", default=None, choices=["qwen", "vllm", "claude"],
+                        help="qwen loads the local model in-process; vllm uses the same model on a vLLM server "
+                             "(much faster); both cost nothing. claude bills per step.")
+    parser.add_argument("--vllm-url", default=None, help="vLLM server endpoint (default http://localhost:8000/v1).")
     parser.add_argument("--pw-x", default=None)
     parser.add_argument("--bands-x", default=None)
     parser.add_argument("--qe-module", default=None, help="Lmod module to load before running QE.")
@@ -55,12 +59,15 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Stream one readable line per action (\"writing setup_jobs.py\", \"running Quantum "
                              "ESPRESSO ...\") and the agent's notes, instead of raw model output and JSON.")
     parser.add_argument("--summarize", action="store_true",
-                        help="Print the four-part run summary on stdout when done; anything streamed during the run "
+                        help="Print the run summary on stdout when done; anything streamed during the run "
                              "goes to stderr.")
     parser.add_argument("--summarize-log", metavar="PATH", default=None,
                         help="Print the summary of a recorded run (a work dir or log.jsonl) and exit.")
     parser.add_argument("--index", type=int, default=-1,
                         help="With --summarize-log: which recorded run in the log (default -1, the latest).")
+    parser.add_argument("--diff-runs", nargs=2, metavar=("RUN_A", "RUN_B"), default=None,
+                        help="Compare two recorded runs (work dir or log.jsonl, optionally @N for the N-th record): "
+                             "outcome, timing, tool use, settings and a diff of the prompts. Then exit.")
     parser.add_argument("--build-docs", action="store_true",
                         help="Build the documentation index and exit.")
     return parser
@@ -78,12 +85,23 @@ def main(argv=None) -> int:
             return 2
         return 0
 
+    if args.diff_runs:
+        from .rundiff import diff_runs
+
+        try:
+            print(diff_runs(*args.diff_runs), end="")
+        except (OSError, ValueError, IndexError) as e:
+            print(f"chem-llm: cannot compare {' and '.join(args.diff_runs)}: {e}", file=sys.stderr)
+            return 2
+        return 0
+
     settings = Settings.from_yaml(args.config) if args.config else Settings.discover()
 
     agent = DFTAgent(
         settings,
         model=args.model,
         backend=args.backend,
+        vllm_url=args.vllm_url,
         pw_x=args.pw_x,
         bands_x=args.bands_x,
         qe_module=args.qe_module,

@@ -184,8 +184,10 @@ class ModelSettings:
     """Which LLM drives the agent loop, and how it generates."""
 
     # Local Qwen by default: it runs on the machine you already have and
-    # costs nothing per run. "claude" hits the Anthropic API and bills.
-    backend: str = "qwen"  # "qwen" (local transformers) or "claude" (API)
+    # costs nothing per run. "vllm" is the same local model served by vLLM
+    # (scripts/serve_vllm.sh) -- several times faster per step. "claude"
+    # hits the Anthropic API and bills.
+    backend: str = "qwen"  # "qwen" (in-process transformers), "vllm" (local server) or "claude" (API)
 
     # Local Qwen
     qwen_model: str = "Qwen/Qwen3.8-27B"
@@ -196,6 +198,10 @@ class ModelSettings:
     # temperature keeps tool calls well formed while letting it break out.
     temperature: float = 0.3   # only used when do_sample is true
     do_sample: bool = True
+
+    # vLLM backend: the server's OpenAI-compatible endpoint. It serves
+    # qwen_model, and decodes with max_new_tokens / temperature / do_sample.
+    vllm_url: str = "http://localhost:8000/v1"
 
     # Claude API
     claude_model: str = "claude-opus-4-8"

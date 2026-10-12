@@ -18,11 +18,8 @@ a chat template plus HF generate(), the prompt goes to the Messages API as
 Requires an Anthropic credential: ANTHROPIC_API_KEY (via .env, which
 chem_llm.config already loads) or any other source the SDK resolves.
 """
-import json
-
 import anthropic
 
-from .agent_core import SYSTEM_PROMPT_TEMPLATE, parse_tool_call
 from .config import ANTHROPIC_API_KEY, CLAUDE_EFFORT, CLAUDE_MAX_TOKENS, CLAUDE_MODEL, MAX_HISTORY
 from .state import AgentState
 
@@ -63,6 +60,7 @@ class ClaudeModel:
         self.effort = effort
         self.use_fallbacks = model in self._REFUSAL_PRONE if use_fallbacks is None else use_fallbacks
         self.served_by: str | None = None  # model that answered the last call
+        self.last_usage: dict | None = None  # token counts of the last call (LangChain usage_metadata shape)
 
     def generate(self, system: str, user: str) -> str:
         """Return the concatenated text blocks of one reply.
@@ -90,6 +88,14 @@ class ClaudeModel:
             response = self.client.messages.create(**params)
 
         self.served_by = response.model
+        u = getattr(response, "usage", None)
+        if u is not None:
+            cached = getattr(u, "cache_read_input_tokens", 0) or 0
+            created = getattr(u, "cache_creation_input_tokens", 0) or 0
+            n_in = (getattr(u, "input_tokens", 0) or 0) + cached + created
+            n_out = getattr(u, "output_tokens", 0) or 0
+            self.last_usage = {"input_tokens": n_in, "output_tokens": n_out, "total_tokens": n_in + n_out,
+                               "input_token_details": {"cache_read": cached}}
 
         if response.stop_reason == "refusal":
             details = getattr(response, "stop_details", None)
@@ -99,17 +105,16 @@ class ClaudeModel:
 
 
 def make_claude_step_source(claude: ClaudeModel, verbose: bool = True, max_history: int = MAX_HISTORY, trim_history: bool = False):
-    """Build a `next_tool_call(state, step)` source for `run_step_loop`,
-    the Claude-backed counterpart of agent_core.make_llm_step_source.
-
-    Mirrors it exactly, including how a malformed reply is handled: logged
-    as a 'parse_error' step and fed back as a note so the model can
-    self-correct, with no tool executed for that step.
+    """Build a `next_tool_call(state, step)` source for `run_step_loop`:
+    agent_core.make_chat_step_source over ClaudeChatModel, with the
+    Claude-specific error policy below. A malformed reply is handled as for
+    every backend: logged as a 'parse_error' step and fed back as a note.
     """
-    def next_tool_call(state: AgentState, step: int):
-        try:
-            output = claude.generate(SYSTEM_PROMPT_TEMPLATE, state.context_summary(max_history=max_history, trim=trim_history))
-        except _TERMINAL_ERRORS as e:
+    from .agent_core import make_chat_step_source
+    from .llm import ClaudeChatModel
+
+    def on_error(state: AgentState, step: int, e: Exception):
+        if isinstance(e, _TERMINAL_ERRORS):
             # No credits, bad key, revoked permissions: every later step
             # would fail identically. Stop the loop instead of spending the
             # remaining budget on calls that cannot succeed -- a drained
@@ -117,21 +122,13 @@ def make_claude_step_source(claude: ClaudeModel, verbose: bool = True, max_histo
             state.add_note(f"Step {step}: Claude API call failed unrecoverably: {e}")
             state.log("api_error", {"model": claude.model, "fatal": True}, str(e))
             raise StopIteration from e
-        except (anthropic.APIStatusError, anthropic.APIConnectionError, RuntimeError) as e:
+        if isinstance(e, (anthropic.APIStatusError, anthropic.APIConnectionError, RuntimeError)):
             # Transient (rate limit, 5xx, dropped connection) or a refusal:
             # record it and let the loop try the next step.
             state.add_note(f"Step {step}: Claude API call failed: {e}")
             state.log("api_error", {"model": claude.model}, str(e))
             return None
+        raise e
 
-        if verbose:
-            print("RAW MODEL OUTPUT:\n", output)
-
-        try:
-            return parse_tool_call(output)
-        except (json.JSONDecodeError, ValueError) as e:
-            state.add_note(f"Step {step}: failed to parse model output as JSON: {e}")
-            state.log("parse_error", {"raw_output": output[:500]}, str(e))
-            return None
-
-    return next_tool_call
+    return make_chat_step_source(ClaudeChatModel(claude=claude), verbose, max_history=max_history,
+                                 trim_history=trim_history, on_error=on_error)
