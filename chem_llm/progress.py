@@ -127,6 +127,22 @@ def describe_result(entry: dict) -> str:
     return ""
 
 
+class Observers:
+    """Several loop observers as one (e.g. the caller's printer plus the
+    archive's progress.txt)."""
+
+    def __init__(self, *observers):
+        self.observers = [o for o in observers if o is not None]
+
+    def start(self, step: int, call: dict) -> None:
+        for o in self.observers:
+            o.start(step, call)
+
+    def finish(self, step: int, entry: dict) -> None:
+        for o in self.observers:
+            o.finish(step, entry)
+
+
 class ProgressPrinter:
     """Observer for the agent loop (run_step_loop) that prints readable lines.
 

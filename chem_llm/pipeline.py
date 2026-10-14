@@ -43,6 +43,8 @@ class RunResult:
     state: Any = None              # the full AgentState
     config: dict | None = None     # DFTAgent.run_config() for this run
     metrics: dict | None = None    # telemetry.run_metrics(): time per phase, tokens
+    archive_dir: Path | None = None  # this run's permanent record (chem_llm.archive)
+    evaluation: dict | None = None   # benchmark checks, when run with evaluate=
 
     def report(self) -> str:
         """A readable summary of the run: what the agent did, its results and

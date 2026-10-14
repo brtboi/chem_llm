@@ -381,6 +381,11 @@ class DFTAgent:
         hide_tools=("train_deepseudopot",),
         verbose: bool = True,
         on_step=None,
+        case: str | None = None,
+        label: str | None = None,
+        meta: dict | None = None,
+        archive: bool = True,
+        evaluate=None,
     ) -> RunResult:
         """Run the full workflow for one compound.
 
@@ -393,6 +398,15 @@ class DFTAgent:
         and full result). on_step is an observer told about each step as it
         happens -- e.g. chem_llm.progress.ProgressPrinter() for one readable
         line per action; pass verbose=False with it.
+
+        Every run is archived (chem_llm.archive, settings.archive_root):
+        progress.txt, summary.txt, what changed since the previous run of the
+        same `case` (default: the compound), and the run's metrics. `label`
+        says why the run was made; `meta` is extra fields for the index (the
+        benchmark passes its suite). `evaluate(work_dir, record) -> dict`
+        scores the run (chem_llm.bench); its result is archived as
+        checks.json and its "passed" goes into the index. archive=False
+        skips all of this.
         """
         # Removes the tools from the registry for the rest of the process --
         # agent_core serialises the tool list into the system prompt once, at
@@ -415,12 +429,20 @@ class DFTAgent:
             functional=functional,
         )
 
+        from .archive import RunArchive, code_version
+        from .progress import Observers, ProgressPrinter
+
         config = self.run_config(prompt)
+        run_archive = RunArchive(s.archive_root, case or compound, label, meta) if archive else None
+        observer = on_step
+        if run_archive is not None:
+            observer = Observers(on_step, ProgressPrinter(run_archive.progress_stream))
         kwargs = dict(
-            log_extra={"config": config, **({"model_load_s": round(load_s, 1)} if load_s else {})},
+            log_extra={"config": config, "code": code_version(),
+                       **({"model_load_s": round(load_s, 1)} if load_s else {})},
             outcome=_outcome,
             step_source=self._loaded.step_source_factory(s, verbose),
-            observer=on_step,
+            observer=observer,
             model_name=self._loaded.name,
             work_dir=work_dir,
             max_steps=max_steps or s.agent.max_steps,
@@ -450,7 +472,7 @@ class DFTAgent:
         record = _last_record(log_path or work_dir / "log.jsonl")
         runtime = record.get("runtime", 0.0)
 
-        return RunResult(
+        result = RunResult(
             compound=compound,
             spacegroup=spacegroup,
             work_dir=work_dir,
@@ -469,6 +491,10 @@ class DFTAgent:
             config=config,
             metrics=record.get("metrics"),
         )
+        if run_archive is not None:
+            result.archive_dir = run_archive.dir
+            result.evaluation = _finish_archive(run_archive, result, record, work_dir, evaluate)
+        return result
 
     def run_config(self, task: str | None = None) -> dict:
         """What this agent runs with, as recorded with each run (no
@@ -505,6 +531,32 @@ class DFTAgent:
     def __repr__(self) -> str:
         loaded = "loaded" if self._loaded else "not loaded"
         return f"DFTAgent(backend={self.backend!r}, model={self.model_name!r}, {loaded})"
+
+
+def _finish_archive(run_archive, result: RunResult, record: dict, work_dir: Path, evaluate) -> dict | None:
+    """Score the run (if asked) and write the rest of its archive. Never
+    raises: the run itself is already logged."""
+    import json
+
+    evaluation = None
+    if evaluate is not None:
+        try:
+            evaluation = evaluate(work_dir, record)
+        except Exception as e:
+            evaluation = {"passed": False, "error": f"{type(e).__name__}: {e}", "checks": []}
+        (run_archive.dir / "checks.json").write_text(json.dumps(evaluation, indent=1, default=str))
+    try:
+        summary = result.report()
+    except Exception as e:
+        summary = f"(could not build the run summary: {type(e).__name__}: {e})\n"
+    extra = {"passed": evaluation.get("passed"),
+             "failed_checks": [c["name"] for c in evaluation.get("checks", []) if c.get("ok") is False]} \
+        if evaluation else None
+    try:
+        run_archive.finish(record, summary, extra)
+    except Exception as e:  # pragma: no cover - archive trouble must not lose the result
+        print(f"chem_llm: could not finish the run archive {run_archive.dir}: {type(e).__name__}: {e}")
+    return evaluation
 
 
 def _llm_name(llm) -> str:

@@ -1,3 +1,4 @@
+import contextlib
 import os
 from pathlib import Path
 import re
@@ -283,9 +284,34 @@ def run_espresso_workflow(
     ]
     _release_cached_gpu_memory()
 
+    timings = {}  # seconds per stage, for the run's timing breakdown
+    with _qe_slot(qe.serialize, timings):
+        return _run_qe_steps(work_dir, qe, settings, steps, timings)
+
+
+@contextlib.contextmanager
+def _qe_slot(serialize: bool, timings: dict):
+    """Hold this node's QE lock (see QESettings.serialize) for the block."""
+    if not serialize:
+        yield
+        return
+    import fcntl
+
+    started = time.perf_counter()
+    with open(f"/tmp/chem_llm_qe_{os.getuid()}.lock", "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        waited = time.perf_counter() - started
+        if waited >= 1:
+            timings["wait_for_gpus"] = round(waited, 1)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+
+
+def _run_qe_steps(work_dir: Path, qe, settings, steps, timings: dict) -> dict:
     completed = []
     outputs = {}
-    timings = {}  # seconds per stage, for the run's timing breakdown
     for name, exe, args, in_file, out_file in steps:
         if not (work_dir / in_file).exists():
             return {

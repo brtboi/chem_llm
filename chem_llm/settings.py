@@ -166,6 +166,12 @@ class QESettings:
     # is far slower than running single-threaded.
     omp_num_threads: int = 1
     timeout_seconds: int = 7200
+    # One QE job at a time per node: several agents (a parallel benchmark)
+    # share the node's GPUs, and two pw.x runs launched on all of them at once
+    # would contend for GPU memory. The lock file is node-local (/tmp), so
+    # runs on other nodes never wait on it. Time spent waiting is reported as
+    # the "wait_for_gpus" stage.
+    serialize: bool = True
 
     def shell_command(self, exe: str, in_file: str, out_file: str, args: str = "") -> str:
         """Full shell command for one QE step, including any module load.
@@ -240,6 +246,9 @@ class Settings:
     hf_home: Path | None = None
     # Documentation retrieval index (DocumentationIndex.build()).
     doc_index_dir: Path = field(default_factory=lambda: Path.cwd() / "retrieval_index" / "ase")
+    # Permanent per-run records (progress, summary, what changed since the
+    # last run, metrics) -- see chem_llm.archive. None -> work_root/_archive.
+    archive_dir: Path | None = None
 
     qe: QESettings = field(default_factory=QESettings)
     model: ModelSettings = field(default_factory=ModelSettings)
@@ -254,6 +263,7 @@ class Settings:
         self.hf_home = _path(self.hf_home or _env("HF_HOME") or _default_hf_home())
         self.work_root = _path(self.work_root)
         self.doc_index_dir = _path(self.doc_index_dir)
+        self.archive_dir = _path(self.archive_dir) if self.archive_dir else None
 
     # ------------------------------------------------------------------
     @classmethod
@@ -284,6 +294,8 @@ class Settings:
         # (relative to cwd) apply when the file does not name them.
         if paths.get("work_root"):
             kwargs["work_root"] = paths["work_root"]
+        if paths.get("archive_dir"):
+            kwargs["archive_dir"] = paths["archive_dir"]
         if paths.get("doc_index_dir") or _env("DOC_INDEX_DIR"):
             kwargs["doc_index_dir"] = paths.get("doc_index_dir") or _env("DOC_INDEX_DIR")
         return cls(**kwargs)
@@ -320,6 +332,11 @@ class Settings:
         sections are deep-copied too, so editing the result never reaches
         back into this object."""
         return replace(self.copy(), **kwargs)
+
+    @property
+    def archive_root(self) -> Path:
+        """Where run archives go: archive_dir, else work_root/_archive."""
+        return self.archive_dir or self.work_root / "_archive"
 
     @property
     def hf_cache_dir(self) -> Path | None:

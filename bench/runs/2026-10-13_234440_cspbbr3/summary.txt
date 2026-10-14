@@ -1,0 +1,138 @@
+chem_llm run summary -- CsPbBr3 (Pm-3m)
+=======================================
+completed in 58 steps, 59.2 min | Qwen/Qwen3.8-27B
+work dir: /pscratch/sd/b/brenthu/chem_llm/sandbox/test34/cspbbr3
+band gap: 0.386 eV (computed from the bands output)
+plot:     calculations/000/bands_000.pdf
+
+1. What the agent did
+    step  1  fetched the CsPbBr3 structure (Pm-3m) from the Materials Project: mp-600089 ->
+             structures/CsPbBr3_base.cif
+    step  3  wrote reduce_cell.py: 4 versions, run 4x (3 failed) -> OK at step 13
+    step 15  wrote generate_structures.py: 1 version, run 1x -> OK at step 16
+    step 20  fetched the Cs pseudopotential from Pseudo-Dojo -> Cs.pbesol_upf.upf
+    step 21  fetched the Pb pseudopotential from Pseudo-Dojo -> Pb.pbesol_upf.upf
+    step 22  fetched the Br pseudopotential from Pseudo-Dojo -> Br.pbesol_upf.upf
+    step 33  wrote setup_jobs.py: 2 versions, run 2x -> OK at step 46
+    step 35  validated calculations/000/pw.in: OK
+    step 36  validated calculations/000/bands.in: OK
+    step 38  ran Quantum ESPRESSO in calculations/000: FAILED -- bands_post (bands.x -in
+             bands_post.in) exited with code 255
+    step 47  ran Quantum ESPRESSO in calculations/000: OK (scf, bands_scf, bands_post)
+    step 52  wrote plot_bands.py: 2 versions, run 2x (1 failed) -> OK at step 56
+             13 documentation lookup(s) along the way (where they clustered: section 4)
+
+2. DFT setup (to reproduce the calculation)
+    Structure
+      - source: Materials Project mp-600089 (CsPbBr3, Pm-3m #221)
+      - cell used for DFT: Br3CsPb, 5 atoms, Pm-3m (#221); a, b, c = 5.9486, 5.9486, 5.9486 A;
+        alpha, beta, gamma = 90.00, 90.00, 90.00 deg; volume 210.499 A^3
+      - fractional positions: Cs (0.0000, 0.0000, 0.0000); Pb (0.5000, 0.5000, 0.5000); Br (0.5000,
+        0.5000, 0.0000); Br (0.5000, 0.0000, 0.5000); Br (0.0000, 0.5000, 0.5000)
+    Pseudopotentials (Pseudo-Dojo)
+      - Cs: Cs.pbesol_upf.upf -- norm-conserving, fully relativistic, PBESOL, stringent table;
+        z_valence 9; recommended ecutwfc 25.0 Ha (50 Ry)
+      - Pb: Pb.pbesol_upf.upf -- norm-conserving, fully relativistic, PBESOL, stringent table;
+        z_valence 22; recommended ecutwfc 44.0 Ha (88 Ry)
+      - Br: Br.pbesol_upf.upf -- norm-conserving, fully relativistic, PBESOL, stringent table;
+        z_valence 17; recommended ecutwfc 38.0 Ha (76 Ry)
+    pw.x settings
+      - exchange-correlation: PBESOL (taken from the pseudopotentials)
+      - spin-orbit coupling: ON (noncolin = .true., lspinorb = .true.)
+      - cutoffs: ecutwfc = 88.0 Ry, ecutrho = 352.0 Ry (largest recommended: 44 Ha = 88 Ry)
+      - occupations = fixed
+      - SCF k-mesh: 8 x 8 x 8 Monkhorst-Pack, shift 0 0 0 (35 irreducible k-points)
+      - SCF convergence: conv_thr = 1e-08 Ry
+    Band structure
+      - k-path: GAMMA-X-M-GAMMA-R-X | R-M (153 k-points, K_POINTS crystal; points named from their
+        coordinates by symmetry)
+      - nbnd = 100 in the bands calculation
+      - 82 electrons -> 82 occupied bands (one electron per band, spin-orbit)
+      - band gap: 0.386 eV (computed here from the bands output; DFT band gaps are typically
+        underestimated)
+      - SCF converged; all three QE stages (SCF, bands, bands.x) finished
+    Perturbed-structure ensemble
+      - temperature: 300.0 K (as set in generate_structures.py)
+      - measured over 50 structures: per-axis RMS displacement Cs 0.162, Pb 0.154, Br 0.126 A; RMS
+        strain 0.10%
+      - 51 structures; DFT was run on structure_000 (unperturbed) only
+    Software
+      - Quantum ESPRESSO v.7.5 (pw.x, bands.x); 4 MPI process(es) x 1 thread(s), GPU on
+
+3. Agent and harness (for CS / LLM engineers)
+    - base model: Qwen/Qwen3.8-27B (local open-weights model via transformers, bf16, sharded across
+      the node's GPUs)
+    - decoding: max_new_tokens 5000, do_sample True, temperature 0.3
+    - run: completed in 58 steps of 80 allowed, 59.2 min; 56 tool calls: search_docs 13, note 10,
+      write_file 9, run_python 9, read_file 4, get_pseudopotential 3, validate_qe_input 2,
+      run_espresso_workflow 2, generate_cif 1, make_dir 1, get_kpath 1, done 1
+    - prompt: a fixed system prompt (29,139 chars) -- agent protocol (one JSON tool call per step),
+      numbered working rules, INVARIANTS the agent's scripts must assert in code (atom/species
+      counts and electron count read from the actual structure and pw.out, never from memory; k-path
+      from seekpath on the cell in use; unit conversions), and DECISION RULES (relativistic
+      treatment, k-path source, primitive cell, plotting) -- plus a task prompt (6,273 chars) giving
+      a 7-step workflow (fetch structure, perturb, pseudopotentials, decide settings, write inputs,
+      run QE, plot) with done criteria. No examples or templates: the agent writes every script.
+    - tools: deterministic Python functions, each returning JSON -- Materials Project fetch, Pseudo-
+      Dojo fetch (reports z_valence/relativity/functional parsed from the downloaded UPF and the
+      matching recommended cutoff), a k-path tool (seekpath's standard path, shared by the QE input
+      and the plot), file read/write, Python execution (exit code), a QE input validator (namelists,
+      nat/ntyp, k-path), a QE runner, and a documentation search (BM25 + embeddings + reranker over
+      the ASE and QE docs). Facts the model is weak at come from tools, not from its memory.
+    - context: each step re-prompts with the task, notes, files written, unresolved errors and the
+      last 32 tool calls; trim_history on (superseded file versions, resolved failures and duplicate
+      notes dropped, plus a progress ledger)
+    - harness guards: a second consecutive note, a repeated doc search, or rewriting a file with
+      identical content is refused; model output that is not a valid tool call is fed back as an
+      error; results (gap, convergence, outputs) are re-derived from files on disk rather than
+      trusted from the agent's own summary
+    - protocol issues this run: 2 refused call(s)
+    - QE launch command: module load espresso/7.5-libxc-7.0.0-gpu-cu13 && srun -n 4 -c 32 --gpus-
+      per-task=1 --gpu-bind=closest pw.x -in pw.in > pw.out 2>&1
+
+4. Errors, uncertainties and difficulties
+    - reduce_cell.py: 3 failed run(s), fixed at step 13
+        step 4: TypeError: 'numpy.ndarray' object is not callable
+        step 7: AttributeError: 'Atoms' object has no attribute 'get_space_group'
+        step 10: AttributeError: 'Spacegroup' object has no attribute 'international'
+    - plot_bands.py: 1 failed run(s), fixed at step 56
+        step 53: ValueError: too many values to unpack (expected 2, got 3)
+    - Quantum ESPRESSO failed at step 38: bands_post (bands.x -in bands_post.in) exited with code
+      255
+    - documentation lookups, grouped by what the agent did next:
+        get_kpath: 6 lookup(s) (steps 24-30): write_espresso_in ASE input_data flat dictionary
+        namelist routing; write_espresso_in kpts ndarray list of k-points fractional coordinates;
+        bands.x input variables filband prefix outdir noncolin lspinorb; bands.x input variables
+        prefix nspin noncolin lspinorb nbnd; bands.x input variables prefix noncolin lspinorb nspin;
+        chem_llm.kpath standard_kpath kp_atoms kp_kpts kp_save plot_axis API
+        setup_jobs.py: 3 lookup(s) (steps 39-43): bands.x input file format namelist BANDS prefix
+        outdir filband noncoli; bands.x noncolin lspinorb namelist BANDS variables list; bands.x
+        INPUT_BANDS all variables complete list namelist
+        reduce_cell.py: 1 lookup(s) (step 5): ase Atoms cell property ndarray array
+        reduce_cell.py: 1 lookup(s) (step 8): ase Atoms get_space_group symmetry space group
+        reduce_cell.py: 1 lookup(s) (step 11): ase.spacegroup.Spacegroup symbol number attribute
+        setup_jobs.py: 1 lookup(s) (step 32): chem_llm.kpath plot_axis kpath.json bands.dat x ticks
+        segments
+    - harness refused 2 call(s) as loops: step 18 (note), step 40 (search_docs)
+    - agent's own scientific assumptions:
+        * T=300 K for thermal displacements: cubic CsPbBr3 is stable at room temperature (it
+          transforms to orthorhombic below ~150 K and to tetragonal above ~340 K).
+        * U values chosen based on typical Debye-Waller factors for halide perovskites: Cs (lighter,
+          more weakly bound) has the largest U, Br (heavier) has the smallest.
+        * ecutwfc = 88 Ry (from Pb, the max recommended cutoff of 44 Ha = 88 Ry), ecutrho = 4 *
+          ecutwfc = 352 Ry.
+        * nbnd = 100: with spin-orbit, each band holds 1 electron, so occupied bands = 82. nbnd must
+          be > 82; 100 gives 18 unoccupied bands for the conduction manifold.
+        * occupations = 'fixed': CsPbBr3 is a semiconductor with a band gap of ~1.78 eV (from MP),
+          so fixed occupations are appropriate.
+    - agent's own needs expert review:
+        * The DFT band gap of 0.385 eV is much lower than the experimental ~1.78 eV. This is
+          expected for PBEsol + SO on halide perovskites, but the magnitude of the underestimation
+          should be verified against literature values for CsPbBr3 specifically.
+        * The U values for thermal displacements are approximate and should be compared to
+          experimental Debye-Waller factors if available.
+        * The k-point mesh of 8x8x8 for the SCF calculation should be verified for convergence (a
+          6x6x6 or 10x10x10 mesh could be tested).
+
+5. Where the time went
+    not recorded (this run predates timing logs)
