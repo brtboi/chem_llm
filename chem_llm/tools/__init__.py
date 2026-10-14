@@ -168,7 +168,10 @@ def _release_cached_gpu_memory() -> None:
     import sys
 
     torch = sys.modules.get("torch")  # only if the model already imported it
-    if torch is not None and torch.cuda.is_available():
+    # is_initialized, not is_available: an agent on a remote backend (vLLM)
+    # never touched the GPU, and asking would create a ~700 MB CUDA context
+    # on GPU 0 in every agent process.
+    if torch is not None and torch.cuda.is_initialized():
         torch.cuda.empty_cache()
 
 
@@ -288,10 +291,15 @@ def run_espresso_workflow(
     timings = {}  # seconds per stage, for the run's timing breakdown
     if qe.gpu_ids:
         with _qe_slot([f"gpu{i}" for i in qe.gpu_ids], timings) as slot:
-            gpu = slot[3:]
-            one_gpu = dataclasses.replace(qe, mpi_prefix=qe.single_gpu_prefix, pw_args="")
+            # Set inside the launch, not in the environment: srun resets
+            # CUDA_VISIBLE_DEVICES for every step it starts (sweep 3 ran every
+            # "dedicated" job on GPU 0, beside the model server).
+            # /usr/bin/env, not env: a user-level "env" earlier on PATH (uv
+            # installs ~/.local/bin/env, a shell script) cannot be executed.
+            pin = f"/usr/bin/env CUDA_VISIBLE_DEVICES={slot[3:]}"
+            one_gpu = dataclasses.replace(qe, mpi_prefix=f"{qe.single_gpu_prefix} {pin}".strip(), pw_args="")
             steps = [(n, exe, "" if exe == qe.pw_x else a, i, o) for n, exe, a, i, o in steps]
-            return _run_qe_steps(work_dir, one_gpu, settings, steps, timings, {"CUDA_VISIBLE_DEVICES": gpu})
+            return _run_qe_steps(work_dir, one_gpu, settings, steps, timings)
     with _qe_slot([str(i) for i in range(qe.max_concurrent)], timings):
         return _run_qe_steps(work_dir, qe, settings, steps, timings)
 

@@ -1,6 +1,6 @@
 # Benchmark results
 
-Generated 2026-10-14 01:12 by `chem-llm-bench report` from `bench/index.jsonl`; do not edit by hand. Each run's folder under `bench/runs/` has its live progress, summary, the checks and what changed since the previous run of that compound.
+Generated 2026-10-14 01:40 by `chem-llm-bench report` from `bench/index.jsonl`; do not edit by hand. Each run's folder under `bench/runs/` has its live progress, summary, the checks and what changed since the previous run of that compound.
 
 ## Suite `core`
 
@@ -21,7 +21,7 @@ Compounds the prompt was never tuned on: elemental and ionic insulators, an indi
 
 | case | what it tests | last run | result | failed checks | gap eV (expected) | steps | wall min | prompt | commit | records |
 |---|---|---|---|---|---|---|---|---|---|---|
-| si | textbook indirect gap (CBM near X, not at a labelled point) | 2026-10-14T00:44 | pass | - | 0.472 (0.4-0.8) | 34 | 8.74 | f8789fb5 | e3df222f | [summary](runs/2026-10-14_003549_si/summary.txt), [progress](runs/2026-10-14_003549_si/progress.txt), [changes](runs/2026-10-14_003549_si/changes.txt) |
+| si | textbook indirect gap (CBM near X, not at a labelled point) | 2026-10-14T01:37 | pass | - | 0.473 (0.4-0.8) | 33 | 22.13 | 7543c481 | 15c2b0a2 | [summary](runs/2026-10-14_011451_si/summary.txt), [progress](runs/2026-10-14_011451_si/progress.txt), [changes](runs/2026-10-14_011451_si/changes.txt) |
 | diamond | wide indirect gap; degenerate valence pairs at X | 2026-10-14T00:57 | pass | - | 4.055 (3.8-4.5) | 27 | 12.99 | e982a950 | e3df222f | [summary](runs/2026-10-14_004443_diamond/summary.txt), [progress](runs/2026-10-14_004443_diamond/progress.txt), [changes](runs/2026-10-14_004443_diamond/changes.txt) |
 | gan | nitride with Ga 3d semicore states; direct gap at Gamma | 2026-10-14T01:07 | pass | - | 1.866 (1.4-2.4) | 36 | 21.4 | d86c1598 | e3df222f | [summary](runs/2026-10-14_004538_gan/summary.txt), [progress](runs/2026-10-14_004538_gan/progress.txt), [changes](runs/2026-10-14_004538_gan/changes.txt) |
 | nacl | ionic wide-gap insulator, alkali semicore | 2026-10-14T01:05 | pass | - | 5.038 (4.4-5.6) | 31 | 12.48 | 078b8223 | e3df222f | [summary](runs/2026-10-14_005324_nacl/summary.txt), [progress](runs/2026-10-14_005324_nacl/progress.txt), [changes](runs/2026-10-14_005324_nacl/changes.txt) |
@@ -42,7 +42,7 @@ core + extended.
 | graphite | semimetal, needs smearing; layered hexagonal | 2026-10-14T01:02 | pass | - | -0.005 (metal) | 32 | 26.8 | 24c763aa | e3df222f | [summary](runs/2026-10-14_003549_graphite/summary.txt), [progress](runs/2026-10-14_003549_graphite/progress.txt), [changes](runs/2026-10-14_003549_graphite/changes.txt) |
 | cspbbr3 | heavy elements, spin-orbit required (it shrinks the gap by ~1 eV) | 2026-10-14T00:22 | pass | - | 0.373 (0.2-0.9) | 46 | 36.3 | 5763242e | aa252971 | [summary](runs/2026-10-13_234637_cspbbr3/summary.txt), [progress](runs/2026-10-13_234637_cspbbr3/progress.txt), [changes](runs/2026-10-13_234637_cspbbr3/changes.txt) |
 | mos2 | layered dichalcogenide with an indirect gap | 2026-10-14T00:54 | pass | - | 1.203 (0.75-1.5) | 42 | 18.67 | 1bc2d5b7 | e3df222f | [summary](runs/2026-10-14_003549_mos2/summary.txt), [progress](runs/2026-10-14_003549_mos2/progress.txt), [changes](runs/2026-10-14_003549_mos2/changes.txt) |
-| si | textbook indirect gap (CBM near X, not at a labelled point) | 2026-10-14T00:44 | pass | - | 0.472 (0.4-0.8) | 34 | 8.74 | f8789fb5 | e3df222f | [summary](runs/2026-10-14_003549_si/summary.txt), [progress](runs/2026-10-14_003549_si/progress.txt), [changes](runs/2026-10-14_003549_si/changes.txt) |
+| si | textbook indirect gap (CBM near X, not at a labelled point) | 2026-10-14T01:37 | pass | - | 0.473 (0.4-0.8) | 33 | 22.13 | 7543c481 | 15c2b0a2 | [summary](runs/2026-10-14_011451_si/summary.txt), [progress](runs/2026-10-14_011451_si/progress.txt), [changes](runs/2026-10-14_011451_si/changes.txt) |
 | diamond | wide indirect gap; degenerate valence pairs at X | 2026-10-14T00:57 | pass | - | 4.055 (3.8-4.5) | 27 | 12.99 | e982a950 | e3df222f | [summary](runs/2026-10-14_004443_diamond/summary.txt), [progress](runs/2026-10-14_004443_diamond/progress.txt), [changes](runs/2026-10-14_004443_diamond/changes.txt) |
 | gan | nitride with Ga 3d semicore states; direct gap at Gamma | 2026-10-14T01:07 | pass | - | 1.866 (1.4-2.4) | 36 | 21.4 | d86c1598 | e3df222f | [summary](runs/2026-10-14_004538_gan/summary.txt), [progress](runs/2026-10-14_004538_gan/progress.txt), [changes](runs/2026-10-14_004538_gan/changes.txt) |
 | nacl | ionic wide-gap insulator, alkali semicore | 2026-10-14T01:05 | pass | - | 5.038 (4.4-5.6) | 31 | 12.48 | 078b8223 | e3df222f | [summary](runs/2026-10-14_005324_nacl/summary.txt), [progress](runs/2026-10-14_005324_nacl/progress.txt), [changes](runs/2026-10-14_005324_nacl/changes.txt) |
@@ -102,6 +102,7 @@ core + extended.
 
 | date | label | backend | result | failed checks | gap eV | steps | wall min | model min | prompt | commit |
 |---|---|---|---|---|---|---|---|---|---|---|
+| 2026-10-14T01:37 | sweep 3: dedicated QE GPUs, scf_kmesh, magnetism rule | vllm | pass | - | 0.473 | 33 | 22.13 | 7.41 | 7543c481 | 15c2b0a2 |
 | 2026-10-14T00:44 | sweep 2: qe_output reader, tick lists, lsym off, 3 QE slots; extended baseline | vllm | pass | - | 0.472 | 34 | 8.74 | 4.54 | f8789fb5 | e3df222f |
 
 ### diamond: wide indirect gap; degenerate valence pairs at X

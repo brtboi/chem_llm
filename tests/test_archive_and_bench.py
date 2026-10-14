@@ -169,5 +169,5 @@ def test_dedicated_gpu_mode_pins_one_gpu_per_job(monkeypatch, tmp_path):
     with activated(s):
         tools.run_espresso_workflow(str(tmp_path / "calc"))
     prefix, pw_args, steps, env = seen[0]
-    assert prefix == "srun -n 1" and pw_args == "" and env == {"CUDA_VISIBLE_DEVICES": "2"}
+    assert prefix == "srun -n 1 /usr/bin/env CUDA_VISIBLE_DEVICES=2" and pw_args == "" and env is None
     assert all(a == "" for _, _, a, _, _ in steps)
