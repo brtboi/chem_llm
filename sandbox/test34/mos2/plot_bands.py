@@ -1,96 +1,81 @@
-import numpy as np
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+import numpy as np
 from chem_llm.kpath import plot_axis
+from chem_llm.qe_output import read_pw_out, band_edges
 
 # =============================================================================
-# STEP 7: plot_bands.py for calculations/000
+# plot_bands.py
+# Plot the band structure for calculations/000 (2H MoS2, unperturbed base).
+# Uses chem_llm.kpath.plot_axis for the x-axis and chem_llm.qe_output for
+# reading the SCF output (n_occupied, fermi_energy_eV) per INVARIANT 2.
 # =============================================================================
-# Reads the band structure from 000.bands.dat (produced by bands.x),
-# aligns energies to the VBM using the occupied-band count from pw.out,
-# and plots the band structure with proper x-axis from kpath.json.
-# =============================================================================
 
-# --- Read the number of Kohn-Sham states (occupied bands) from pw.out ---
-# INVARIANT 2: the occupied-band count is a property of the pseudopotentials
-# and the SCF run, not a guess. Read it from pw.out directly.
-occupied_bands = None
-with open('calculations/000/pw.out') as f:
-    for line in f:
-        if 'number of Kohn-Sham states' in line:
-            occupied_bands = int(line.split('=')[1].strip())
-            break
+KPATH_JSON = 'calculations/000/kpath.json'
+BANDS_DAT = 'calculations/000/000.bands.dat'
+PW_OUT = 'calculations/000/pw.out'
+OUTPUT_PDF = 'calculations/000/bands_000.pdf'
 
-assert occupied_bands is not None, 'Could not find "number of Kohn-Sham states" in pw.out'
-print(f'Occupied bands from pw.out: {occupied_bands}')
+# Get x-axis, energies, ticks, and line segments from plot_axis
+# This checks that bands were computed on kpath.json's k-points (INVARIANT 4)
+ax = plot_axis(KPATH_JSON, BANDS_DAT)
+x = ax['x']          # path length array
+E = ax['energies']   # (nkpts, nbands) array in eV
+tick_x = ax['tick_x']
+tick_labels = ax['tick_labels']
+segments = ax['segments']  # list of slice objects
 
-# --- Get the x-axis, energies, ticks, and segments from plot_axis ---
-# INVARIANT 4: plot_axis checks that bands.x computed the same k-points as kpath.json
-axis = plot_axis('calculations/000/kpath.json', 'calculations/000/000.bands.dat')
+# Read SCF output to get n_occupied and fermi_energy_eV (INVARIANT 2)
+pw = read_pw_out(PW_OUT)
+n_occupied = pw['n_occupied']
+fermi_eV = pw['fermi_energy_eV']
 
-x = axis['x']           # path length (in A^-1 or similar units)
-energies = axis['energies']  # shape (n_kpts, n_bands), in eV
-ticks = axis['ticks']   # list of dicts with 'x', 'label', 'indices'
-segments = axis['segments']  # list of (start_idx, end_idx) for each continuous segment
+# Determine alignment: VBM for insulator/semiconductor, Fermi for metal
+# MoS2 2H is a semiconductor (gap ~1.46 eV from MP), so align to VBM
+edges = band_edges(E, n_occupied)
+vbm = edges['vbm']
+cbm = edges['cbm']
+gap = edges['gap']
 
-n_kpts = len(x)
-n_bands = energies.shape[1]
-print(f'k-points: {n_kpts}, bands: {n_bands}')
-print(f'Ticks: {ticks}')
-print(f'Segments: {segments}')
+print(f"n_occupied = {n_occupied}")
+if fermi_eV is not None:
+    print(f"Fermi energy = {fermi_eV:.4f} eV")
+else:
+    print("Fermi energy = None (not reported for fixed occupations)")
+print(f"VBM = {vbm:.4f} eV")
+print(f"CBM = {cbm:.4f} eV")
+print(f"Band gap = {gap:.4f} eV")
 
-# --- Align energies to the VBM ---
-# The VBM is the maximum energy among the occupied bands (bands 0 to occupied_bands-1).
-# For a semiconductor, the VBM is the highest occupied state.
-vbm = np.max(energies[:, :occupied_bands])
-print(f'VBM (before alignment): {vbm:.4f} eV')
+# Align energies to VBM (semiconductor)
+zero = vbm
 
-# Shift all energies so that VBM = 0
-e = energies - vbm
-
-# --- Find the CBM (minimum of conduction bands) ---
-cbm = np.min(e[:, occupied_bands:])
-band_gap = cbm - 0.0  # VBM is at 0
-print(f'CBM: {cbm:.4f} eV')
-print(f'Band gap: {band_gap:.4f} eV')
-
-# --- Plot ---
-fig, ax = plt.subplots(figsize=(10, 6))
+# Create the plot
+fig, plt_ax = plt.subplots(figsize=(10, 6))
 
 # Plot each band as one line per segment (never across a discontinuity)
-for band_idx in range(n_bands):
-    for seg_start, seg_end in segments:
-        seg_x = x[seg_start:seg_end + 1]
-        seg_e = e[seg_start:seg_end + 1, band_idx]
-        ax.plot(seg_x, seg_e, 'b-', linewidth=0.8)
+for s in segments:
+    for b in range(E.shape[1]):
+        plt_ax.plot(x[s], E[s, b] - zero, 'k-', lw=1)
 
 # Draw vertical lines at every tick
-tick_xs = [t['x'] for t in ticks]
-tick_labels = [t['label'] for t in ticks]
-for tick_x in tick_xs:
-    ax.axvline(x=tick_x, color='gray', linewidth=0.5, linestyle='--')
+for t in tick_x:
+    plt_ax.axvline(t, color='gray', lw=0.5)
 
 # Set x-axis ticks and labels
-ax.set_xticks(tick_xs)
-ax.set_xticklabels(tick_labels)
+plt_ax.set_xticks(tick_x)
+plt_ax.set_xticklabels(tick_labels)
 
-# Set x-limits to the full path
-ax.set_xlim(x[0], x[-1])
+# Set axis limits
+plt_ax.set_xlim(x[0], x[-1])
+plt_ax.set_ylim(-10, 10)  # restrict to +/-10 eV around VBM
 
-# Restrict y-axis to about +/-10 eV around VBM (at 0)
-ax.set_ylim(-10, 10)
-
-# Labels
-ax.set_xlabel('k-point path')
-ax.set_ylabel('Energy (eV)')
-ax.set_title(f'2H-MoS2 band structure (PBEsol, VBM-aligned)\nBand gap = {band_gap:.3f} eV')
+# Labels and title
+plt_ax.set_xlabel('k-point')
+plt_ax.set_ylabel('Energy (eV)')
+plt_ax.set_title('2H MoS$_2$ band structure (PBEsol, scalar-relativistic)\n' +
+                 f'Gap = {gap:.3f} eV (VBM-aligned)')
 
 plt.tight_layout()
-plt.savefig('calculations/000/bands_000.pdf', bbox_inches='tight')
-print('Saved calculations/000/bands_000.pdf')
-
-print(f'\nSummary:')
-print(f'  VBM: {vbm:.4f} eV (aligned to 0)')
-print(f'  CBM: {cbm:.4f} eV')
-print(f'  Band gap: {band_gap:.4f} eV')
+plt.savefig(OUTPUT_PDF, dpi=150, bbox_inches='tight')
+print(f"Saved band structure plot to {OUTPUT_PDF}")

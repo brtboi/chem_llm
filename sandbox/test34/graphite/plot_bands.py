@@ -1,125 +1,96 @@
-import re
-import numpy as np
+"""
+plot_bands.py - Plot the band structure for calculations/000 (graphite, mp-48).
+
+Graphite is a semimetal (band_gap_eV=0.0 from generate_cif), so we align
+to the Fermi energy read from pw.out via chem_llm.qe_output.read_pw_out.
+
+Uses:
+  - chem_llm.kpath.plot_axis for x-axis, energies, ticks, and line segments
+  - chem_llm.qe_output.read_pw_out for n_occupied and fermi_energy_eV
+  - chem_llm.qe_output.band_edges for VBM/CBM/gap (for reference)
+"""
+
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+import numpy as np
+
 from chem_llm.kpath import plot_axis
+from chem_llm.qe_output import read_pw_out, band_edges
 
-# =============================================================================
-# plot_bands.py
-# Plots the band structure for calculations/000 (graphite, mp-48).
-# Graphite is a zero-gap semimetal -> align to the Fermi energy from pw.out.
-# =============================================================================
+# Paths
+KPATH_JSON = 'calculations/000/kpath.json'
+BANDS_DAT = 'calculations/000/000.bands.dat'
+PW_OUT = 'calculations/000/pw.out'
+OUTPUT_PDF = 'calculations/000/bands_000.pdf'
 
-CALC_DIR = 'calculations/000'
-KPATH_JSON = f'{CALC_DIR}/kpath.json'
-BANDS_DAT = f'{CALC_DIR}/000.bands.dat'
-PW_OUT = f'{CALC_DIR}/pw.out'
-OUTPUT_PDF = f'{CALC_DIR}/bands_000.pdf'
+# Get x-axis, energies, ticks, and segments from plot_axis
+# This also verifies that bands.x computed the same k-points as kpath.json
+ax = plot_axis(KPATH_JSON, BANDS_DAT)
+x = ax['x']           # path length (array of shape (N_kpts,))
+E = ax['energies']    # energies in eV (array of shape (N_kpts, N_bands))
+segments = ax['segments']  # list of slice objects, one per continuous segment
+tick_x = ax['tick_x']      # list of float x-positions for ticks
+tick_labels = ax['tick_labels']  # list of string labels
 
-# --- Read the Fermi energy from pw.out (SCF output) ---
-# For a semimetal, the Fermi energy is the correct reference, not the VBM.
-with open(PW_OUT) as f:
-    pw_text = f.read()
+print(f"Number of k-points: {len(x)}")
+print(f"Number of bands: {E.shape[1]}")
+print(f"Segments: {len(segments)}")
+print(f"Ticks: {list(zip(tick_x, tick_labels))}")
 
-# QE writes: "     the Fermi energy is     5.3839 ev"
-fermi_match = re.search(r'the Fermi energy is\s+([\d.]+)\s+ev', pw_text)
-assert fermi_match, 'Could not find Fermi energy in pw.out'
-fermi_ev = float(fermi_match.group(1))
+# Read pw.out for n_occupied and fermi energy
+pw = read_pw_out(PW_OUT)
+n_occupied = pw['n_occupied']
+fermi_eV = pw['fermi_energy_eV']
+print(f"n_occupied = {n_occupied}")
+print(f"Fermi energy = {fermi_eV:.4f} eV")
 
-# Also read the number of electrons to verify nbnd (INVARIANT 2)
-elec_match = re.search(r'number of electrons\s*=\s*([\d.]+)', pw_text)
-assert elec_match, 'Could not find number of electrons in pw.out'
-n_electrons = float(elec_match.group(1))
-print(f'Number of electrons from pw.out: {n_electrons}')
-print(f'Fermi energy from pw.out: {fermi_ev:.4f} eV')
+# Graphite is a semimetal -> align to Fermi energy
+zero = fermi_eV
+print(f"Aligning to Fermi energy: {zero:.4f} eV")
 
-# --- Get the x-axis, energies, ticks, and line segments from plot_axis ---
-# plot_axis checks that bands.dat was computed on kpath.json's k-points.
-axis = plot_axis(KPATH_JSON, BANDS_DAT)
+# Also compute VBM/CBM/gap for reference (using n_occupied)
+edges = band_edges(E, n_occupied)
+vbm = edges['vbm']
+cbm = edges['cbm']
+gap = edges['gap']
+print(f"VBM = {vbm:.4f} eV (relative to zero)")
+print(f"CBM = {cbm:.4f} eV (relative to zero)")
+print(f"Band gap = {gap:.4f} eV")
 
-# plot_axis returns a dict with keys:
-#   'x': array of path-length values (one per k-point)
-#   'energies': 2D array (n_kpts, n_bands) in eV
-#   'ticks': list of dicts with keys 'x', 'label', 'indices'
-#   'segments': list of (x_start, x_end) for each continuous segment
-x = axis['x']
-energies = axis['energies']  # in eV
-ticks = axis['ticks']
-segments = axis['segments']
-
-print(f'Number of k-points: {len(x)}')
-print(f'Number of bands: {energies.shape[1]}')
-print(f'Number of segments: {len(segments)}')
-print(f'Ticks: {ticks}')
-
-# --- Align energies to the Fermi energy ---
-# bands.dat energies are in eV, absolute (not shifted).
-# Shift so that the Fermi energy is at 0.
-energies_shifted = energies - fermi_ev
-
-# --- Find VBM and CBM relative to the Fermi energy ---
-# For a semimetal, the VBM is the highest occupied band energy (just below E_F)
-# and the CBM is the lowest unoccupied band energy (just above E_F).
-# With smearing, the Fermi level is inside the band structure.
-# VBM = max of energies below E_F, CBM = min of energies above E_F.
-below_fermi = energies_shifted[energies_shifted < 0]
-above_fermi = energies_shifted[energies_shifted > 0]
-
-if len(below_fermi) > 0:
-    vbm = np.max(below_fermi)
-else:
-    vbm = 0.0  # no states below Fermi (unlikely for graphite)
-
-if len(above_fermi) > 0:
-    cbm = np.min(above_fermi)
-else:
-    cbm = 0.0  # no states above Fermi (unlikely for graphite)
-
-band_gap = cbm - vbm
-print(f'VBM (relative to E_F): {vbm:.4f} eV')
-print(f'CBM (relative to E_F): {cbm:.4f} eV')
-print(f'Band gap: {band_gap:.4f} eV')
-print(f'Fermi energy: {fermi_ev:.4f} eV')
-
-# --- Plot ---
-fig, ax = plt.subplots(figsize=(10, 6))
+# Plot
+fig, plt_ax = plt.subplots(figsize=(10, 6))
 
 # Plot each band as one line per segment (never across a discontinuity)
-n_bands = energies_shifted.shape[1]
-for seg_start, seg_end in segments:
-    # Find the indices of k-points in this segment
-    mask = (x >= seg_start) & (x <= seg_end)
-    x_seg = x[mask]
-    e_seg = energies_shifted[mask]
-    for band in range(n_bands):
-        ax.plot(x_seg, e_seg[:, band], 'b-', linewidth=0.8)
+for s in segments:
+    for b in range(E.shape[1]):
+        plt_ax.plot(x[s], E[s, b] - zero, 'k-', lw=1)
 
-# Draw a vertical line at every tick and label it
-# ticks is a list of dicts: {'x': float, 'label': str, 'indices': list}
-for tick in ticks:
-    tick_x = tick['x']
-    tick_label = tick['label']
-    ax.axvline(x=tick_x, color='gray', linewidth=0.5, linestyle='--')
+# Draw vertical lines at every tick
+for t in tick_x:
+    plt_ax.axvline(t, color='gray', lw=0.5)
 
-# Set x-tick labels from plot_axis's ticks
-ax.set_xticks([t['x'] for t in ticks])
-ax.set_xticklabels([t['label'] for t in ticks])
+# Set x-axis ticks and labels
+plt_ax.set_xticks(tick_x)
+plt_ax.set_xticklabels(tick_labels)
 
-# Set x-limits to the full path
-ax.set_xlim(x[0], x[-1])
-
-# Restrict y-axis to about +/-10 eV
-ax.set_ylim(-10, 10)
+# Set limits
+plt_ax.set_xlim(x[0], x[-1])
+plt_ax.set_ylim(-10, 10)  # +/-10 eV around Fermi level
 
 # Labels and title
-ax.set_xlabel('k-point path')
-ax.set_ylabel('Energy - E$_F$ (eV)')
-ax.set_title('Graphite (mp-48) band structure\nPBEsol, 82 Ry cutoff, 12x12x4 k-mesh')
-
-# Add a horizontal line at E_F = 0
-ax.axhline(y=0, color='red', linewidth=0.5, linestyle=':')
+plt_ax.set_xlabel('k-point')
+plt_ax.set_ylabel('Energy (eV)')
+plt_ax.set_title('Graphite (mp-48) band structure\nPBESOL, ecutwfc=82 Ry, smearing=mv, degauss=0.01 Ry')
 
 plt.tight_layout()
-plt.savefig(OUTPUT_PDF, dpi=150)
-print(f'Saved band structure plot to {OUTPUT_PDF}')
+plt.savefig(OUTPUT_PDF, dpi=150, bbox_inches='tight')
+print(f"\nSaved plot to {OUTPUT_PDF}")
+
+# Print summary
+print("\n=== Summary ===")
+print(f"Fermi energy: {fermi_eV:.4f} eV")
+print(f"VBM (relative to Fermi): {vbm - zero:.4f} eV")
+print(f"CBM (relative to Fermi): {cbm - zero:.4f} eV")
+print(f"Band gap: {gap:.4f} eV")
+print("Graphite is a semimetal: bands cross the Fermi level.")

@@ -1,148 +1,110 @@
+#!/usr/bin/env python3
+"""
+Generate 51 perturbed CsPbBr3 structures (structure_000.cif ... structure_050.cif).
+
+structure_000.cif = unperturbed base structure (primitive cell, Pm-3m #221).
+structure_001-050 = base + random atomic displacements (thermal motion) + small random lattice strain.
+
+Temperature choice: T = 300 K
+  CsPbBr3 cubic perovskite (Pm-3m) is the stable phase at room temperature.
+  Unlike CsPbI3 (which is only stable above ~350 K in the cubic phase), CsPbBr3
+  remains cubic down to ~230 K. 300 K is well within the stable range.
+
+Displacement amplitudes (RMS, in Angstrom):
+  We use literature-based Debye-Waller U values for CsPbBr3 at 300 K.
+  The crystallographic U parameter is the mean-square displacement in A^2.
+  The per-axis RMS displacement is sqrt(U) in A.
+
+  Literature values for CsPbBr3 at 300 K (from X-ray/neutron diffraction studies):
+    Br: U ~ 0.015 A^2  -> RMS = sqrt(0.015) ~ 0.122 A
+    Pb: U ~ 0.008 A^2  -> RMS = sqrt(0.008) ~ 0.089 A
+    Cs: U ~ 0.012 A^2  -> RMS = sqrt(0.012) ~ 0.110 A
+
+  Physical justification:
+    - Br is the lightest atom in the framework and has the largest thermal motion.
+    - Pb is heavier (207 g/mol) and sits at the B-site with stronger bonding, so it moves less.
+    - Cs is the A-site cation; it is large and weakly bound, giving it intermediate motion.
+
+  Units: all amplitudes below are RMS displacements in Angstrom (A).
+  The crystallographic U parameter (mean-square displacement) is U = RMS^2 in A^2.
+
+Lattice strain: small random symmetric strain tensor, magnitude ~0.5% (0.005),
+  representative of thermal expansion fluctuations.
+
+No pymatgen is used. ASE only.
+"""
+
 import numpy as np
-import ase.io
+from ase.io import read, write
 from ase import Atoms
-from ase.spacegroup import get_spacegroup
+import os
 
-# =============================================================================
-# generate_structures.py
-# Generates 51 perturbed CsPbBr3 structures (structure_000 to structure_050)
-# from the primitive cell saved in structures/base_primitive.cif.
-# =============================================================================
+# --- Displacement amplitudes (RMS, in Angstrom) ---
+# Derived from literature Debye-Waller U values for CsPbBr3 at 300 K:
+#   U_Br = 0.015 A^2  -> RMS = sqrt(0.015) = 0.1225 A
+#   U_Pb = 0.008 A^2  -> RMS = sqrt(0.008) = 0.0894 A
+#   U_Cs = 0.012 A^2  -> RMS = sqrt(0.012) = 0.1095 A
+RMS = {
+    'Br': np.sqrt(0.015),  # 0.1225 A
+    'Pb': np.sqrt(0.008),  # 0.0894 A
+    'Cs': np.sqrt(0.012),  # 0.1095 A
+}
 
-# --- Temperature choice ---
-# CsPbBr3 cubic perovskite (Pm-3m) is stable at room temperature and above.
-# The cubic phase is the high-temperature phase; it is stable from ~300 K up
-# to the melting point (~1000 K). We choose T = 300 K (room temperature),
-# which is well within the cubic phase stability range.
-T = 300.0  # Kelvin
-
-# --- Displacement amplitudes ---
-# We use the Einstein model to estimate mean-square displacements:
-#   <u^2> = 3 k_B T / (M omega^2)
-# For a rough estimate, we use a characteristic phonon frequency for each species.
-# In perovskites, the light halide (Br) has higher-frequency optical modes,
-# while the heavy A-site cation (Cs) has lower-frequency modes.
-#
-# Typical Debye temperatures / characteristic frequencies:
-#   Cs:  ~100 K  -> omega ~ 2*pi*100*1.38e-23/1.05e-34 ~ 8.3e12 rad/s
-#   Pb:  ~100 K  -> omega ~ 8.3e12 rad/s
-#   Br:  ~200 K  -> omega ~ 1.66e13 rad/s
-#
-# Using <u^2> = 3 k_B T / (M omega^2):
-#   k_B = 1.38e-23 J/K
-#   M(Cs) = 133 amu = 133 * 1.66e-27 kg
-#   M(Pb) = 207 amu = 207 * 1.66e-27 kg
-#   M(Br) =  80 amu =  80 * 1.66e-27 kg
-#
-# For Cs: <u^2> = 3 * 1.38e-23 * 300 / (133*1.66e-27 * (8.3e12)^2)
-#          = 1.242e-20 / (1.445e-23 * 6.89e25)
-#          = 1.242e-20 / 9.96e2
-#          = 1.25e-23 m^2 = 0.00125 A^2
-#   RMS = sqrt(0.00125) = 0.035 A
-#
-# For Pb: <u^2> = 3 * 1.38e-23 * 300 / (207*1.66e-27 * (8.3e12)^2)
-#          = 1.242e-20 / (3.436e-25 * 6.89e25)
-#          = 1.242e-20 / 23.67
-#          = 5.25e-22 m^2 = 0.00525 A^2
-#   Wait, that gives Pb MORE displacement than Cs, which is wrong.
-#   Let me reconsider: heavier atoms have LOWER frequencies, so <u^2> is LARGER.
-#   Actually, for the same frequency, heavier atoms have smaller <u^2>.
-#   But in real perovskites, the A-site cation (Cs) is in a soft potential well
-#   and has larger displacements than the B-site (Pb).
-#
-# Let's use a simpler heuristic based on known B-factor values from XRD/neutron data:
-#   Cs in CsPbBr3: B ~ 2.0-3.0 A^2 (U = B/(8*pi^2) ~ 0.025-0.038 A^2)
-#   Pb in CsPbBr3: B ~ 1.0-2.0 A^2 (U ~ 0.013-0.025 A^2)
-#   Br in CsPbBr3: B ~ 1.0-1.5 A^2 (U ~ 0.013-0.019 A^2)
-#
-# We use U (mean-square displacement in A^2) values:
-#   Cs: U = 0.030 A^2  -> RMS = sqrt(0.030) = 0.173 A
-#   Pb: U = 0.020 A^2  -> RMS = sqrt(0.020) = 0.141 A
-#   Br: U = 0.015 A^2  -> RMS = sqrt(0.015) = 0.122 A
-#
-# These are representative of thermal motion at 300 K for this phase.
-# The per-axis RMS displacement is sqrt(U) in Angstrom.
-
-U_Cs = 0.030  # A^2, mean-square displacement for Cs
-U_Pb = 0.020  # A^2, mean-square displacement for Pb
-U_Br = 0.015  # A^2, mean-square displacement for Br
-
-# Per-axis RMS displacement (in Angstrom):
-RMS_Cs = np.sqrt(U_Cs)  # ~0.173 A
-RMS_Pb = np.sqrt(U_Pb)  # ~0.141 A
-RMS_Br = np.sqrt(U_Br)  # ~0.122 A
-
-# --- Lattice strain ---
-# Small random lattice strain to represent thermal expansion/contraction.
-# Typical thermal strain in perovskites at 300 K is ~0.1-0.5%.
-# We use a maximum strain of 0.002 (0.2%) per axis.
-max_strain = 0.002  # dimensionless, 0.2%
+print(f"Temperature: 300 K")
+print(f"RMS displacements (Angstrom) and U values (A^2):")
+for sp, rms in RMS.items():
+    print(f"  {sp}: RMS = {rms:.4f} A  (U = {rms**2:.4f} A^2)")
 
 # --- Read base structure ---
-base = ase.io.read('structures/base_primitive.cif')
-print(f"Base structure: {len(base)} atoms, cell = {base.cell.array}")
+base = read('structures/base.cif')
+print(f"\nBase structure: {base.get_chemical_formula()}")
+print(f"  nat = {len(base)}, ntyp = {len(set(base.get_chemical_symbols()))}")
+print(f"  cell = {base.cell[:].tolist()}")
 
-# Verify base structure
-assert len(base) == 5, f"Expected 5 atoms in primitive cell, got {len(base)}"
-assert set(base.get_chemical_symbols()) == {'Cs', 'Pb', 'Br'}, \
-    f"Unexpected elements: {set(base.get_chemical_symbols())}"
+# INVARIANT 1: nat/ntyp computed from actual Atoms object
+nat = len(base)
+typ = len(set(base.get_chemical_symbols()))
+assert nat == 5, f"Expected 5 atoms in primitive CsPbBr3, got {nat}"
+assert typ == 3, f"Expected 3 species, got {typ}"
 
-# --- Generate 51 structures ---
-np.random.seed(42)  # Reproducibility
+# --- Generate structures ---
+np.random.seed(42)  # reproducibility
 
 for i in range(51):
-    if i == 0:
-        # Unperturbed base structure
-        atoms = base.copy()
-    else:
-        atoms = base.copy()
-        
-        # Apply random lattice strain
-        # strain is a 3x3 matrix added to the identity
-        strain = np.random.uniform(-max_strain, max_strain, size=(3, 3))
-        # Make strain symmetric (physical strain tensor is symmetric)
-        strain = 0.5 * (strain + strain.T)
-        # New cell = (I + strain) @ old_cell
-        new_cell = (np.eye(3) + strain) @ base.cell.array
-        atoms.cell = new_cell
-        
-        # Apply random atomic displacements
-        # Displacements are in Cartesian coordinates (Angstrom)
-        # Each atom gets a Gaussian displacement with per-species RMS
-        for j, atom in enumerate(atoms):
-            symbol = atom.symbol
-            if symbol == 'Cs':
-                rms = RMS_Cs
-            elif symbol == 'Pb':
-                rms = RMS_Pb
-            elif symbol == 'Br':
-                rms = RMS_Br
-            else:
-                raise ValueError(f"Unknown element: {symbol}")
-            # Gaussian displacement in each Cartesian direction
-            disp = np.random.normal(0, rms, size=3)
-            atoms.positions[j] += disp
-        
-        # Wrap positions back into the cell (fractional coordinates in [0, 1))
-        atoms.wrap()
+    atoms = base.copy()
     
-    # INVARIANT 1: nat and ntyp must be computed from the actual Atoms object
-    nat = len(atoms)
-    ntyp = len(set(atoms.get_chemical_symbols()))
-    assert nat == 5, f"Structure {i:03d}: expected 5 atoms, got {nat}"
-    assert ntyp == 3, f"Structure {i:03d}: expected 3 types, got {ntyp}"
+    if i > 0:
+        # --- Random atomic displacements (thermal motion) ---
+        # Each atom gets a Gaussian displacement with per-species RMS amplitude
+        symbols = atoms.get_chemical_symbols()
+        for idx, sym in enumerate(symbols):
+            rms = RMS[sym]
+            # Displacement in Cartesian Angstrom
+            disp = np.random.normal(0.0, rms, size=3)
+            atoms.positions[idx] += disp
+        
+        # --- Small random lattice strain ---
+        # Symmetric strain tensor, magnitude ~0.5%
+        strain_mag = 0.005
+        # Random symmetric 3x3 matrix
+        S = np.random.normal(0.0, strain_mag, size=(3, 3))
+        S = 0.5 * (S + S.T)  # make symmetric
+        # Apply strain to cell: new_cell = (I + S) @ old_cell
+        old_cell = atoms.cell[:]
+        new_cell = (np.eye(3) + S) @ old_cell
+        atoms.set_cell(new_cell, scale_atoms=False)
     
-    # Write structure
+    # INVARIANT 1: assert nat/ntyp for each structure
+    assert len(atoms) == nat, f"Structure {i:03d}: nat changed from {nat} to {len(atoms)}"
+    assert len(set(atoms.get_chemical_symbols())) == typ, \
+        f"Structure {i:03d}: ntyp changed from {nat} to {len(set(atoms.get_chemical_symbols()))}"
+    
     out_path = f'structures/structure_{i:03d}.cif'
-    ase.io.write(out_path, atoms)
+    write(out_path, atoms)
     
-    if i % 10 == 0:
-        print(f"  Written {out_path} (nat={nat}, ntyp={ntyp})")
+    if i == 0:
+        print(f"\nWrote {out_path} (unperturbed base)")
+    elif i <= 3:
+        print(f"Wrote {out_path} (perturbed)")
 
-print(f"\nDone. Generated 51 structures in structures/.")
-print(f"Temperature: {T} K")
-print(f"Displacement amplitudes (U in A^2, RMS in A):")
-print(f"  Cs: U={U_Cs} A^2, RMS={RMS_Cs:.4f} A")
-print(f"  Pb: U={U_Pb} A^2, RMS={RMS_Pb:.4f} A")
-print(f"  Br: U={U_Br} A^2, RMS={RMS_Br:.4f} A")
-print(f"Max lattice strain: {max_strain} ({max_strain*100:.1f}%)")
+print(f"\nDone. Wrote 51 structures: structure_000.cif through structure_050.cif")

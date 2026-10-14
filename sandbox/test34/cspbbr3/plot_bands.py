@@ -1,111 +1,104 @@
-import re
-import numpy as np
+#!/usr/bin/env python3
+"""
+plot_bands.py -- Plot the band structure for calculations/000 (CsPbBr3, spin-orbit).
+
+Uses:
+  - chem_llm.kpath.plot_axis for x-axis, energies, ticks, and line segments
+  - chem_llm.qe_output.read_pw_out for n_occupied and fermi_energy_eV
+  - chem_llm.qe_output.band_edges for VBM/CBM/gap
+  - matplotlib for the plot
+
+Aligns to the VBM (semiconductor, gap ~1.78 eV from MP).
+Saves calculations/000/bands_000.pdf.
+"""
+
 import matplotlib
-matplotlib.use('Agg')
+matplotlib.use('Agg')  # headless backend
 import matplotlib.pyplot as plt
+import numpy as np
+
 from chem_llm.kpath import plot_axis
+from chem_llm.qe_output import read_pw_out, band_edges
 
-# =============================================================================
-# plot_bands.py
-# Plots the band structure for calculations/000 (CsPbBr3, spin-orbit on).
-# - x-axis, ticks, segments from chem_llm.kpath.plot_axis (INVARIANT 4)
-# - VBM alignment using occupied-band count read from pw.out (INVARIANT 2)
-# - Each band drawn as one line per segment (no line across discontinuities)
-# - Vertical lines at every tick, labels from plot_axis ticks
-# - y-axis restricted to about +/-10 eV around VBM
-# =============================================================================
+# --- Paths ---
+KPATH_JSON = 'calculations/000/kpath.json'
+BANDS_DAT = 'calculations/000/000.bands.dat'
+PW_OUT = 'calculations/000/pw.out'
+OUTPUT_PDF = 'calculations/000/bands_000.pdf'
 
-CALC_DIR = 'calculations/000'
-KPATH_JSON = f'{CALC_DIR}/kpath.json'
-BANDS_DAT = f'{CALC_DIR}/000.bands.dat'
-PW_OUT = f'{CALC_DIR}/pw.out'
-OUTPUT_PDF = f'{CALC_DIR}/bands_000.pdf'
+# --- Read band data (INVARIANT 4: plot_axis checks k-point consistency) ---
+ax = plot_axis(KPATH_JSON, BANDS_DAT)
+x = ax['x']          # path length (array)
+E = ax['energies']   # (n_kpoints, n_bands) in eV
+segments = ax['segments']   # list of slice objects, one per continuous segment
+tick_x = ax['tick_x']       # list of float positions
+tick_labels = ax['tick_labels']  # list of strings
 
-# --- Read the number of electrons from pw.out (INVARIANT 2) ---
-# With spin-orbit (noncolin=.true.), each band holds ONE electron,
-# so occupied bands = number of electrons.
-with open(PW_OUT) as f:
-    pw_text = f.read()
+print(f"Band data: {E.shape[0]} k-points, {E.shape[1]} bands")
+print(f"Path length: {x[0]:.3f} to {x[-1]:.3f}")
+print(f"Ticks: {list(zip(tick_x, tick_labels))}")
 
-m = re.search(r'number of electrons\s*=\s*([\d.]+)', pw_text)
-assert m, "Could not find 'number of electrons' in pw.out"
-n_electrons = float(m.group(1))
-print(f"Number of electrons from pw.out: {n_electrons}")
+# --- Read SCF output (INVARIANT 2: use chem_llm.qe_output, not hand-written regex) ---
+pw = read_pw_out(PW_OUT)
+n_occupied = pw['n_occupied']
+fermi_eV = pw['fermi_energy_eV']  # None for fixed-occupations runs (no smearing)
+print(f"\nFrom pw.out:")
+print(f"  n_electrons = {pw['n_electrons']}")
+print(f"  n_occupied  = {n_occupied}")
+if fermi_eV is not None:
+    print(f"  fermi_energy = {fermi_eV:.4f} eV")
+else:
+    print(f"  fermi_energy = None (fixed occupations, no smearing)")
+print(f"  spin_orbit  = {pw['spin_orbit']}")
 
-# With spin-orbit, each band holds 1 electron, so occupied bands = n_electrons
-n_occ = int(round(n_electrons))
-print(f"Occupied bands (spin-orbit): {n_occ}")
+# --- Align to VBM (semiconductor) ---
+edges = band_edges(E, n_occupied)
+vbm = edges['vbm']
+cbm = edges['cbm']
+gap = edges['gap']
+print(f"\nBand edges (before alignment):")
+print(f"  VBM = {vbm:.4f} eV")
+print(f"  CBM = {cbm:.4f} eV")
+print(f"  Gap = {gap:.4f} eV")
 
-# --- Get x-axis, energies, ticks, segments from plot_axis (INVARIANT 4) ---
-# plot_axis checks that bands.dat was computed on the k-points in kpath.json
-axis = plot_axis(KPATH_JSON, BANDS_DAT)
-
-# plot_axis returns a dict with keys: x, energies, ticks, segments
-# x: array of path-length values (one per k-point)
-# energies: 2D array (n_kpts, n_bands) in eV
-# ticks: list of dicts with keys 'x', 'label', 'indices'
-# segments: list of (start_idx, end_idx) index pairs for each continuous segment
-x = axis['x']
-energies = axis['energies']
-ticks = axis['ticks']
-segments = axis['segments']
-
-print(f"Number of k-points: {len(x)}")
-print(f"Number of bands: {energies.shape[1]}")
-print(f"Number of segments: {len(segments)}")
-print(f"Ticks: {ticks}")
-
-# --- Align energies to VBM ---
-# VBM = maximum energy among occupied bands (bands 0 to n_occ-1)
-# With spin-orbit, band index 0 is the lowest, band index n_occ-1 is the VBM
-occ_energies = energies[:, :n_occ]
-vbm = np.max(occ_energies)
-print(f"VBM (raw): {vbm:.6f} eV")
-
-# Shift all energies so VBM = 0
-e_shifted = energies - vbm
-
-# --- Find CBM (minimum of conduction bands) ---
-cond_energies = e_shifted[:, n_occ:]
-cbm = np.min(cond_energies)
-band_gap = cbm  # since VBM is at 0
-print(f"CBM (relative to VBM): {cbm:.6f} eV")
-print(f"Band gap: {band_gap:.6f} eV")
+# Shift so VBM is at 0 eV
+E_shifted = E - vbm
 
 # --- Plot ---
-fig, ax = plt.subplots(figsize=(10, 6))
+fig, plt_ax = plt.subplots(figsize=(10, 6))
 
-# Plot each band as one line per segment (never across a discontinuity)
-for band_idx in range(energies.shape[1]):
-    for (start, end) in segments:
-        seg_x = x[start:end + 1]
-        seg_e = e_shifted[start:end + 1, band_idx]
-        ax.plot(seg_x, seg_e, 'b-', linewidth=0.8)
+# Draw each band as one line per segment (never across a discontinuity)
+for s in segments:
+    for b in range(E_shifted.shape[1]):
+        plt_ax.plot(x[s], E_shifted[s, b], 'k-', lw=1)
 
-# Draw vertical lines at every tick and set tick labels
-# ticks are dicts with keys 'x', 'label', 'indices'
-tick_xs = [t['x'] for t in ticks]
-tick_labels = [t['label'] for t in ticks]
-for tick_x in tick_xs:
-    ax.axvline(x=tick_x, color='k', linewidth=0.5, alpha=0.5)
-ax.set_xticks(tick_xs)
-ax.set_xticklabels(tick_labels)
+# Draw vertical lines at every tick
+for t in tick_x:
+    plt_ax.axvline(t, color='gray', lw=0.5)
 
-# Set x-limits to the full path
-ax.set_xlim(x[0], x[-1])
+# Label the ticks
+plt_ax.set_xticks(tick_x)
+plt_ax.set_xticklabels(tick_labels)
 
-# Restrict y-axis to about +/-10 eV around VBM
-ax.set_ylim(-10, 10)
+# Set axis limits
+plt_ax.set_xlim(x[0], x[-1])
+plt_ax.set_ylim(-10, 10)  # +/-10 eV around VBM
 
-ax.set_xlabel('k-path')
-ax.set_ylabel('Energy (eV) relative to VBM')
-ax.set_title(f'CsPbBr3 band structure (spin-orbit, PBEsol)\nVBM=0, CBM={cbm:.3f} eV, gap={band_gap:.3f} eV')
-ax.grid(True, alpha=0.3)
+# Labels and title
+plt_ax.set_xlabel('k-path')
+plt_ax.set_ylabel('Energy (eV)')
+plt_ax.set_title('CsPbBr3 band structure (PBEsol, spin-orbit)\nVBM at 0 eV')
 
 plt.tight_layout()
 plt.savefig(OUTPUT_PDF, dpi=150)
-print(f"Saved plot to {OUTPUT_PDF}")
-print(f"\nSummary:")
-print(f"  VBM: 0.000 eV (by definition)")
-print(f"  CBM: {cbm:.4f} eV")
-print(f"  Band gap: {band_gap:.4f} eV")
+print(f"\nSaved plot to {OUTPUT_PDF}")
+
+# --- Print summary ---
+print(f"\n=== Summary ===")
+print(f"VBM = {vbm:.4f} eV (set to 0)")
+print(f"CBM = {cbm:.4f} eV")
+print(f"Band gap = {gap:.4f} eV")
+if fermi_eV is not None:
+    print(f"Fermi energy (from pw.out) = {fermi_eV:.4f} eV")
+else:
+    print(f"Fermi energy: not available (fixed occupations)")
