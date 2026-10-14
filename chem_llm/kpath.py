@@ -20,6 +20,7 @@ fixing them. Here the whole path comes from one call, and both ends use it:
     x, E = ax["x"], ax["energies"]
     for s in ax["segments"]:              # slice objects: use them as x[s], E[s, band]
         plt.plot(x[s], E[s, band])
+    plt.xticks(ax["tick_x"], ax["tick_labels"])
 
 The path is seekpath's (Hinuma et al. convention), with points spaced evenly
 in reciprocal space, so the x-axis is the true path length and breaks add no
@@ -154,7 +155,10 @@ def plot_axis(kpath_file: str | Path, bands_file: str | Path) -> dict:
     """Everything a band plot needs, guaranteed consistent with the QE run.
 
     bands_file is bands.x's primary filband output (e.g. 000.bands.dat).
-    Returns {"x", "energies" (nk, nbnd, eV), "ticks", "segments", "path"}.
+    Returns {"x", "energies" (nk, nbnd, eV), "ticks", "tick_x", "tick_labels",
+    "segments", "path"}. ticks are dicts ({"x", "label", "indices"}); tick_x and
+    tick_labels are the same as two plain lists, ready for
+    plt.xticks(ax["tick_x"], ax["tick_labels"]).
     segments are Python slice objects -- one continuous line each, used as
     x[s] and energies[s, band]. (Plain (start, stop) pairs were misread as
     inclusive by four of five agent scripts, which then drew a connector
@@ -179,4 +183,5 @@ def plot_axis(kpath_file: str | Path, bands_file: str | Path) -> dict:
         raise ValueError(f"the k-points in {bands_file} differ from {kpath_file} (max |dk| {worst:.4f} 1/A): "
                          "bands.in was not written from this k-path, or pw.x ran on a different cell")
     return {"x": np.asarray(kp["x"]), "energies": energies, "ticks": kp["ticks"],
+            "tick_x": [t["x"] for t in kp["ticks"]], "tick_labels": [t["label"] for t in kp["ticks"]],
             "segments": [slice(a, b) for a, b in kp["segments"]], "path": kp["path"]}

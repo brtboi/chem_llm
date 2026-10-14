@@ -82,3 +82,64 @@ def test_report_lists_every_case(tmp_path, monkeypatch):
          "dir": "runs/x_tio2", "code": {"commit": "abc"}, "prompt_version": "123"}) + "\n")
     text = bench.write_report(tmp_path / "RESULTS.md").read_text()
     assert "| tio2 |" in text and "1.840 (1.7-2.0)" in text and "| si |" in text and "never" in text
+
+
+def test_qe_output_reader(tmp_path):
+    from chem_llm.qe_output import band_edges, read_pw_out
+
+    soc = tmp_path / "soc.out"
+    soc.write_text("     number of atoms/cell      =            5\n     number of electrons       =        82.00\n"
+                   "     number of Kohn-Sham states=           82\n     Non magnetic calculation with spin-orbit\n"
+                   "     highest occupied level (ev):     4.5905\n     convergence has been achieved in  12 iterations\n"
+                   "   JOB DONE.\n")
+    d = read_pw_out(soc)
+    assert d["n_occupied"] == 82 and d["spin_orbit"] and d["highest_occupied_eV"] == 4.5905 and d["converged"]
+    metal = tmp_path / "metal.out"
+    metal.write_text("     number of electrons       =        16.00\n     the Fermi energy is     5.3839 ev\n"
+                     "     total magnetization       =     2.21 Bohr mag/cell\n")
+    d = read_pw_out(metal)
+    assert d["n_occupied"] == 8 and d["fermi_energy_eV"] == 5.3839 and d["total_magnetization"] == 2.21
+    e = band_edges([[0.0, 1.0, 3.0], [0.5, 2.0, 4.0]], 2)
+    assert (e["vbm"], e["cbm"], e["gap"], e["vbm_k"]) == (2.0, 3.0, 1.0, 1)
+
+
+def test_plot_axis_gives_plain_tick_lists(tmp_path):
+    import numpy as np
+    from ase.build import bulk
+
+    from chem_llm.kpath import kp_save, plot_axis, standard_kpath
+
+    kp = standard_kpath(bulk("Si"))
+    kp_save(kp, tmp_path / "kpath.json")
+    cell = np.asarray(kp["cell"]); recip = np.linalg.inv(cell).T
+    k_cart = np.asarray(kp["kpoints"]) @ recip * np.linalg.norm(cell[0])     # 2pi/alat units
+    n = len(k_cart)
+    body = "\n".join(" ".join(f"{v:.6f}" for v in k) + "\n" + " ".join(["0.0"] * 4) for k in k_cart)
+    (tmp_path / "b.dat").write_text(f" &plot nbnd=   4, nks= {n} /\n{body}\n")
+    ax = plot_axis(tmp_path / "kpath.json", tmp_path / "b.dat")
+    assert ax["tick_labels"][0] == "GAMMA" and len(ax["tick_x"]) == len(ax["ticks"])
+    assert all(isinstance(x, float) for x in ax["tick_x"])
+
+
+def test_qe_slots_limit_concurrency(monkeypatch, tmp_path):
+    import threading
+    import time
+
+    from chem_llm.tools import _qe_slot
+
+    monkeypatch.setattr("os.getuid", lambda: f"test{tmp_path.name}")
+    inside, peak, lock = [0], [0], threading.Lock()
+
+    def job():
+        with _qe_slot(2, {}):
+            with lock:
+                inside[0] += 1
+                peak[0] = max(peak[0], inside[0])
+            time.sleep(0.3)
+            with lock:
+                inside[0] -= 1
+
+    threads = [threading.Thread(target=job) for _ in range(4)]
+    [t.start() for t in threads]
+    [t.join() for t in threads]
+    assert peak[0] == 2

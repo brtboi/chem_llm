@@ -19,7 +19,7 @@ One place instead of numbered sandbox directories:
 
 Each case runs in its own process (tools work relative to the process's
 cwd), several at once against one vLLM server; Quantum ESPRESSO steps take
-turns on the node's GPUs (QESettings.serialize). A run is scored by checks
+turns on the node's GPUs (QESettings.max_concurrent at a time). A run is scored by checks
 read from the files it produced -- never from the agent's own claims.
 
 With LANGSMITH_API_KEY set, `--langsmith` also records the sweep as a
@@ -218,7 +218,7 @@ def compare_to_reference(ref: dict, fp: dict | None, tol: float | None = None) -
 
 def promote(run_dir: Path, tolerance: float = 0.15) -> Path:
     """Make a validated run the golden reference for its case."""
-    run_dir = Path(run_dir)
+    run_dir = Path(run_dir).resolve()
     record = json.loads((run_dir / "record.json").read_text())
     name = record["case"]
     _, cases = load_suites()

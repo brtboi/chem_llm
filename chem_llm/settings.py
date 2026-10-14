@@ -112,6 +112,8 @@ def _default_mpi_prefix() -> str:
     job was allocated as a single task owning every CPU (e.g. an interactive
     salloc): srun would otherwise inherit that cpus-per-task for each of the
     ranks and refuse the step ("More processors requested than permitted").
+    --overlap lets several such steps share the node at once (agents running
+    in parallel, QESettings.max_concurrent > 1); alone it changes nothing.
     """
     if not _on_perlmutter():
         return ""
@@ -120,7 +122,7 @@ def _default_mpi_prefix() -> str:
         cpus = int(os.environ.get("SLURM_CPUS_ON_NODE") or 128)
     except ValueError:
         cpus = 128
-    return f"srun -n {n} -c {max(1, cpus // n)} --gpus-per-task=1 --gpu-bind=closest"
+    return f"srun --overlap -n {n} -c {max(1, cpus // n)} --gpus-per-task=1 --gpu-bind=closest"
 
 
 def _default_pw_args() -> str:
@@ -166,12 +168,13 @@ class QESettings:
     # is far slower than running single-threaded.
     omp_num_threads: int = 1
     timeout_seconds: int = 7200
-    # One QE job at a time per node: several agents (a parallel benchmark)
-    # share the node's GPUs, and two pw.x runs launched on all of them at once
-    # would contend for GPU memory. The lock file is node-local (/tmp), so
-    # runs on other nodes never wait on it. Time spent waiting is reported as
-    # the "wait_for_gpus" stage.
-    serialize: bool = True
+    # How many QE jobs may run at once on this node when several agents (a
+    # parallel benchmark) share its GPUs. Each job uses every GPU, so more
+    # than one at a time needs free GPU memory beside the model server: 1 on
+    # 40 GB A100s next to vLLM, 2-3 on 80 GB. The lock files are node-local
+    # (/tmp), so runs on other nodes never wait on them. Time spent waiting
+    # is reported as the "wait_for_gpus" stage. 0 = no limit.
+    max_concurrent: int = 1
 
     def shell_command(self, exe: str, in_file: str, out_file: str, args: str = "") -> str:
         """Full shell command for one QE step, including any module load.
