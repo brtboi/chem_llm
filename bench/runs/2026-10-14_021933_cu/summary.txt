@@ -1,0 +1,117 @@
+chem_llm run summary -- Cu (Fm-3m)
+==================================
+completed in 27 steps, 9.4 min | Qwen/Qwen3.8-27B
+work dir: /pscratch/sd/b/brenthu/chem_llm/bench/work/cu
+band gap: -2.366 eV (computed from the bands output)
+plot:     calculations/000/bands_000.pdf
+
+1. What the agent did
+    step  1  fetched the Cu structure (Fm-3m) from the Materials Project: mp-30 ->
+             structures/cu_base.cif
+    step  3  wrote reduce_cell.py: 1 version, run 1x -> OK at step 4
+    step  6  wrote generate_structures.py: 1 version, run 1x -> OK at step 7
+    step  9  fetched the Cu pseudopotential from Pseudo-Dojo -> Cu.pbesol_s-rrkjus_psl.1.0.0.UPF
+    step 16  wrote setup_jobs.py: 1 version, run 1x -> OK at step 17
+    step 18  validated calculations/000/pw.in: issues ERROR executing validate_qe_input:
+             _check_magnetization() got an unexpected keyword argument 'path'
+    step 20  validated calculations/000/pw.in: issues ERROR executing validate_qe_input:
+             _check_magnetization() got an unexpected keyword argument 'path'
+    step 22  ran Quantum ESPRESSO in calculations/000: OK (scf, bands_scf, bands_post)
+    step 24  wrote plot_bands.py: 1 version, run 1x -> OK at step 25
+             2 documentation lookup(s) along the way (where they clustered: section 4)
+
+2. DFT setup (to reproduce the calculation)
+    Structure
+      - source: Materials Project mp-30 (Cu, Fm-3m #225)
+      - cell used for DFT: Cu, 1 atoms, Fm-3m (#225); a, b, c = 2.5296, 2.5296, 2.5296 A; alpha,
+        beta, gamma = 60.00, 60.00, 60.00 deg; volume 11.446 A^3
+      - fractional positions: Cu (0.0000, 0.0000, 0.0000)
+    Pseudopotentials (Pseudo-Dojo)
+      - Cu: Cu.pbesol_s-rrkjus_psl.1.0.0.UPF -- norm-conserving, scalar-relativistic, PBESOL,
+        stringent table; z_valence 19; recommended ecutwfc 52.0 Ha (104 Ry)
+    pw.x settings
+      - exchange-correlation: PBESOL (taken from the pseudopotentials)
+      - spin-orbit coupling: off
+      - cutoffs: ecutwfc = 104.0 Ry, ecutrho = 416.0 Ry (largest recommended: 52 Ha = 104 Ry)
+      - occupations = smearing, smearing = mv, degauss = 0.01 Ry, nspin = 1
+      - SCF k-mesh: 21 x 21 x 21 Monkhorst-Pack, shift 0 0 0 (286 irreducible k-points)
+      - SCF convergence: conv_thr = 1e-08 Ry
+    Band structure
+      - k-path: GAMMA-X-U | K-GAMMA-L-W-X (308 k-points, K_POINTS crystal; points named from their
+        coordinates by symmetry)
+      - nbnd = 20 in the bands calculation
+      - 19 electrons -> 10 occupied bands (two electrons per band)
+      - band gap: -2.366 eV (computed here from the bands output; DFT band gaps are typically
+        underestimated)
+      - SCF converged; all three QE stages (SCF, bands, bands.x) finished
+    Perturbed-structure ensemble
+      - measured over 50 structures: per-axis RMS displacement Cu 0.058 A; RMS strain 0.26%
+      - 51 structures; DFT was run on structure_000 (unperturbed) only
+    Software
+      - Quantum ESPRESSO v.7.5 (pw.x, bands.x); 1 MPI process(es) x 1 thread(s), GPU on
+
+3. Agent and harness (for CS / LLM engineers)
+    - base model: Qwen/Qwen3.8-27B
+    - decoding: max_new_tokens 5000, do_sample True, temperature 0.3
+    - run: completed in 27 steps of 80 allowed, 9.4 min; 26 tool calls: note 7, write_file 4,
+      run_python 4, search_docs 2, validate_qe_input 2, read_file 2, generate_cif 1,
+      get_pseudopotential 1, get_kpath 1, run_espresso_workflow 1, done 1
+    - prompt: a fixed system prompt (29,073 chars) -- agent protocol (one JSON tool call per step),
+      numbered working rules, INVARIANTS the agent's scripts must assert in code (atom/species
+      counts and electron count read from the actual structure and pw.out, never from memory; k-path
+      from seekpath on the cell in use; unit conversions), and DECISION RULES (relativistic
+      treatment, k-path source, primitive cell, plotting) -- plus a task prompt (6,625 chars) giving
+      a 7-step workflow (fetch structure, perturb, pseudopotentials, decide settings, write inputs,
+      run QE, plot) with done criteria. No examples or templates: the agent writes every script.
+    - tools: deterministic Python functions, each returning JSON -- Materials Project fetch, Pseudo-
+      Dojo fetch (reports z_valence/relativity/functional parsed from the downloaded UPF and the
+      matching recommended cutoff), a k-path tool (seekpath's standard path, shared by the QE input
+      and the plot), file read/write, Python execution (exit code), a QE input validator (namelists,
+      nat/ntyp, k-path), a QE runner, and a documentation search (BM25 + embeddings + reranker over
+      the ASE and QE docs). Facts the model is weak at come from tools, not from its memory.
+    - context: each step re-prompts with the task, notes, files written, unresolved errors and the
+      last 32 tool calls; trim_history on (superseded file versions, resolved failures and duplicate
+      notes dropped, plus a progress ledger)
+    - harness guards: a second consecutive note, a repeated doc search, or rewriting a file with
+      identical content is refused; model output that is not a valid tool call is fed back as an
+      error; results (gap, convergence, outputs) are re-derived from files on disk rather than
+      trusted from the agent's own summary
+    - protocol issues this run: 1 refused call(s)
+    - QE launch command: module load espresso/7.5-libxc-7.0.0-gpu-cu13 && srun --overlap -n 4 -c 32
+      --gpus-per-task=1 --gpu-bind=closest pw.x -in pw.in > pw.out 2>&1
+
+4. Errors, uncertainties and difficulties
+    - documentation lookups, grouped by what the agent did next:
+        setup_jobs.py: 2 lookup(s) (steps 13-14): write_espresso_in ase.io.espresso function
+        signature parameters; bands.x input variables BANDS namelist filband lsym spin_component
+    - harness refused 1 call(s) as loops: step 11 (note)
+    - notes where the agent flagged doubt or an assumption:
+        step 21: validate_qe_input is failing with an internal error (_check_magnetization() got an
+                 unexpected keyword argument 'path').
+        step 21: I'll proceed to run the DFT workflow on calculations/000 and verify the output
+                 manually.
+    - agent's own scientific assumptions:
+        * Scalar-relativistic pseudopotentials (Z=29 < 54, no spin-orbit physics targeted).
+        * PBEsol functional (standard for metals, better than PBE for lattice constants).
+        * Smearing with Marzari-Vanderbilt (appropriate for a metal).
+        * 300 K thermal displacements (within fcc Cu stability range).
+        * ecutrho = 4 * ecutwfc (standard practice for charge density).
+    - agent's own items for expert review:
+        * The negative band gap (-2.367 eV) is expected for a metal but the magnitude may be
+          sensitive to the k-mesh and smearing parameters.
+        * The 1-atom primitive cell is the minimal unit; a larger supercell would better capture
+          finite-size effects in the band structure.
+        * The 0.5% random strain is a reasonable thermal-expansion fluctuation but could be tuned
+          for specific applications.
+
+5. Where the time went
+    wall time 9m22s
+      model generation               8m19s   89%
+      Quantum ESPRESSO               0m34s    6%
+    model: 27 calls, 18 s each on average (max 105 s); prompt 16,767 tokens on average (max 24,996); replies 317 tokens on average; 17.2 tokens/s generated
+    Quantum ESPRESSO by stage: scf 0m15s, bands_scf 0m16s, bands_post 0m03s
+    by workflow step (ends at the agent's checkpoint note):
+      STEP 1 Fetch the base Cu structure with           0m13s  (done at step 2)
+      STEP 2 Write and run generate_structures          2m11s  (done at step 8)
+      STEP 3 Fetch pseudopotentials for every element   0m22s  (done at step 10)
+      STEP 6 Run run_espresso_workflow on calculation   5m41s  (done at step 23)

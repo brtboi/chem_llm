@@ -18,6 +18,7 @@ def test_every_run_is_archived(run_scripted, settings):
     [entry] = read_index(settings.archive_root)
     assert entry["case"] == "Si" and entry["steps"] == 4 and entry["run_id"] == result.state.run_id
     assert (settings.archive_root / "prompts" / f"{entry['system_sha']}.txt").exists()
+    assert (d / "scripts" / "hello.py").read_text() == "print('hi')\n"
 
 
 def test_changes_since_previous_run(run_scripted, monkeypatch):

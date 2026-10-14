@@ -56,6 +56,32 @@ step through in-process `transformers`.
     `band_edges`.
   - Up to 7 failed attempts on invented spglib APIs for a space-group check. The rule now
     points to the space group the k-path tool already returns.
+- *Sweep 2, all 14 compounds* (8 core + extended baseline): the 8 that finished all passed
+  (Si, diamond, NaCl, GaN on first try). MoS2 took 42 steps, down from 63. I stopped it by
+  hand: three QE jobs and vLLM time-slicing the same four GPUs made each job far slower than
+  running alone (a 3-minute bands run made no progress in 24 min) (15c2b0a). It also showed:
+  - TiO2 got a 1.730 eV gap from a hand-picked 4×4×2 SCF mesh that under-sampled the short
+    c-axis. New `scf_kmesh` (even reciprocal-space spacing, denser for metals) and a rule
+    requiring it.
+  - Fe: the agent ran non-magnetic with no prompt cue. `generate_cif` now returns Materials
+    Project's magnetic ordering and moment, and a magnetism rule acts on it.
+- *Infrastructure:* QE now gets dedicated GPUs (vLLM on GPUs 0–1 with TP=2, one QE job per
+  GPU on 2–3). Sweep 3 showed the pin wasn't working, because `srun` resets
+  `CUDA_VISIBLE_DEVICES` per step; it is now set inside the launch. A silicon SCF went from
+  4 min contended to 3 s. Agent processes no longer create a stray 700 MB CUDA context.
+  Protocol rule 11: QE runs only through the tool (two agents had started a `find /global`
+  for pw.x) (1b8c79f).
+- *Sweep 4, all 14:* **13/14 pass, the whole suite in about 23 min**. TiO2 is back to
+  1.848 eV, with every high-symmetry point within 0.007 eV of the references. Golden
+  references were promoted for the 13, each checked at its high-symmetry points:
+  - degenerate pairs at X in Si and diamond;
+  - SrTiO3's indirect R→Γ gap;
+  - Kramers pairs in CsPbBr3 with spin-orbit;
+  - Cu d bands at −5.4 to −1.5 eV.
+
+  Fe failed: the agent put `starting_magnetization` in `input_data`, and ASE's per-species
+  value, taken from the atoms' zero moments, overrode it. The rule now says to set moments on
+  the cell, and `validate_qe_input` flags spin-polarized inputs with zero moments (61135fe).
 
 ## Week of 2026-10-05
 

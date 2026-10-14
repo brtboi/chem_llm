@@ -14,6 +14,9 @@ anything meant to last lives in the archive instead (settings.archive_dir):
                                          and the result
         record.json                      the log record without the full history:
                                          config, metrics, outcome, prompt version, code
+        scripts/                         the final version of every script the agent
+                                         wrote (top level of the work dir)
+        bands.pdf                        the band-structure plot, when there is one
 
 Nothing here is ever deleted by chem_llm. `case` groups runs of the same
 job (default: the compound); `label` says why a run was made.
@@ -148,10 +151,28 @@ class RunArchive:
         (self.dir / "record.json").write_text(json.dumps(slim, indent=1, default=str))
         if summary is not None:
             (self.dir / "summary.txt").write_text(summary)
+        self._keep_artifacts(Path(record.get("work_dir") or ""), record.get("outcome") or {})
         previous = next((e for e in reversed(read_index(self.archive)) if e.get("case") == self.case), None)
         (self.dir / "changes.txt").write_text(describe_changes(previous, entry, self.archive))
         append_index(self.archive, entry)
         return entry
+
+
+    def _keep_artifacts(self, work_dir: Path, outcome: dict) -> None:
+        """Copy the agent's scripts and the plot: the work dir is cleared by
+        the next run. Small files only (scripts < 200 kB, plot < 5 MB)."""
+        import shutil
+
+        if not work_dir.is_dir():
+            return
+        scripts = [p for p in sorted(work_dir.glob("*.py")) if p.stat().st_size < 200_000]
+        if scripts:
+            (self.dir / "scripts").mkdir(exist_ok=True)
+            for p in scripts:
+                shutil.copy2(p, self.dir / "scripts" / p.name)
+        plot = Path(outcome["plot"]) if outcome.get("plot") else None
+        if plot and plot.is_file() and plot.stat().st_size < 5_000_000:
+            shutil.copy2(plot, self.dir / f"bands{plot.suffix}")
 
 
 def _slug(text: str) -> str:

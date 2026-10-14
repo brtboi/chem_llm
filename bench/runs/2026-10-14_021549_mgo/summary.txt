@@ -1,0 +1,111 @@
+chem_llm run summary -- MgO (Fm-3m)
+===================================
+completed in 33 steps, 10.0 min | Qwen/Qwen3.8-27B
+work dir: /pscratch/sd/b/brenthu/chem_llm/bench/work/mgo
+band gap: 4.782 eV (computed from the bands output)
+plot:     calculations/000/bands_000.pdf
+
+1. What the agent did
+    step  1  fetched the MgO structure (Fm-3m) from the Materials Project: mp-1265 ->
+             structures/MgO_base.cif
+    step  3  wrote reduce_cell.py: 1 version, run 1x -> OK at step 4
+    step  6  wrote generate_structures.py: 2 versions, run 2x (1 failed) -> OK at step 9
+    step 11  fetched the Mg pseudopotential from Pseudo-Dojo -> Mg.upf
+    step 12  fetched the O pseudopotential from Pseudo-Dojo -> O.upf
+    step 22  wrote setup_jobs.py: 1 version, run 1x -> OK at step 23
+    step 24  validated calculations/000/pw.in: issues ERROR executing validate_qe_input:
+             _check_magnetization() got an unexpected keyword argument 'path'
+    step 26  ran Quantum ESPRESSO in calculations/000: OK (scf, bands_scf, bands_post)
+    step 29  wrote plot_bands.py: 1 version, run 1x -> OK at step 30
+             5 documentation lookup(s) along the way (where they clustered: section 4)
+
+2. DFT setup (to reproduce the calculation)
+    Structure
+      - source: Materials Project mp-1265 (MgO, Fm-3m #225)
+      - cell used for DFT: MgO, 2 atoms, Fm-3m (#225); a, b, c = 2.9656, 2.9656, 2.9656 A; alpha,
+        beta, gamma = 60.00, 60.00, 60.00 deg; volume 18.443 A^3
+      - fractional positions: Mg (0.0000, 0.0000, 0.0000); O (0.5000, 0.5000, 0.5000)
+    Pseudopotentials (Pseudo-Dojo)
+      - Mg: Mg.upf -- norm-conserving, scalar-relativistic, PBESOL, stringent table; z_valence 10;
+        recommended ecutwfc 42.0 Ha (84 Ry)
+      - O: O.upf -- norm-conserving, scalar-relativistic, PBESOL, stringent table; z_valence 6;
+        recommended ecutwfc 46.0 Ha (92 Ry)
+    pw.x settings
+      - exchange-correlation: PBESOL (taken from the pseudopotentials)
+      - spin-orbit coupling: off
+      - cutoffs: ecutwfc = 92.0 Ry, ecutrho = 368.0 Ry (largest recommended: 46 Ha = 92 Ry)
+      - occupations = fixed, nspin = 1
+      - SCF k-mesh: 11 x 11 x 11 Monkhorst-Pack, shift 0 0 0 (56 irreducible k-points)
+      - SCF convergence: conv_thr = 1e-08 Ry
+    Band structure
+      - k-path: GAMMA-X-U | K-GAMMA-L-W-X (261 k-points, K_POINTS crystal; points named from their
+        coordinates by symmetry)
+      - nbnd = 20 in the bands calculation
+      - 16 electrons -> 8 occupied bands (two electrons per band)
+      - band gap: 4.782 eV (computed here from the bands output; DFT band gaps are typically
+        underestimated)
+      - SCF converged; all three QE stages (SCF, bands, bands.x) finished
+    Perturbed-structure ensemble
+      - measured over 50 structures: per-axis RMS displacement Mg 0.044, O 0.059 A; RMS strain 0.42%
+      - 51 structures; DFT was run on structure_000 (unperturbed) only
+    Software
+      - Quantum ESPRESSO v.7.5 (pw.x, bands.x); 1 MPI process(es) x 1 thread(s), GPU on
+
+3. Agent and harness (for CS / LLM engineers)
+    - base model: Qwen/Qwen3.8-27B
+    - decoding: max_new_tokens 5000, do_sample True, temperature 0.3
+    - run: completed in 33 steps of 80 allowed, 10.0 min; 33 tool calls: note 8, write_file 5,
+      run_python 5, search_docs 5, read_file 3, get_pseudopotential 2, generate_cif 1, get_kpath 1,
+      validate_qe_input 1, run_espresso_workflow 1, done 1
+    - prompt: a fixed system prompt (29,073 chars) -- agent protocol (one JSON tool call per step),
+      numbered working rules, INVARIANTS the agent's scripts must assert in code (atom/species
+      counts and electron count read from the actual structure and pw.out, never from memory; k-path
+      from seekpath on the cell in use; unit conversions), and DECISION RULES (relativistic
+      treatment, k-path source, primitive cell, plotting) -- plus a task prompt (6,627 chars) giving
+      a 7-step workflow (fetch structure, perturb, pseudopotentials, decide settings, write inputs,
+      run QE, plot) with done criteria. No examples or templates: the agent writes every script.
+    - tools: deterministic Python functions, each returning JSON -- Materials Project fetch, Pseudo-
+      Dojo fetch (reports z_valence/relativity/functional parsed from the downloaded UPF and the
+      matching recommended cutoff), a k-path tool (seekpath's standard path, shared by the QE input
+      and the plot), file read/write, Python execution (exit code), a QE input validator (namelists,
+      nat/ntyp, k-path), a QE runner, and a documentation search (BM25 + embeddings + reranker over
+      the ASE and QE docs). Facts the model is weak at come from tools, not from its memory.
+    - context: each step re-prompts with the task, notes, files written, unresolved errors and the
+      last 32 tool calls; trim_history on (superseded file versions, resolved failures and duplicate
+      notes dropped, plus a progress ledger)
+    - harness guards: a second consecutive note, a repeated doc search, or rewriting a file with
+      identical content is refused; model output that is not a valid tool call is fed back as an
+      error; results (gap, convergence, outputs) are re-derived from files on disk rather than
+      trusted from the agent's own summary
+    - QE launch command: module load espresso/7.5-libxc-7.0.0-gpu-cu13 && srun --overlap -n 4 -c 32
+      --gpus-per-task=1 --gpu-bind=closest pw.x -in pw.in > pw.out 2>&1
+
+4. Errors, uncertainties and difficulties
+    - generate_structures.py: 1 failed run(s), fixed at step 9
+        step 7: ImportError: cannot import name 'add_rotations' from 'ase.build'
+        (/pscratch/sd/b/brenthu/chem_llm/.venv/lib/python3.14/site-packages/ase/bui
+    - documentation lookups, grouped by what the agent did next:
+        setup_jobs.py: 5 lookup(s) (steps 16-20): ase.io.espresso write_espresso_in input_data kpts;
+        chem_llm.kpath scf_kmesh kp_kpts kp_save standard_kpath kp_atoms; chem_llm.kpath scf_kmesh
+        kp_kpts kp_save standard_kpath kp_atoms plot_; bands.x input BANDS namelist filband lsym
+        prefix outdir
+    - notes where the agent flagged doubt or an assumption:
+        step 10: hint_level: 'normal' -- a balanced cutoff for a routine band-structure calculation;
+                 'high' would add cost without meaningful accuracy gain for this simple ionic
+                 insulator, and 'low' risks under-convergence.
+        step 25: validate_qe_input failed with an internal error (_check_magnetization got
+                 unexpected keyword 'path') -- this is a tool bug, not an input problem.
+    - caveats in the agent's done summary:
+        * **Scientific assumptions:**
+        * **Items for expert review:**
+
+5. Where the time went
+    wall time 9m57s
+      model generation               9m00s   91%
+      Quantum ESPRESSO               0m23s    4%
+    model: 33 calls, 16 s each on average (max 97 s); prompt 19,201 tokens on average (max 32,397); replies 291 tokens on average; 17.8 tokens/s generated
+    Quantum ESPRESSO by stage: scf 0m05s, bands_scf 0m16s, bands_post 0m03s
+    by workflow step (ends at the agent's checkpoint note):
+      STEP 1 Fetch the base MgO structure with          0m14s  (done at step 2)
+      STEP 5 First call get_kpath on structures/struc   6m04s  (done at step 25)
+      STEP 6 Run run_espresso_workflow on calculation   1m05s  (done at step 28)
