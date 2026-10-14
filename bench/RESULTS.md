@@ -42,7 +42,7 @@ Added after the core and extended suites passed, never used for tuning: a simple
 | lif | widest-gap ionic crystal; light atoms, Li 1s semicore | 2026-10-14T04:46 | pass | - | 8.589 (8.0-9.8) | 40 | 9.03 | af3ce52a | 57e18000 | [summary](runs/2026-10-14_043717_lif/summary.txt), [progress](runs/2026-10-14_043717_lif/progress.txt), [changes](runs/2026-10-14_043717_lif/changes.txt) |
 | cdte | II-VI semiconductor with Cd 4d states; spin-orbit optional (Te Z=52) | 2026-10-14T04:48 | pass | - | 0.549 (0.1-1.1) | 36 | 10.14 | 6879fe83 | 57e18000 | [summary](runs/2026-10-14_043842_cdte/summary.txt), [progress](runs/2026-10-14_043842_cdte/progress.txt), [changes](runs/2026-10-14_043842_cdte/changes.txt) |
 | pbte | heavy-element narrow gap at L; spin-orbit required | 2026-10-14T04:48 | pass | - | 0.054 (0.02-0.7) | 33 | 9.78 | f54b978c | 57e18000 | [summary](runs/2026-10-14_043859_pbte/summary.txt), [progress](runs/2026-10-14_043859_pbte/progress.txt), [changes](runs/2026-10-14_043859_pbte/changes.txt) |
-| bi2se3 | layered topological insulator; spin-orbit required (inverts the gap at Gamma) | 2026-10-14T04:15 | pass | - | 0.123 (0.1-0.6) | 33 | 29.05 | 2d61a711 | 5f94842f | [summary](runs/2026-10-14_034612_bi2se3/summary.txt), [progress](runs/2026-10-14_034612_bi2se3/progress.txt), [changes](runs/2026-10-14_034612_bi2se3/changes.txt) |
+| bi2se3 | layered topological insulator; spin-orbit required (inverts the gap at Gamma) | 2026-10-14T05:11 | pass | - | 0.127 (0.1-0.6) | 41 | 32.03 | 2d61a711 | 57e18000 | [summary](runs/2026-10-14_043932_bi2se3/summary.txt), [progress](runs/2026-10-14_043932_bi2se3/progress.txt), [changes](runs/2026-10-14_043932_bi2se3/changes.txt) |
 
 ## Suite `all`
 
@@ -91,7 +91,7 @@ core + extended + stretch.
 | lif | widest-gap ionic crystal; light atoms, Li 1s semicore | 2026-10-14T04:46 | pass | - | 8.589 (8.0-9.8) | 40 | 9.03 | af3ce52a | 57e18000 | [summary](runs/2026-10-14_043717_lif/summary.txt), [progress](runs/2026-10-14_043717_lif/progress.txt), [changes](runs/2026-10-14_043717_lif/changes.txt) |
 | cdte | II-VI semiconductor with Cd 4d states; spin-orbit optional (Te Z=52) | 2026-10-14T04:48 | pass | - | 0.549 (0.1-1.1) | 36 | 10.14 | 6879fe83 | 57e18000 | [summary](runs/2026-10-14_043842_cdte/summary.txt), [progress](runs/2026-10-14_043842_cdte/progress.txt), [changes](runs/2026-10-14_043842_cdte/changes.txt) |
 | pbte | heavy-element narrow gap at L; spin-orbit required | 2026-10-14T04:48 | pass | - | 0.054 (0.02-0.7) | 33 | 9.78 | f54b978c | 57e18000 | [summary](runs/2026-10-14_043859_pbte/summary.txt), [progress](runs/2026-10-14_043859_pbte/progress.txt), [changes](runs/2026-10-14_043859_pbte/changes.txt) |
-| bi2se3 | layered topological insulator; spin-orbit required (inverts the gap at Gamma) | 2026-10-14T04:15 | pass | - | 0.123 (0.1-0.6) | 33 | 29.05 | 2d61a711 | 5f94842f | [summary](runs/2026-10-14_034612_bi2se3/summary.txt), [progress](runs/2026-10-14_034612_bi2se3/progress.txt), [changes](runs/2026-10-14_034612_bi2se3/changes.txt) |
+| bi2se3 | layered topological insulator; spin-orbit required (inverts the gap at Gamma) | 2026-10-14T05:11 | pass | - | 0.127 (0.1-0.6) | 41 | 32.03 | 2d61a711 | 57e18000 | [summary](runs/2026-10-14_043932_bi2se3/summary.txt), [progress](runs/2026-10-14_043932_bi2se3/progress.txt), [changes](runs/2026-10-14_043932_bi2se3/changes.txt) |
 
 ## History
 
@@ -308,5 +308,6 @@ core + extended + stretch.
 
 | date | label | backend | result | failed checks | gap eV | steps | wall min | model min | prompt | commit |
 |---|---|---|---|---|---|---|---|---|---|---|
+| 2026-10-14T05:11 | sweep 8: repeatability, no changes since sweep 7 | vllm | pass | - | 0.127 | 41 | 32.03 | 9.66 | 2d61a711 | 57e18000 |
 | 2026-10-14T04:15 | sweep 7: Ni moment rule, validator fix, hBN range; repeatability | vllm | pass | - | 0.123 | 33 | 29.05 | 7.36 | 2d61a711 | 5f94842f |
 | 2026-10-14T03:23 | sweep 6: repeatability of all 14 + stretch suite (never tuned) | vllm | pass | - | 0.123 | 41 | 25.45 | 9.95 | 892ab881 | 0e1f853c |

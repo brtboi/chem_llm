@@ -117,10 +117,9 @@ step through in-process `transformers`.
 | 5: magnetization fix | 14 | 14 | 38 | 10.2 |
 | 6: + 7 never-tuned compounds | 21 | 19 | 37 | 10.9 |
 | 7: Ni moment rule, validator fix | 21 | 21 | 34 | 10.4 |
-| 8: repeat, no changes | 20 of 21 finished | 19 | — | — |
+| 8: repeat, no changes | 21 | 20 (CsPbBr3 fixed and rerun: pass) | — | — |
 
-- *Sweep 8 (repeat with no code changes):* 19/20 finished cases passed, with Bi2Se3 still
-  running when the allocation ended. CsPbBr3 failed: the agent read the relativistic
+- *Sweep 8 (repeat with no code changes):* 20/21 passed (Bi2Se3 0.127 eV, finishing just before the allocation ended). CsPbBr3 failed: the agent read the relativistic
   rule's "Z > 54 OR spin-orbit physics" as AND, and ran without spin-orbit (1.601 eV). The
   rule now states the two conditions separately, and `validate_qe_input` rejects any element
   past Xe without `lspinorb`. The rerun chose fully relativistic pseudopotentials from the
