@@ -1,0 +1,123 @@
+chem_llm run summary -- GaAs (F-43m)
+====================================
+completed in 39 steps, 11.4 min | Qwen/Qwen3.8-27B
+work dir: /pscratch/sd/b/brenthu/chem_llm/sandbox/test34/gaas
+band gap: 0.076 eV (computed from the bands output)
+plot:     calculations/000/bands_000.pdf
+
+1. What the agent did
+    step  2  fetched the GaAs structure (F-43m) from the Materials Project: mp-2534 ->
+             structures/base_GaAs.cif
+    step  4  wrote reduce_primitive.py: 1 version, run 1x -> OK at step 5
+    step  8  wrote generate_structures.py: 1 version, run 1x -> OK at step 9
+    step 11  fetched the Ga pseudopotential from Pseudo-Dojo -> Ga.pbesol-rrkjus_psl.1.0.0.UPF
+    step 12  fetched the As pseudopotential from Pseudo-Dojo -> As.pbesol-rrkjus_psl.1.0.0.UPF
+    step 22  wrote setup_jobs.py: 2 versions, run 2x (1 failed) -> OK at step 27
+    step 28  validated calculations/000/pw.in: OK
+    step 29  validated calculations/000/bands.in: OK
+    step 30  ran Quantum ESPRESSO in calculations/000: OK (scf, bands_scf, bands_post)
+    step 32  wrote plot_bands.py: 2 versions, run 2x (1 failed) -> OK at step 36
+             5 documentation lookup(s) along the way (where they clustered: section 4)
+
+2. DFT setup (to reproduce the calculation)
+    Structure
+      - source: Materials Project mp-2534 (GaAs, F-43m #216)
+      - cell used for DFT: AsGa, 2 atoms, F-43m (#216); a, b, c = 4.0660, 4.0660, 4.0660 A; alpha,
+        beta, gamma = 60.00, 60.00, 60.00 deg; volume 47.532 A^3
+      - fractional positions: Ga (0.0000, 0.0000, 0.0000); As (0.7500, 0.7500, 0.7500)
+    Pseudopotentials (Pseudo-Dojo)
+      - Ga: Ga.pbesol-rrkjus_psl.1.0.0.UPF -- norm-conserving, scalar-relativistic, PBESOL,
+        stringent table; z_valence 21; recommended ecutwfc 57.0 Ha (114 Ry)
+      - As: As.pbesol-rrkjus_psl.1.0.0.UPF -- norm-conserving, scalar-relativistic, PBESOL,
+        stringent table; z_valence 23; recommended ecutwfc 52.0 Ha (104 Ry)
+    pw.x settings
+      - exchange-correlation: PBESOL (taken from the pseudopotentials)
+      - spin-orbit coupling: off
+      - cutoffs: ecutwfc = 114 Ry, ecutrho = 456 Ry (largest recommended: 57 Ha = 114 Ry)
+      - occupations = fixed
+      - SCF k-mesh: 8 x 8 x 8 Monkhorst-Pack, shift 0 0 0 (29 irreducible k-points)
+      - SCF convergence: conv_thr = 1e-08 Ry
+    Band structure
+      - k-path: GAMMA-X-U | K-GAMMA-L-W-X (188 k-points, K_POINTS crystal; points named from their
+        coordinates by symmetry)
+      - nbnd = 40 in the bands calculation
+      - 44 electrons -> 22 occupied bands (two electrons per band)
+      - band gap: 0.076 eV (computed here from the bands output; DFT band gaps are typically
+        underestimated)
+      - SCF converged; all three QE stages (SCF, bands, bands.x) finished
+    Perturbed-structure ensemble
+      - measured over 50 structures: per-axis RMS displacement Ga 0.058, As 0.053 A; RMS strain
+        18.63%
+      - 51 structures; DFT was run on structure_000 (unperturbed) only
+    Software
+      - Quantum ESPRESSO v.7.5 (pw.x, bands.x); 1 MPI process(es) x 1 thread(s), GPU on
+
+3. Agent and harness (for CS / LLM engineers)
+    - base model: Qwen/Qwen3.8-27B
+    - decoding: max_new_tokens 5000, do_sample True, temperature 0.3
+    - run: completed in 39 steps of 80 allowed, 11.4 min; 36 tool calls: note 8, write_file 6,
+      run_python 6, search_docs 5, read_file 3, get_pseudopotential 2, validate_qe_input 2,
+      generate_cif 1, get_kpath 1, run_espresso_workflow 1, done 1
+    - prompt: a fixed system prompt (29,208 chars) -- agent protocol (one JSON tool call per step),
+      numbered working rules, INVARIANTS the agent's scripts must assert in code (atom/species
+      counts and electron count read from the actual structure and pw.out, never from memory; k-path
+      from seekpath on the cell in use; unit conversions), and DECISION RULES (relativistic
+      treatment, k-path source, primitive cell, plotting) -- plus a task prompt (6,631 chars) giving
+      a 7-step workflow (fetch structure, perturb, pseudopotentials, decide settings, write inputs,
+      run QE, plot) with done criteria. No examples or templates: the agent writes every script.
+    - tools: deterministic Python functions, each returning JSON -- Materials Project fetch, Pseudo-
+      Dojo fetch (reports z_valence/relativity/functional parsed from the downloaded UPF and the
+      matching recommended cutoff), a k-path tool (seekpath's standard path, shared by the QE input
+      and the plot), file read/write, Python execution (exit code), a QE input validator (namelists,
+      nat/ntyp, k-path), a QE runner, and a documentation search (BM25 + embeddings + reranker over
+      the ASE and QE docs). Facts the model is weak at come from tools, not from its memory.
+    - context: each step re-prompts with the task, notes, files written, unresolved errors and the
+      last 32 tool calls; trim_history on (superseded file versions, resolved failures and duplicate
+      notes dropped, plus a progress ledger)
+    - harness guards: a second consecutive note, a repeated doc search, or rewriting a file with
+      identical content is refused; model output that is not a valid tool call is fed back as an
+      error; results (gap, convergence, outputs) are re-derived from files on disk rather than
+      trusted from the agent's own summary
+    - protocol issues this run: 1 unparseable output(s), 2 refused call(s)
+    - QE launch command: module load espresso/7.5-libxc-7.0.0-gpu-cu13 && srun --overlap -n 4 -c 32
+      --gpus-per-task=1 --gpu-bind=closest pw.x -in pw.in > pw.out 2>&1
+
+4. Errors, uncertainties and difficulties
+    - setup_jobs.py: 1 failed run(s), fixed at step 27
+        step 23: AttributeError: 'str' object has no attribute 'constraints'
+    - plot_bands.py: 1 failed run(s), fixed at step 36
+        step 33: TypeError: unsupported format string passed to NoneType.__format__
+    - documentation lookups, grouped by what the agent did next:
+        setup_jobs.py: 4 lookup(s) (steps 16-20): write_espresso_in ASE function signature
+        parameters input_data kpts; ase.io.espresso write_espresso_in input_data kpts;
+        write_espresso_in function signature; ase.io.espresso write_espresso_in
+        setup_jobs.py: 1 lookup(s) (step 24): write_espresso_in atoms parameter first argument
+    - harness refused 2 call(s) as loops: step 14 (note), step 17 (search_docs)
+    - 1 step(s) produced output that was not a valid tool call
+    - agent's own scientific assumptions:
+        * T=300 K: zincblende GaAs is the stable phase at ambient conditions; rocksalt phase
+          requires >10 GPa or >1200 K
+        * Scalar-relativistic pseudopotentials: both Ga (Z=31) and As (Z=33) are below Z=54, no SOC
+          target
+        * occupations='fixed': GaAs is a semiconductor (not a metal)
+        * ecutrho = 4 × ecutwfc: standard ratio for norm-conserving pseudopotentials
+    - agent's own items for expert review:
+        * The PBEsol band gap (0.075 eV) is much smaller than the experimental value (~1.42 eV).
+          This is a known limitation of semilocal DFT functionals for III-V semiconductors. For
+          quantitative band gap predictions, a hybrid functional (HSE06) or many-body perturbation
+          theory (GW) would be recommended.
+        * The k-mesh (8×8×8) and cutoffs (114 Ry) were chosen based on the pseudopotential
+          recommendations and standard practice, but a convergence study would be advisable for
+          production-quality results.
+
+5. Where the time went
+    wall time 11m27s
+      model generation               9m33s   83%
+      Quantum ESPRESSO               1m11s   10%
+    model: 39 calls, 15 s each on average (max 108 s); prompt 15,267 tokens on average (max 20,527); replies 302 tokens on average; 20.5 tokens/s generated
+    Quantum ESPRESSO by stage: wait_for_gpus 0m36s, scf 0m06s, bands_scf 0m25s, bands_post 0m04s
+    by workflow step (ends at the agent's checkpoint note):
+      STEP 1 Fetch the base GaAs structure with         0m16s  (done at step 3)
+      STEP 2 Write and run generate_structures          1m41s  (done at step 10)
+      STEP 3 Fetch pseudopotentials for every element   0m23s  (done at step 13)
+      STEP 6 Run run_espresso_workflow on calculation   6m13s  (done at step 31)

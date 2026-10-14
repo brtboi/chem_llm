@@ -117,6 +117,15 @@ step through in-process `transformers`.
 | 5: magnetization fix | 14 | 14 | 38 | 10.2 |
 | 6: + 7 never-tuned compounds | 21 | 19 | 37 | 10.9 |
 | 7: Ni moment rule, validator fix | 21 | 21 | 34 | 10.4 |
+| 8: repeat, no changes | 20 of 21 finished | 19 | — | — |
+
+- *Sweep 8 (repeat with no code changes):* 19/20 finished cases passed, with Bi2Se3 still
+  running when the allocation ended. CsPbBr3 failed: the agent read the relativistic
+  rule's "Z > 54 OR spin-orbit physics" as AND, and ran without spin-orbit (1.601 eV). The
+  rule now states the two conditions separately, and `validate_qe_input` rejects any element
+  past Xe without `lspinorb`. The rerun chose fully relativistic pseudopotentials from the
+  start and passed at 0.390 eV (0cebfb2). This is the first failure that came purely from
+  sampling variance, which is why rules that matter now also get a deterministic check.
 
 **Still open**
 - The extended and stretch suites were run on the same prompt they are scored with. A
@@ -124,8 +133,8 @@ step through in-process `transformers`.
 - Expected gap ranges are hand-set (one was wrong: hBN). Deriving them from Materials
   Project's gap for the selected structure would be more principled.
 - Each sweep runs the same 14–21 compounds once. With sampling at temperature 0.3, the pass
-  rate over several repeats is the honest number; so far it is 21/21, 19/21 and 14/14 on
-  the last three sweeps.
+  rate over several repeats is the honest number. Sweep 8, an unchanged repeat, found one
+  sampling failure in 20; it is now caught by a validator check.
 - Spin-polarized band plots show the majority spin only.
 - No LangSmith experiments yet: the integration is built and tested offline, but it needs
   a `LANGSMITH_API_KEY`.

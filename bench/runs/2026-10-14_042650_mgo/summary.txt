@@ -1,0 +1,131 @@
+chem_llm run summary -- MgO (Fm-3m)
+===================================
+completed in 43 steps, 11.7 min | Qwen/Qwen3.8-27B
+work dir: /pscratch/sd/b/brenthu/chem_llm/bench/work/mgo
+band gap: 4.782 eV (computed from the bands output)
+plot:     calculations/000/bands_000.pdf
+
+1. What the agent did
+    step  1  fetched the MgO structure (Fm-3m) from the Materials Project: mp-1265 ->
+             structures/MgO_base.cif
+    step  3  wrote reduce_cell.py: 1 version, run 1x -> OK at step 4
+    step  6  wrote generate_structures.py: 1 version, run 1x -> OK at step 7
+    step 10  fetched the Mg pseudopotential from Pseudo-Dojo -> Mg.upf
+    step 11  fetched the O pseudopotential from Pseudo-Dojo -> O.upf
+    step 24  wrote setup_jobs.py: 2 versions, run 2x (1 failed) -> OK at step 30
+    step 31  validated calculations/000/pw.in: OK
+    step 32  validated calculations/000/bands.in: OK
+    step 33  ran Quantum ESPRESSO in calculations/000: OK (scf, bands_scf, bands_post)
+    step 35  wrote plot_bands.py: 2 versions, run 2x (1 failed) -> OK at step 40
+             9 documentation lookup(s) along the way (where they clustered: section 4)
+
+2. DFT setup (to reproduce the calculation)
+    Structure
+      - source: Materials Project mp-1265 (MgO, Fm-3m #225)
+      - cell used for DFT: MgO, 2 atoms, Fm-3m (#225); a, b, c = 2.9656, 2.9656, 2.9656 A; alpha,
+        beta, gamma = 60.00, 60.00, 60.00 deg; volume 18.443 A^3
+      - fractional positions: Mg (0.0000, 0.0000, 0.0000); O (0.5000, 0.5000, 0.5000)
+    Pseudopotentials (Pseudo-Dojo)
+      - Mg: Mg.upf -- norm-conserving, scalar-relativistic, PBESOL, stringent table; z_valence 10;
+        recommended ecutwfc 42.0 Ha (84 Ry)
+      - O: O.upf -- norm-conserving, scalar-relativistic, PBESOL, stringent table; z_valence 6;
+        recommended ecutwfc 46.0 Ha (92 Ry)
+    pw.x settings
+      - exchange-correlation: PBESOL (taken from the pseudopotentials)
+      - spin-orbit coupling: off
+      - cutoffs: ecutwfc = 92.0 Ry, ecutrho = 368.0 Ry (largest recommended: 46 Ha = 92 Ry)
+      - occupations = fixed, nspin = 1
+      - SCF k-mesh: 11 x 11 x 11 Monkhorst-Pack, shift 0 0 0 (56 irreducible k-points)
+      - SCF convergence: conv_thr = 1e-08 Ry
+    Band structure
+      - k-path: GAMMA-X-U | K-GAMMA-L-W-X (261 k-points, K_POINTS crystal; points named from their
+        coordinates by symmetry)
+      - nbnd = 16 in the bands calculation
+      - 16 electrons -> 8 occupied bands (two electrons per band)
+      - band gap: 4.782 eV (computed here from the bands output; DFT band gaps are typically
+        underestimated)
+      - SCF converged; all three QE stages (SCF, bands, bands.x) finished
+    Perturbed-structure ensemble
+      - temperature: 300.0 K (as set in generate_structures.py)
+      - measured over 50 structures: per-axis RMS displacement Mg 0.062, O 0.060 A; RMS strain 0.24%
+      - 51 structures; DFT was run on structure_000 (unperturbed) only
+    Software
+      - Quantum ESPRESSO v.7.5 (pw.x, bands.x); 1 MPI process(es) x 1 thread(s), GPU on
+
+3. Agent and harness (for CS / LLM engineers)
+    - base model: Qwen/Qwen3.8-27B
+    - decoding: max_new_tokens 5000, do_sample True, temperature 0.3
+    - run: completed in 43 steps of 80 allowed, 11.7 min; 41 tool calls: search_docs 9, note 8,
+      write_file 6, run_python 6, read_file 4, get_pseudopotential 2, validate_qe_input 2,
+      generate_cif 1, get_kpath 1, run_espresso_workflow 1, done 1
+    - prompt: a fixed system prompt (29,208 chars) -- agent protocol (one JSON tool call per step),
+      numbered working rules, INVARIANTS the agent's scripts must assert in code (atom/species
+      counts and electron count read from the actual structure and pw.out, never from memory; k-path
+      from seekpath on the cell in use; unit conversions), and DECISION RULES (relativistic
+      treatment, k-path source, primitive cell, plotting) -- plus a task prompt (6,627 chars) giving
+      a 7-step workflow (fetch structure, perturb, pseudopotentials, decide settings, write inputs,
+      run QE, plot) with done criteria. No examples or templates: the agent writes every script.
+    - tools: deterministic Python functions, each returning JSON -- Materials Project fetch, Pseudo-
+      Dojo fetch (reports z_valence/relativity/functional parsed from the downloaded UPF and the
+      matching recommended cutoff), a k-path tool (seekpath's standard path, shared by the QE input
+      and the plot), file read/write, Python execution (exit code), a QE input validator (namelists,
+      nat/ntyp, k-path), a QE runner, and a documentation search (BM25 + embeddings + reranker over
+      the ASE and QE docs). Facts the model is weak at come from tools, not from its memory.
+    - context: each step re-prompts with the task, notes, files written, unresolved errors and the
+      last 32 tool calls; trim_history on (superseded file versions, resolved failures and duplicate
+      notes dropped, plus a progress ledger)
+    - harness guards: a second consecutive note, a repeated doc search, or rewriting a file with
+      identical content is refused; model output that is not a valid tool call is fed back as an
+      error; results (gap, convergence, outputs) are re-derived from files on disk rather than
+      trusted from the agent's own summary
+    - protocol issues this run: 2 refused call(s)
+    - QE launch command: module load espresso/7.5-libxc-7.0.0-gpu-cu13 && srun --overlap -n 4 -c 32
+      --gpus-per-task=1 --gpu-bind=closest pw.x -in pw.in > pw.out 2>&1
+
+4. Errors, uncertainties and difficulties
+    - setup_jobs.py: 1 failed run(s), fixed at step 30
+        step 25: AttributeError: module 'ase.io' has no attribute 'espresso'
+    - plot_bands.py: 1 failed run(s), fixed at step 40
+        step 36: TypeError: unsupported format string passed to NoneType.__format__
+    - documentation lookups, grouped by what the agent did next:
+        setup_jobs.py: 5 lookup(s) (steps 17-21): chem_llm.kpath scf_kmesh function signature;
+        chem_llm.kpath scf_kmesh kp_kpts kp_save standard_kpath kp_atoms; chem_llm kpath scf_kmesh
+        kp_kpts kp_save standard_kpath kp_atoms plot_; chem_llm.kpath scf_kmesh function signature
+        Monkhorst-Pack
+        get_kpath: 2 lookup(s) (steps 13-15): write_espresso_in ASE function signature parameters
+        input_data kpts; bands.x input variables BANDS namelist filband lsym spin_component
+        setup_jobs.py: 1 lookup(s) (step 26): import ase.io.espresso write_espresso_in
+        plot_bands.py: 1 lookup(s) (step 37): chem_llm.qe_output read_pw_out fermi_energy_eV None
+        insulator fixed oc
+    - harness refused 2 call(s) as loops: step 9 (note), step 22 (search_docs)
+    - notes where the agent flagged doubt or an assumption:
+        step 34: Need to verify nbnd vs n_electrons from pw.out, then plot bands aligned to VBM.
+    - agent's own scientific assumptions:
+        * T=300K for thermal displacements: MgO is stable at room temperature (rock-salt phase is
+          the ground state up to very high temperatures).
+        * Scalar-relativistic pseudopotentials: both Mg (Z=12) and O (Z=8) are well below Z=54, no
+          spin-orbit physics targeted.
+        * occupations='fixed': MgO is a clear insulator (band gap ~4.4 eV from Materials Project),
+          no smearing needed.
+        * nspin=1: MgO is non-magnetic (moment_per_formula_unit ~0).
+        * ecutwfc=92 Ry: used O's higher recommended cutoff (46 Ha x 2 = 92 Ry) for the whole
+          calculation.
+        * nbnd=16: well above the 8 occupied bands (16 electrons / 2 for spin-unpolarized).
+    - agent's own expert review needed:
+        * The PBEsol band gap (4.78 eV) is larger than the experimental value (~7.8 eV) due to the
+          well-known DFT gap underestimation; hybrid functionals or GW would be needed for
+          quantitative agreement.
+        * The 11x11x11 k-mesh was computed by scf_kmesh for the primitive cell; convergence testing
+          with denser meshes would be advisable for production-quality results.
+
+5. Where the time went
+    wall time 11m42s
+      model generation              10m48s   92%
+      Quantum ESPRESSO               0m19s    3%
+    model: 43 calls, 15 s each on average (max 98 s); prompt 21,273 tokens on average (max 31,816); replies 251 tokens on average; 16.7 tokens/s generated
+    Quantum ESPRESSO by stage: scf 0m04s, bands_scf 0m12s, bands_post 0m03s
+    by workflow step (ends at the agent's checkpoint note):
+      STEP 1 Fetch the base MgO structure with          0m08s  (done at step 2)
+      STEP 2 Write and run generate_structures          1m34s  (done at step 8)
+      STEP 3 Fetch pseudopotentials for every element   0m19s  (done at step 12)
+      STEP 6 Run run_espresso_workflow on calculation   5m28s  (done at step 34)

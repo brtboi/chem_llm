@@ -6,128 +6,127 @@ from ase.io.espresso import write_espresso_in
 from chem_llm.kpath import standard_kpath, kp_atoms, kp_kpts, kp_save, scf_kmesh
 from chem_llm.tools.upf import read_upf_header
 
-# ============================================================
+# =============================================================================
 # setup_jobs.py
-# Creates calculations/NNN/ directories for each structure with:
-#   - pseudopotential files (Ga.upf, As.upf)
+# For each structure NNN (000-050), create calculations/NNN/ containing:
+#   - pseudopotential files (copied from template/)
 #   - kpath.json (from chem_llm.kpath)
 #   - pw.in (SCF input)
-#   - bands.in (bands SCF input)
+#   - bands.in (NSCF bands input)
 #   - bands_post.in (bands.x post-processing input)
-# ============================================================
+#
+# QE settings (from STEP 4 note):
+#   ecutwfc = 114 Ry (57 Ha * 2, from Ga pseudopotential, the larger of the two)
+#   ecutrho = 456 Ry (4 * ecutwfc)
+#   occupations = 'fixed' (GaAs is a semiconductor, band_gap_eV=0.184 from MP)
+#   conv_thr = 1e-8 Ry
+#   nbnd = 40 (>= 22 occupied bands, with padding)
+#   prefix = 'gaas'
+#   outdir = './outdir' (relative to calculations/NNN/)
+#   pseudo_dir = '.' (pseudopotentials copied into calculations/NNN/)
+# =============================================================================
 
-# Pseudopotential info (from get_pseudopotential results)
-# Ga: z_valence=21, recommended_ecutwfc=57.0 Ha
-# As: z_valence=23, recommended_ecutwfc=52.0 Ha
-# INVARIANT 5: 1 Ha = 2 Ry, so ecutwfc in Ry = 2.0 * max(57.0, 52.0) = 114.0 Ry
-# ecutrho = 4 * ecutwfc = 456.0 Ry (standard 4x ratio for charge density)
+# Pseudopotential files
+PP_GA = 'template/Ga.pbesol-rrkjus_psl.1.0.0.UPF'
+PP_AS = 'template/As.pbesol-rrkjus_psl.1.0.0.UPF'
 
-# Read z_valence from the actual UPF files (INVARIANT 2)
-ga_upf = read_upf_header('template/Ga.upf')
-as_upf = read_upf_header('template/As.upf')
-z_valence_Ga = ga_upf['z_valence']
-z_valence_As = as_upf['z_valence']
-print(f"Ga z_valence: {z_valence_Ga}")
-print(f"As z_valence: {z_valence_As}")
+# Verify z_valence from the actual UPF files (INVARIANT 2)
+pp_ga = read_upf_header(PP_GA)
+pp_as = read_upf_header(PP_AS)
+z_val_ga = int(pp_ga['z_valence'])
+z_val_as = int(pp_as['z_valence'])
+print(f"Ga z_valence = {z_val_ga}, As z_valence = {z_val_as}")
 
-# Total electrons per formula unit (GaAs): 21 + 23 = 44
-# Occupied bands (spin-unpolarized): 44 / 2 = 22
-n_electrons = int(z_valence_Ga + z_valence_As)
+# Total electrons per formula unit (GaAs = 1 Ga + 1 As)
+n_electrons = z_val_ga + z_val_as
+print(f"Total electrons = {n_electrons}")
+
+# Occupied bands (non-spin-polarized, no SOC)
 n_occupied = n_electrons // 2
-print(f"Total electrons: {n_electrons}, occupied bands: {n_occupied}")
+print(f"Occupied bands = {n_occupied}")
 
-# nbnd for bands: pad above 22, use 48
-nbnd = 48
-assert nbnd > n_occupied, f"nbnd={nbnd} must be > n_occupied={n_occupied}"
+# nbnd must be >= n_occupied, with padding
+NBND = 40
+assert NBND >= n_occupied, f"nbnd={NBND} must be >= n_occupied={n_occupied}"
 
-# ecutwfc in Ry (INVARIANT 5: 1 Ha = 2 Ry)
-ecutwfc_ha = max(57.0, 52.0)  # max of recommended cutoffs in Ha
-ecutwfc_ry = 2.0 * ecutwfc_ha  # convert to Ry
-ecutrho_ry = 4.0 * ecutwfc_ry  # standard 4x ratio
-print(f"ecutwfc: {ecutwfc_ha} Ha = {ecutwfc_ry} Ry")
-print(f"ecutrho: {ecutrho_ry} Ry")
+# Cutoffs (INVARIANT 5: 1 Ha = 2 Ry)
+# Ga cutoff = 57 Ha, As cutoff = 52 Ha -> use max = 57 Ha = 114 Ry
+ECUTWFC = 114  # Ry
+ECUTRHO = 4 * ECUTWFC  # 456 Ry
+print(f"ecutwfc = {ECUTWFC} Ry, ecutrho = {ECUTRHO} Ry")
 
-# Pseudopotential filenames for write_espresso_in
-# These are relative to pseudo_dir='.' (the calculation directory)
-pseudopotentials = {'Ga': 'Ga.upf', 'As': 'As.upf'}
+# Pseudopotential filenames for write_espresso_in (relative to calculations/NNN/)
+# since pseudo_dir='.' and the UPF files are copied into calculations/NNN/
+pseudopotentials = {
+    'Ga': 'Ga.pbesol-rrkjus_psl.1.0.0.UPF',
+    'As': 'As.pbesol-rrkjus_psl.1.0.0.UPF',
+}
 
-# Common input settings
+# Common input_data (FLAT dict, ASE routes to correct namelists per INVARIANT 6)
 common_input = {
     'prefix': 'gaas',
-    'outdir': 'tmp',
+    'outdir': './outdir',
     'pseudo_dir': '.',
-    'ecutwfc': ecutwfc_ry,
-    'ecutrho': ecutrho_ry,
+    'ecutwfc': ECUTWFC,
+    'ecutrho': ECUTRHO,
     'occupations': 'fixed',
     'conv_thr': 1e-8,
 }
 
-# Process each structure
-for n in range(51):
-    nnn = f"{n:03d}"
-    calc_dir = f"calculations/{nnn}"
+for i in range(51):
+    nnn = f"{i:03d}"
+    calc_dir = f'calculations/{nnn}'
     os.makedirs(calc_dir, exist_ok=True)
+    os.makedirs(f'{calc_dir}/outdir', exist_ok=True)
     
-    # Copy pseudopotentials into the calculation directory
-    for pp in ['Ga.upf', 'As.upf']:
-        src = f"template/{pp}"
-        dst = f"{calc_dir}/{pp}"
-        if not os.path.exists(dst):
-            shutil.copy2(src, dst)
+    # Copy pseudopotentials into calculations/NNN/
+    shutil.copy(PP_GA, calc_dir)
+    shutil.copy(PP_AS, calc_dir)
     
     # Read the structure
-    atoms = ase.io.read(f"structures/structure_{nnn}.cif")
+    atoms = ase.io.read(f'structures/structure_{nnn}.cif')
     
     # Get the standard k-path and primitive cell (INVARIANT 3)
     kp = standard_kpath(atoms)
     prim = kp_atoms(kp)
     
     # Save kpath.json
-    kp_save(kp, f"{calc_dir}/kpath.json")
+    kp_save(kp, f'{calc_dir}/kpath.json')
     
-    # INVARIANT 1: compute nat/ntyp from the actual Atoms object
+    # INVARIANT 1: nat and ntyp from the actual Atoms object
     nat = len(prim)
     ntyp = len(set(prim.get_chemical_symbols()))
-    print(f"Structure {nnn}: nat={nat}, ntyp={ntyp}")
-    assert nat == 2, f"Expected 2 atoms, got {nat}"
-    assert ntyp == 2, f"Expected 2 types, got {ntyp}"
+    assert nat == 2, f"Structure {nnn}: expected nat=2, got {nat}"
+    assert ntyp == 2, f"Structure {nnn}: expected ntyp=2, got {ntyp}"
     
     # SCF k-point mesh (from chem_llm.kpath, not hand-typed)
     kpts_scf = scf_kmesh(prim, metal=False)
-    print(f"  SCF k-mesh: {kpts_scf}")
     
     # Write pw.in (SCF)
+    # write_espresso_in signature: (fd, atoms, input_data, pseudopotentials, kpts, ...)
     scf_input = dict(common_input)
     scf_input['calculation'] = 'scf'
-    scf_input['nat'] = nat
-    scf_input['ntyp'] = ntyp
+    write_espresso_in(f'{calc_dir}/pw.in', prim, scf_input, pseudopotentials=pseudopotentials, kpts=kpts_scf)
     
-    with open(f"{calc_dir}/pw.in", 'w') as f:
-        write_espresso_in(f, prim, input_data=scf_input, pseudopotentials=pseudopotentials, kpts=kpts_scf)
-    
-    # Write bands.in (non-self-consistent bands)
+    # Write bands.in (NSCF bands)
     bands_input = dict(common_input)
     bands_input['calculation'] = 'bands'
-    bands_input['nat'] = nat
-    bands_input['ntyp'] = ntyp
-    bands_input['nbnd'] = nbnd
-    
-    # kpts for bands: from the k-path (INVARIANT 3)
+    bands_input['nbnd'] = NBND
     kpts_bands = kp_kpts(kp)
-    
-    with open(f"{calc_dir}/bands.in", 'w') as f:
-        write_espresso_in(f, prim, input_data=bands_input, pseudopotentials=pseudopotentials, kpts=kpts_bands)
+    write_espresso_in(f'{calc_dir}/bands.in', prim, bands_input, pseudopotentials=pseudopotentials, kpts=kpts_bands)
     
     # Write bands_post.in (bands.x input)
-    # &BANDS: prefix, outdir, filband, lsym=.false.
-    with open(f"{calc_dir}/bands_post.in", 'w') as f:
-        f.write("&BANDS\n")
-        f.write(f"  prefix = '{common_input['prefix']}'\n")
-        f.write(f"  outdir = '{common_input['outdir']}'\n")
-        f.write(f"  filband = '{nnn}.bands.dat'\n")
-        f.write("  lsym = .false.\n")
-        f.write("/")
+    bands_post_content = f"""&BANDS
+    prefix = 'gaas'
+    outdir = './outdir'
+    filband = '{nnn}.bands.dat'
+    lsym = .false.
+/
+"""
+    with open(f'{calc_dir}/bands_post.in', 'w') as f:
+        f.write(bands_post_content)
     
-    print(f"  Wrote {calc_dir}/pw.in, bands.in, bands_post.in")
+    if i == 0 or i % 10 == 0:
+        print(f"Setup {calc_dir}: nat={nat}, ntyp={ntyp}, kpts_scf={kpts_scf}, n_kpts_bands={len(kpts_bands)}")
 
-print("\nDone. All calculation directories created.")
+print("Done: all 51 calculation directories set up.")

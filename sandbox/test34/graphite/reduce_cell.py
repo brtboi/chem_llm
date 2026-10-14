@@ -2,16 +2,19 @@ import ase.io
 from chem_llm.kpath import standard_kpath, kp_atoms
 
 atoms = ase.io.read('structures/base_C.cif')
-print('Original cell:', atoms.get_cell())
-print('Original nat:', len(atoms))
+print('original cell:', atoms.get_cell())
+print('original nat:', len(atoms))
 
 kp = standard_kpath(atoms)
-print('Space group:', kp['spacegroup'])
-
+print('spacegroup:', kp['spacegroup'])
 prim = kp_atoms(kp)
-print('Primitive cell:', prim.get_cell())
-print('Primitive nat:', len(prim))
+print('primitive nat:', len(prim))
 
-# Save the primitive cell as the base structure for downstream use
-ase.io.write('structures/base_C_prim.cif', prim)
-print('Saved primitive cell to structures/base_C_prim.cif')
+# INVARIANT: space group unchanged by reduction, atom count divides evenly
+# kp['spacegroup'] is a string like 'P6_3/mmc (#194)' -- compare the number, not the symbol
+sg_num = kp['spacegroup'].split('#')[1].strip().rstrip(')')
+assert sg_num == '194', kp['spacegroup']
+assert len(atoms) % len(prim) == 0
+
+ase.io.write('structures/primitive_C.cif', prim)
+print('wrote structures/primitive_C.cif')

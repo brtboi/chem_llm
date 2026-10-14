@@ -2,21 +2,25 @@ import ase.io
 from chem_llm.kpath import standard_kpath, kp_atoms
 
 atoms = ase.io.read('structures/MoS2_base.cif')
-print('Original cell:', atoms.get_cell())
-print('Original atom count:', len(atoms))
-print('Original symbols:', atoms.get_chemical_symbols())
+print('Original cell: nat =', len(atoms), 'symbols:', atoms.get_chemical_symbols())
+print('Original cell vectors:')
+print(atoms.cell)
 
 kp = standard_kpath(atoms)
-print('Space group from kpath:', kp['spacegroup'])
+print('Space group from standard_kpath:', kp['spacegroup'])
+
 prim = kp_atoms(kp)
-print('Primitive cell:', prim.get_cell())
-print('Primitive atom count:', len(prim))
-print('Primitive symbols:', prim.get_chemical_symbols())
+print('Primitive cell: nat =', len(prim), 'symbols:', prim.get_chemical_symbols())
+print('Primitive cell vectors:')
+print(prim.cell)
 
-# Check that the space group number is unchanged
-assert '194' in kp['spacegroup'], f"Space group changed: {kp['spacegroup']}"
-# Check that the reduced atom count divides the original evenly
-assert len(atoms) % len(prim) == 0, f"Atom count {len(atoms)} not divisible by {len(prim)}"
+# INVARIANT check: reduced atom count divides original evenly
+assert len(atoms) % len(prim) == 0, 'Primitive cell atom count does not divide original'
 
-ase.io.write('structures/MoS2_primitive.cif', prim)
-print('Saved primitive cell to structures/MoS2_primitive.cif')
+# Space group number check: original was #194 from generate_cif
+sg_num = int(kp['spacegroup'].split('#')[-1].strip().rstrip(')'))
+assert sg_num == 194, f'Space group changed: {kp["spacegroup"]}'
+
+ase.io.write('structures/structure_000_base.cif', prim)
+print('Saved primitive cell to structures/structure_000_base.cif')
+print('DONE: original nat =', len(atoms), ', primitive nat =', len(prim))

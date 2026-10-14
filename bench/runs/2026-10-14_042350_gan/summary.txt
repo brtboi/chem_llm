@@ -1,0 +1,136 @@
+chem_llm run summary -- GaN (P6_3mc)
+====================================
+completed in 48 steps, 16.6 min | Qwen/Qwen3.8-27B
+work dir: /pscratch/sd/b/brenthu/chem_llm/bench/work/gan
+band gap: 1.877 eV (computed from the bands output)
+plot:     calculations/000/bands_000.pdf
+
+1. What the agent did
+    step  2  fetched the GaN structure (P6_3mc) from the Materials Project: mp-804 ->
+             structures/gan_base.cif
+    step  4  wrote reduce_primitive.py: 1 version, run 1x -> OK at step 5
+    step  7  wrote generate_structures.py: 2 versions, run 2x (1 failed) -> OK at step 11
+    step 13  fetched the Ga pseudopotential from Pseudo-Dojo -> Ga.pbesol-sr-rrkjus_psl.1.0.0.UPF
+    step 14  fetched the N pseudopotential from Pseudo-Dojo -> N.pbesol-sr-rrkjus_psl.1.0.0.UPF
+    step 31  wrote setup_jobs.py: 2 versions, run 2x (1 failed) -> OK at step 36
+    step 37  validated calculations/000/pw.in: OK
+    step 38  validated calculations/000/bands.in: OK
+    step 39  ran Quantum ESPRESSO in calculations/000: OK (scf, bands_scf, bands_post)
+    step 41  wrote verify_nbnd.py: 1 version, run 2x (1 failed) -> OK at step 43
+    step 44  wrote plot_bands.py: 1 version, run 1x -> OK at step 45
+             12 documentation lookup(s) along the way (where they clustered: section 4)
+
+2. DFT setup (to reproduce the calculation)
+    Structure
+      - source: Materials Project mp-804 (GaN, P6_3mc #186)
+      - cell used for DFT: Ga2N2, 4 atoms, P6_3mc (#186); a, b, c = 3.1889, 3.1889, 5.1924 A; alpha,
+        beta, gamma = 90.00, 90.00, 120.00 deg; volume 45.728 A^3
+      - fractional positions: Ga (0.6667, 0.3333, 0.4991); Ga (0.3333, 0.6667, 0.9991); N (0.6667,
+        0.3333, 0.8759); N (0.3333, 0.6667, 0.3759)
+    Pseudopotentials (Pseudo-Dojo)
+      - Ga: Ga.pbesol-sr-rrkjus_psl.1.0.0.UPF -- norm-conserving, scalar-relativistic, PBESOL,
+        stringent table; z_valence 21; recommended ecutwfc 57.0 Ha (114 Ry)
+      - N: N.pbesol-sr-rrkjus_psl.1.0.0.UPF -- norm-conserving, scalar-relativistic, PBESOL,
+        stringent table; z_valence 5; recommended ecutwfc 42.0 Ha (84 Ry)
+    pw.x settings
+      - exchange-correlation: PBESOL (taken from the pseudopotentials)
+      - spin-orbit coupling: off
+      - cutoffs: ecutwfc = 114.0 Ry, ecutrho = 456.0 Ry (largest recommended: 57 Ha = 114 Ry)
+      - occupations = fixed, nspin = 1
+      - SCF k-mesh: 10 x 10 x 5 Monkhorst-Pack, shift 0 0 0 (42 irreducible k-points)
+      - SCF convergence: conv_thr = 1e-08 Ry
+    Band structure
+      - k-path: GAMMA-M-K-GAMMA-A-L-H-A | L-M | H-K (312 k-points, K_POINTS crystal; points named
+        from their coordinates by symmetry)
+      - nbnd = 40 in the bands calculation
+      - 52 electrons -> 26 occupied bands (two electrons per band)
+      - band gap: 1.877 eV (computed here from the bands output; DFT band gaps are typically
+        underestimated)
+      - SCF converged; all three QE stages (SCF, bands, bands.x) finished
+    Perturbed-structure ensemble
+      - measured over 50 structures: per-axis RMS displacement Ga 0.079, N 0.127 A; RMS strain 0.42%
+      - 51 structures; DFT was run on structure_000 (unperturbed) only
+    Software
+      - Quantum ESPRESSO v.7.5 (pw.x, bands.x); 1 MPI process(es) x 1 thread(s), GPU on
+
+3. Agent and harness (for CS / LLM engineers)
+    - base model: Qwen/Qwen3.8-27B
+    - decoding: max_new_tokens 5000, do_sample True, temperature 0.3
+    - run: completed in 48 steps of 80 allowed, 16.6 min; 46 tool calls: search_docs 12, note 8,
+      run_python 8, write_file 7, read_file 3, get_pseudopotential 2, validate_qe_input 2,
+      generate_cif 1, get_kpath 1, run_espresso_workflow 1, done 1
+    - prompt: a fixed system prompt (29,208 chars) -- agent protocol (one JSON tool call per step),
+      numbered working rules, INVARIANTS the agent's scripts must assert in code (atom/species
+      counts and electron count read from the actual structure and pw.out, never from memory; k-path
+      from seekpath on the cell in use; unit conversions), and DECISION RULES (relativistic
+      treatment, k-path source, primitive cell, plotting) -- plus a task prompt (6,627 chars) giving
+      a 7-step workflow (fetch structure, perturb, pseudopotentials, decide settings, write inputs,
+      run QE, plot) with done criteria. No examples or templates: the agent writes every script.
+    - tools: deterministic Python functions, each returning JSON -- Materials Project fetch, Pseudo-
+      Dojo fetch (reports z_valence/relativity/functional parsed from the downloaded UPF and the
+      matching recommended cutoff), a k-path tool (seekpath's standard path, shared by the QE input
+      and the plot), file read/write, Python execution (exit code), a QE input validator (namelists,
+      nat/ntyp, k-path), a QE runner, and a documentation search (BM25 + embeddings + reranker over
+      the ASE and QE docs). Facts the model is weak at come from tools, not from its memory.
+    - context: each step re-prompts with the task, notes, files written, unresolved errors and the
+      last 32 tool calls; trim_history on (superseded file versions, resolved failures and duplicate
+      notes dropped, plus a progress ledger)
+    - harness guards: a second consecutive note, a repeated doc search, or rewriting a file with
+      identical content is refused; model output that is not a valid tool call is fed back as an
+      error; results (gap, convergence, outputs) are re-derived from files on disk rather than
+      trusted from the agent's own summary
+    - protocol issues this run: 2 refused call(s)
+    - QE launch command: module load espresso/7.5-libxc-7.0.0-gpu-cu13 && srun --overlap -n 4 -c 32
+      --gpus-per-task=1 --gpu-bind=closest pw.x -in pw.in > pw.out 2>&1
+
+4. Errors, uncertainties and difficulties
+    - generate_structures.py: 1 failed run(s), fixed at step 11
+        step 8: ImportError: cannot import name 'crystal_strain' from 'ase.spacegroup'
+        (/pscratch/sd/b/brenthu/chem_llm/.venv/lib/python3.14/site-packages/a
+    - setup_jobs.py: 1 failed run(s), fixed at step 36
+        step 32: KeyError: 'N'
+    - verify_nbnd.py: 1 failed run(s), fixed at step 43
+        step 41: /pscratch/sd/b/brenthu/chem_llm/.venv/bin/python3: can't open file
+        '/pscratch/sd/b/brenthu/chem_llm/bench/work/gan/verify_nbnd.py': [Errno 2
+    - documentation lookups, grouped by what the agent did next:
+        setup_jobs.py: 10 lookup(s) (steps 18-29): write_espresso_in ASE function signature
+        parameters input_data atoms k; write_espresso_in function signature input_data atoms kpts;
+        ase.io.espresso write_espresso_in; write_espresso_in ASE espresso input file; scf_kmesh
+        chem_llm.kpath function signature; chem_llm kpath scf_kmesh kp_kpts kp_save standard_kpath
+        kp_atoms; bands.x input variables filband lsym prefix outdir spin_component; chem_llm.kpath
+        module scf_kmesh kp_kpts kp_save standard_kpath kp_atom; chem_llm.kpath scf_kmesh kp_kpts
+        kp_save standard_kpath kp_atoms plot_
+        generate_structures.py: 1 lookup(s) (step 9): ase apply strain to cell, set_cell
+        scale_atoms, random strain tensor
+        setup_jobs.py: 1 lookup(s) (step 33): write_espresso_in pseudopotentials parameter
+        dictionary species mappin
+    - harness refused 2 call(s) as loops: step 16 (note), step 19 (search_docs)
+    - notes where the agent flagged doubt or an assumption:
+        step 40: Next: verify nbnd against 'number of electrons' in pw.out, then write
+                 plot_bands.py.
+    - agent's own scientific assumptions:
+        * 300 K for thermal displacements: wurtzite GaN is the stable phase at room temperature.
+        * Scalar-relativistic pseudopotentials: both Ga (Z=31) and N (Z=7) are below Z=54, no spin-
+          orbit needed.
+        * occupations='fixed': GaN is a wide-gap semiconductor, not a metal.
+        * nspin=1: GaN is non-magnetic.
+        * ecutrho = 4×ecutwfc: standard ratio for norm-conserving pseudopotentials.
+    - agent's own items for expert review:
+        * The DFT band gap (1.878 eV) is significantly lower than the experimental value (~3.4 eV)
+          due to the known DFT band-gap underestimation. A hybrid functional (HSE06) or GW
+          correction would be needed for quantitative agreement.
+        * The Einstein model for thermal displacements is a simplification; a full phonon
+          calculation would give more accurate temperature-dependent displacements.
+
+5. Where the time went
+    wall time 16m38s
+      model generation              15m10s   91%
+      Quantum ESPRESSO               0m46s    5%
+    model: 48 calls, 19 s each on average (max 174 s); prompt 19,859 tokens on average (max 31,684); replies 310 tokens on average; 16.4 tokens/s generated
+    Quantum ESPRESSO by stage: scf 0m10s, bands_scf 0m30s, bands_post 0m06s
+    by workflow step (ends at the agent's checkpoint note):
+      STEP 1 Fetch the base GaN structure with          0m56s  (done at step 3)
+      STEP 2 Write and run generate_structures          5m11s  (done at step 12)
+      STEP 3 Fetch pseudopotentials for every element   0m24s  (done at step 15)
+      STEP 5 First call get_kpath on structures/struc   1m54s  (done at step 30)
+      STEP 6 Run run_espresso_workflow on calculation   6m34s  (done at step 40)

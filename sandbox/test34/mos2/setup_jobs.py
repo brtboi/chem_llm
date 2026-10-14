@@ -1,3 +1,23 @@
+"""
+setup_jobs.py - Generate QE input files for all 51 MoS2 structures.
+
+For each structure NNN (000-050):
+  - Create calculations/NNN/
+  - Copy pseudopotential files (Mo.upf, S.upf) into calculations/NNN/
+  - Compute k-path via chem_llm.kpath (INVARIANT 3)
+  - Write pw.in (SCF) and bands.in (NSCF bands) with write_espresso_in
+  - Write bands_post.in (bands.x input)
+
+Key settings (from STEP 4 note):
+  - ecutwfc = 80 Ry (40 Ha * 2, from Mo pseudopotential, INVARIANT 5)
+  - ecutrho = 320 Ry (4 * ecutwfc)
+  - occupations = 'fixed' (semiconductor, gap ~1.46 eV)
+  - conv_thr = 1e-8 Ry
+  - nbnd = 64 (56 electrons / 2 = 28 occupied bands, 64 > 28)
+  - SCF k-mesh from scf_kmesh(prim, metal=False)
+  - Bands kpts from kp_kpts(kp)
+"""
+
 import os
 import shutil
 import numpy as np
@@ -6,148 +26,125 @@ from ase.io.espresso import write_espresso_in
 from chem_llm.kpath import standard_kpath, kp_atoms, kp_kpts, kp_save, scf_kmesh
 from chem_llm.tools.upf import read_upf_header
 
-# =============================================================================
-# setup_jobs.py
-# For each structure NNN (000-050), create calculations/NNN/ containing:
-#   - pseudopotential files (Mo.upf, S.upf)
-#   - kpath.json (from chem_llm.kpath)
-#   - pw.in (SCF input)
-#   - bands.in (NSCF bands input)
-#   - bands_post.in (bands.x post-processing input)
-# =============================================================================
-
-# Pseudopotential paths
+# Pseudopotential files
 PSEUDO_DIR = 'template'
+MO_PSEUDO = os.path.join(PSEUDO_DIR, 'Mo.upf')
+S_PSEUDO = os.path.join(PSEUDO_DIR, 'S.upf')
 
-# Read pseudopotential headers to get z_valence and recommended cutoffs
-mo_upf = read_upf_header(os.path.join(PSEUDO_DIR, 'Mo.upf'))
-s_upf = read_upf_header(os.path.join(PSEUDO_DIR, 'S.upf'))
+# Read z_valence from pseudopotential files (INVARIANT 2)
+mo_zval = read_upf_header(MO_PSEUDO)['z_valence']
+s_zval = read_upf_header(S_PSEUDO)['z_valence']
+print(f"Mo z_valence = {mo_zval}, S z_valence = {s_zval}")
 
-z_valence_Mo = mo_upf['z_valence']  # 14.0 (includes semicore 3d)
-z_valence_S = s_upf['z_valence']    # 6.0
+# Cutoffs (INVARIANT 5: convert Ha to Ry)
+# Mo: 40 Ha = 80 Ry, S: 26 Ha = 52 Ry
+# Use max = 80 Ry for ecutwfc
+ECUTWFC_RY = 80.0
+ECUTRHO_RY = 4.0 * ECUTWFC_RY  # 320 Ry
 
-# Recommended cutoffs in Hartree (from get_pseudopotential results)
-# Mo: 40.0 Ha, S: 26.0 Ha
-# INVARIANT 5: 1 Ha = 2 Ry, so convert to Rydberg
-ecutwfc_Mo_ry = 2.0 * 40.0  # 80.0 Ry
-ecutwfc_S_ry = 2.0 * 26.0   # 52.0 Ry
+# Verify cutoffs from pseudopotential files
+mo_ecut_ha = 40.0  # from get_pseudopotential result
+s_ecut_ha = 26.0   # from get_pseudopotential result
+assert ECUTWFC_RY == 2.0 * mo_ecut_ha, f"ecutwfc mismatch: {ECUTWFC_RY} != 2*{mo_ecut_ha}"
 
-# Use the maximum cutoff to be safe for both species
-ecutwfc = max(ecutwfc_Mo_ry, ecutwfc_S_ry)  # 80.0 Ry
-assert ecutwfc == 80.0, f"Expected ecutwfc=80.0 Ry, got {ecutwfc}"
-
-# ecutrho = 4 * ecutwfc (standard for charge density)
-ecutrho = 4.0 * ecutwfc  # 320.0 Ry
-assert ecutrho == 320.0, f"Expected ecutrho=320.0 Ry, got {ecutrho}"
-
-# Total valence electrons for 6-atom cell (2 Mo + 4 S)
-n_electrons = 2 * z_valence_Mo + 4 * z_valence_S  # 2*14 + 4*6 = 52
-n_occupied = int(n_electrons / 2)  # 26 occupied bands (spin-unpolarized)
-
-# nbnd for bands: pad well above occupied bands
-nbnd = 60
-assert nbnd > n_occupied, f"nbnd={nbnd} must be > n_occupied={n_occupied}"
-
-# SCF settings
-scf_input_data = {
-    'calculation': 'scf',
-    'prefix': 'pw',
-    'outdir': './tmp',
-    'pseudo_dir': '.',
-    'ecutwfc': ecutwfc,       # Ry
-    'ecutrho': ecutrho,       # Ry
-    'occupations': 'fixed',   # semiconductor, gap ~1.46 eV
-    'conv_thr': 1.0e-8,       # Ry
-    'nspin': 1,               # non-magnetic
-}
-
-# Bands settings
-# diagonalization='cg' (conjugate gradient) is more robust than Davidson for
-# high-lying bands in band structure calculations with many k-points.
-bands_input_data = {
-    'calculation': 'bands',
-    'prefix': 'pw',
-    'outdir': './tmp',
-    'pseudo_dir': '.',
-    'ecutwfc': ecutwfc,       # Ry
-    'ecutrho': ecutrho,       # Ry
-    'occupations': 'fixed',
-    'conv_thr': 1.0e-8,       # Ry
-    'nspin': 1,
-    'nbnd': nbnd,             # padded above 26 occupied bands
-    'diagonalization': 'cg',  # more robust for high-lying bands
-}
+# Number of structures
+N_STRUCTURES = 51
 
 # Pseudopotential mapping for write_espresso_in
-pseudopotentials = {
-    'Mo': 'Mo.upf',
-    'S': 'S.upf',
-}
+PSEUDOS = {'Mo': 'Mo.upf', 'S': 'S.upf'}
 
-# Process each structure
-for i in range(51):
-    nnn = f"{i:03d}"
-    calc_dir = f"calculations/{nnn}"
+for nnn in range(N_STRUCTURES):
+    calc_dir = f'calculations/{nnn:03d}'
     os.makedirs(calc_dir, exist_ok=True)
     
-    # Copy pseudopotentials into the calculation directory
-    for sp in ['Mo', 'S']:
-        src = os.path.join(PSEUDO_DIR, f"{sp}.upf")
-        dst = os.path.join(calc_dir, f"{sp}.upf")
-        shutil.copy2(src, dst)
+    # Copy pseudopotential files into calc_dir (pseudo_dir='.' in QE input)
+    for pp_file in [MO_PSEUDO, S_PSEUDO]:
+        shutil.copy2(pp_file, calc_dir)
     
-    # Read the structure
-    atoms = ase.io.read(f"structures/structure_{nnn}.cif")
+    # Read structure
+    cif_path = f'structures/structure_{nnn:03d}.cif'
+    atoms = ase.io.read(cif_path)
     
-    # INVARIANT 1: nat and ntyp from the actual Atoms object
+    # INVARIANT 1: compute nat and ntyp from the actual Atoms object
     nat = len(atoms)
     ntyp = len(set(atoms.get_chemical_symbols()))
-    assert nat == 6, f"Structure {nnn}: expected 6 atoms, got {nat}"
-    assert ntyp == 2, f"Structure {nnn}: expected 2 species, got {ntyp}"
+    assert nat == 6, f"Structure {nnn:03d}: expected nat=6, got {nat}"
+    assert ntyp == 2, f"Structure {nnn:03d}: expected ntyp=2, got {ntyp}"
     
-    # Get the standard k-path for this structure
+    # INVARIANT 3: k-path from chem_llm.kpath for THIS structure
     kp = standard_kpath(atoms)
-    
-    # The primitive cell for the calculation (INVARIANT 3)
-    prim = kp_atoms(kp)
+    prim = kp_atoms(kp)  # THE cell for pw.in AND bands.in
     
     # Save kpath.json
     kp_save(kp, os.path.join(calc_dir, 'kpath.json'))
     
-    # SCF k-point mesh (computed, not hand-typed)
+    # SCF k-mesh (monkhorst-pack, metal=False for semiconductor)
     kpts_scf = scf_kmesh(prim, metal=False)
+    print(f"Structure {nnn:03d}: SCF k-mesh = {kpts_scf}")
     
-    # Write pw.in (SCF)
+    # Bands k-points from k-path
+    kpts_bands = kp_kpts(kp)
+    
+    # Total electrons (INVARIANT 2: from pseudopotential z_valence, not textbook)
+    symbols = atoms.get_chemical_symbols()
+    n_electrons = sum(mo_zval if s == 'Mo' else s_zval for s in symbols)
+    n_occupied = int(n_electrons / 2)  # spin-unpolarized
+    nbnd = 64  # well above n_occupied=28
+    assert nbnd > n_occupied, f"nbnd={nbnd} must be > n_occupied={n_occupied}"
+    
+    # SCF input (pw.in)
+    scf_input_data = {
+        'calculation': 'scf',
+        'prefix': 'scf',
+        'outdir': 'tmp_scf',
+        'pseudo_dir': '.',
+        'ecutwfc': ECUTWFC_RY,
+        'ecutrho': ECUTRHO_RY,
+        'occupations': 'fixed',
+        'conv_thr': 1e-8,
+    }
+    
     write_espresso_in(
         os.path.join(calc_dir, 'pw.in'),
         prim,
         input_data=scf_input_data,
-        pseudopotentials=pseudopotentials,
+        pseudopotentials=PSEUDOS,
         kpts=kpts_scf,
     )
     
-    # Write bands.in (NSCF bands)
-    kpts_bands = kp_kpts(kp)
+    # Bands input (bands.in) - NSCF bands calculation
+    bands_input_data = {
+        'calculation': 'bands',
+        'prefix': 'scf',
+        'outdir': 'tmp_scf',
+        'pseudo_dir': '.',
+        'ecutwfc': ECUTWFC_RY,
+        'ecutrho': ECUTRHO_RY,
+        'occupations': 'fixed',
+        'conv_thr': 1e-8,
+        'nbnd': nbnd,
+    }
+    
     write_espresso_in(
         os.path.join(calc_dir, 'bands.in'),
         prim,
         input_data=bands_input_data,
-        pseudopotentials=pseudopotentials,
+        pseudopotentials=PSEUDOS,
         kpts=kpts_bands,
     )
     
-    # Write bands_post.in (bands.x input)
-    # &BANDS namelist: prefix, outdir, filband, lsym
+    # Bands post-processing input (bands_post.in) for bands.x
     bands_post_content = f"""&BANDS
-    prefix = 'pw'
-    outdir = './tmp'
-    filband = '{nnn}.bands.dat'
+    prefix = 'scf'
+    outdir = 'tmp_scf'
+    filband = '{nnn:03d}.bands.dat'
     lsym = .false.
 /
 """
     with open(os.path.join(calc_dir, 'bands_post.in'), 'w') as f:
         f.write(bands_post_content)
     
-    print(f"Setup complete for calculations/{nnn}/")
+    print(f"Structure {nnn:03d}: done (nat={nat}, ntyp={ntyp}, n_electrons={n_electrons}, n_occupied={n_occupied})")
 
-print("\nAll 51 calculation directories set up.")
+print("\nAll 51 calculation directories created.")
+print("Next: validate calculations/000/pw.in and calculations/000/bands.in")

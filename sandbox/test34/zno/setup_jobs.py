@@ -1,144 +1,149 @@
+#!/usr/bin/env python3
+"""
+setup_jobs.py -- Generate QE input files for all 51 ZnO structures.
+
+For each structure NNN (000-050):
+  calculations/NNN/
+    Zn.pbesol-rrkjus_psl.1.0.0.UPF   (pseudopotential, copied from template/)
+    O.pbesol-rrkjus_psl.1.0.0.UPF    (pseudopotential, copied from template/)
+    kpath.json                        (from chem_llm.kpath)
+    pw.in                             (SCF input, written by write_espresso_in)
+    bands.in                          (NSCF bands input, written by write_espresso_in)
+    bands_post.in                     (bands.x post-processing input)
+
+Key settings (see STEP 4 note):
+  ecutwfc  = 92.0 Ry  (46.0 Ha * 2, max of Zn=42 Ha and O=46 Ha)
+  ecutrho  = 368 Ry   (4 * ecutwfc)
+  conv_thr = 1e-8 Ry  (in &ELECTRONS, not &CONTROL -- INVARIANT 6)
+  occupations = 'fixed' (ZnO is a wide-gap semiconductor)
+  nspin = 1 (non-magnetic)
+  nbnd = 40 (occupied bands = 52/2 = 26, pad above)
+  SCF k-mesh: computed via scf_kmesh(prim, metal=False) from chem_llm.kpath
+  Bands k-path: kp_kpts(kp) from chem_llm.kpath (INVARIANT 3)
+"""
+
 import os
 import shutil
 import numpy as np
 import ase.io
+from ase import Atoms
 from ase.io.espresso import write_espresso_in
 from chem_llm.kpath import standard_kpath, kp_atoms, kp_kpts, kp_save, scf_kmesh
-from chem_llm.tools.upf import read_upf_header
 
-# ============================================================
-# setup_jobs.py
-# For each structure NNN (000-050), create calculations/NNN/ with:
-#   - pseudopotential files (Zn.upf, O.upf)
-#   - kpath.json (from chem_llm.kpath)
-#   - pw.in (SCF input for pw.x)
-#   - bands.in (NSCF bands input for pw.x)
-#   - bands_post.in (bands.x post-processing input)
-# ============================================================
+# --- Pseudopotential files ---
+PP_ZN = 'Zn.pbesol-rrkjus_psl.1.0.0.UPF'
+PP_O  = 'O.pbesol-rrkjus_psl.1.0.0.UPF'
 
-# --- Pseudopotential cutoffs (INVARIANT 5: convert Ha -> Ry) ---
-# Zn: z_valence=20, recommended cutoff 42 Ha (normal hint)
-# O:  z_valence=6,  recommended cutoff 46 Ha (normal hint)
-# Use the maximum: 46 Ha = 92 Ry (1 Ha = 2 Ry)
-Zn_pp = 'template/Zn.upf'
-O_pp = 'template/O.upf'
+# --- QE settings ---
+ECUTWFC_RY = 92.0   # 46.0 Ha * 2 (INVARIANT 5: 1 Ha = 2 Ry)
+ECUTRHO_RY = 368.0  # 4 * ecutwfc
+CONV_THR   = 1e-8   # Ry, in &ELECTRONS
+NBND       = 40     # occupied = 26, pad above
+PREFIX     = 'zno'
+OUTDIR     = './tmp'
 
-# Read z_valence from the actual UPF files (INVARIANT 2)
-z_val_Zn = read_upf_header(Zn_pp)['z_valence']
-z_val_O = read_upf_header(O_pp)['z_valence']
-print(f"z_valence: Zn={z_val_Zn}, O={z_val_O}")
+# Pseudopotential mapping for write_espresso_in
+PSEUDOS = {'Zn': PP_ZN, 'O': PP_O}
 
-# Total valence electrons for Zn2O2 (4 atoms: 2 Zn + 2 O)
-n_Zn = 2
-n_O = 2
-total_electrons = n_Zn * z_val_Zn + n_O * z_val_O
-print(f"Total valence electrons: {total_electrons}")
+# --- Read base structure to get the primitive cell ---
+# The primitive cell is the one from kp_atoms(standard_kpath(atoms))
+# For structure_000 (unperturbed), this is the same as the base cell.
+# For perturbed structures, the cell may be slightly different due to strain,
+# but the k-path is still computed from the perturbed structure.
+base = ase.io.read('structures/structure_000.cif')
+print(f"Base structure: {len(base)} atoms, species: {sorted(set(base.get_chemical_symbols()))}")
 
-# Occupied bands (spin-unpolarized, non-metallic): electrons / 2
-n_occupied = int(total_electrons / 2)
-print(f"Occupied bands: {n_occupied}")
-
-# nbnd: pad well above occupied bands
-nbnd = 60
-assert nbnd > n_occupied, f"nbnd={nbnd} must be > n_occupied={n_occupied}"
-
-# ecutwfc in Ry (INVARIANT 5: 1 Ha = 2 Ry)
-ecutwfc_ry = 2.0 * 46.0  # 92 Ry
-ecutrho_ry = 4.0 * ecutwfc_ry  # 368 Ry
-print(f"ecutwfc = {ecutwfc_ry} Ry, ecutrho = {ecutrho_ry} Ry")
-
-# --- Common QE settings ---
-prefix = 'zno'
-outdir = 'tmp'
-pseudo_dir = '.'  # pseudos copied into calculations/NNN/
-
-# --- Pseudopotential mapping ---
-pseudopotentials = {'Zn': 'Zn.upf', 'O': 'O.upf'}
-
-# --- Process each structure ---
-for n in range(51):
-    nnn = f"{n:03d}"
+# --- Create calculations directories and write input files ---
+for i in range(51):
+    nnn = f"{i:03d}"
     calc_dir = f"calculations/{nnn}"
     os.makedirs(calc_dir, exist_ok=True)
-
+    
     # Copy pseudopotentials into the calculation directory
-    for pp_file in ['Zn.upf', 'O.upf']:
-        src = os.path.join('template', pp_file)
-        dst = os.path.join(calc_dir, pp_file)
+    # (pw.x runs inside calculations/NNN, so pseudo_dir='.' resolves from there)
+    for pp in [PP_ZN, PP_O]:
+        src = f"template/{pp}"
+        dst = f"{calc_dir}/{pp}"
         if not os.path.exists(dst):
             shutil.copy2(src, dst)
-
+    
     # Read the structure
     atoms = ase.io.read(f"structures/structure_{nnn}.cif")
-
+    
+    # INVARIANT 1: nat and ntyp computed from the actual Atoms object
+    nat = len(atoms)
+    ntyp = len(set(atoms.get_chemical_symbols()))
+    assert nat == 4, f"Structure {nnn}: nat={nat} != 4"
+    assert ntyp == 2, f"Structure {nnn}: ntyp={ntyp} != 2"
+    
     # Get the standard k-path for THIS structure (INVARIANT 3)
+    # Perturbed structures have lower symmetry and their own path
     kp = standard_kpath(atoms)
     prim = kp_atoms(kp)  # THE cell for pw.in AND bands.in
-
-    # Save kpath.json
-    kp_save(kp, os.path.join(calc_dir, 'kpath.json'))
-
-    # --- SCF k-point mesh (DECISION RULE: use scf_kmesh, not hand-typed) ---
-    # ZnO is an insulator (gap ~0.73 eV), so metal=False
-    scf_kpts = scf_kmesh(prim, metal=False)
-    print(f"Structure {nnn}: SCF k-mesh = {scf_kpts}")
-
-    # --- SCF input (pw.in) ---
-    scf_input_data = {
+    
+    # Save kpath.json (holds labels, tick positions, line segments)
+    kp_save(kp, f"{calc_dir}/kpath.json")
+    
+    # --- SCF k-mesh (Monkhorst-Pack, computed from the primitive cell) ---
+    # ZnO is a semiconductor (not a metal), so metal=False
+    kpts_scf = scf_kmesh(prim, metal=False)
+    print(f"  {nnn}: SCF k-mesh = {kpts_scf}")
+    
+    # --- Write pw.in (SCF) ---
+    input_data_scf = {
         'calculation': 'scf',
-        'prefix': prefix,
-        'outdir': outdir,
-        'pseudo_dir': pseudo_dir,
-        'ecutwfc': ecutwfc_ry,
-        'ecutrho': ecutrho_ry,
-        'occupations': 'fixed',  # insulator
-        'conv_thr': 1e-8,
-        'nbnd': nbnd,
-    }
-
-    write_espresso_in(
-        os.path.join(calc_dir, 'pw.in'),
-        prim,
-        input_data=scf_input_data,
-        pseudopotentials=pseudopotentials,
-        kpts=scf_kpts,
-    )
-
-    # --- Bands input (bands.in) ---
-    # NSCF calculation on the k-path (INVARIANT 3: kpts=kp_kpts(kp))
-    bands_kpts = kp_kpts(kp)
-    bands_input_data = {
-        'calculation': 'nscf',
-        'prefix': prefix,
-        'outdir': outdir,
-        'pseudo_dir': pseudo_dir,
-        'ecutwfc': ecutwfc_ry,
-        'ecutrho': ecutrho_ry,
+        'prefix': PREFIX,
+        'outdir': OUTDIR,
+        'pseudo_dir': '.',
+        'ecutwfc': ECUTWFC_RY,
+        'ecutrho': ECUTRHO_RY,
         'occupations': 'fixed',
-        'conv_thr': 1e-8,
-        'nbnd': nbnd,
+        'conv_thr': CONV_THR,
+        'nspin': 1,
     }
-
     write_espresso_in(
-        os.path.join(calc_dir, 'bands.in'),
+        f"{calc_dir}/pw.in",
         prim,
-        input_data=bands_input_data,
-        pseudopotentials=pseudopotentials,
-        kpts=bands_kpts,
+        input_data=input_data_scf,
+        pseudopotentials=PSEUDOS,
+        kpts=kpts_scf,
     )
-
-    # --- Bands post-processing input (bands_post.in) ---
-    # bands.x input: &BANDS namelist
+    
+    # --- Write bands.in (NSCF bands) ---
+    input_data_bands = {
+        'calculation': 'bands',
+        'prefix': PREFIX,
+        'outdir': OUTDIR,
+        'pseudo_dir': '.',
+        'ecutwfc': ECUTWFC_RY,
+        'ecutrho': ECUTRHO_RY,
+        'occupations': 'fixed',
+        'conv_thr': CONV_THR,
+        'nspin': 1,
+        'nbnd': NBND,
+    }
+    write_espresso_in(
+        f"{calc_dir}/bands.in",
+        prim,
+        input_data=input_data_bands,
+        pseudopotentials=PSEUDOS,
+        kpts=kp_kpts(kp),  # INVARIANT 3: k-points from the k-path
+    )
+    
+    # --- Write bands_post.in (bands.x post-processing) ---
+    # &BANDS namelist: prefix, outdir, filband, lsym=.false.
+    # lsym=.false. to skip the band-representation file (saves time)
     bands_post_content = f"""&BANDS
-    prefix = '{prefix}'
-    outdir = '{outdir}'
+    prefix = '{PREFIX}'
+    outdir = '{OUTDIR}'
     filband = '{nnn}.bands.dat'
     lsym = .false.
 /
 """
-    with open(os.path.join(calc_dir, 'bands_post.in'), 'w') as f:
+    with open(f"{calc_dir}/bands_post.in", 'w') as f:
         f.write(bands_post_content)
+    
+    if i < 3 or i == 50:
+        print(f"  Wrote {calc_dir}/: pw.in, bands.in, bands_post.in, kpath.json")
 
-    print(f"Structure {nnn}: done (nat={len(prim)}, ntyp={len(set(prim.get_chemical_symbols()))})")
-
-print("\nAll 51 calculation directories created.")
+print("\nDone. All 51 calculation directories created.")

@@ -1,0 +1,126 @@
+chem_llm run summary -- NaCl (Fm-3m)
+====================================
+completed in 32 steps, 10.7 min | Qwen/Qwen3.8-27B
+work dir: /pscratch/sd/b/brenthu/chem_llm/bench/work/nacl
+band gap: 5.039 eV (computed from the bands output)
+plot:     calculations/000/bands_000.pdf
+
+1. What the agent did
+    step  1  fetched the NaCl structure (Fm-3m) from the Materials Project: mp-22862 ->
+             structures/NaCl_base.cif
+    step  3  wrote generate_structures.py: 2 versions, run 2x (1 failed) -> OK at step 7
+    step  9  fetched the Na pseudopotential from Pseudo-Dojo -> Na.pbesol-rrkjus_psl.1.0.0.UPF
+    step 10  fetched the Cl pseudopotential from Pseudo-Dojo -> Cl.pbesol-rrkjus_psl.1.0.0.UPF
+    step 17  wrote setup_jobs.py: 1 version, run 1x -> OK at step 18
+    step 19  validated calculations/000/pw.in: OK
+    step 20  validated calculations/000/bands.in: OK
+    step 22  ran Quantum ESPRESSO in calculations/000: OK (scf, bands_scf, bands_post)
+    step 24  wrote plot_bands.py: 2 versions, run 2x (1 failed) -> OK at step 29
+             4 documentation lookup(s) along the way (where they clustered: section 4)
+
+2. DFT setup (to reproduce the calculation)
+    Structure
+      - source: Materials Project mp-22862 (NaCl, Fm-3m #225)
+      - cell used for DFT: ClNa, 2 atoms, Fm-3m (#225); a, b, c = 3.9514, 3.9514, 3.9514 A; alpha,
+        beta, gamma = 60.00, 60.00, 60.00 deg; volume 43.625 A^3
+      - fractional positions: Na (0.0000, 0.0000, 0.0000); Cl (0.5000, 0.5000, 0.5000)
+    Pseudopotentials (Pseudo-Dojo)
+      - Na: Na.pbesol-rrkjus_psl.1.0.0.UPF -- norm-conserving, scalar-relativistic, PBESOL,
+        stringent table; z_valence 9; recommended ecutwfc 44.0 Ha (88 Ry)
+      - Cl: Cl.pbesol-rrkjus_psl.1.0.0.UPF -- norm-conserving, scalar-relativistic, PBESOL,
+        stringent table; z_valence 7; recommended ecutwfc 29.0 Ha (58 Ry)
+    pw.x settings
+      - exchange-correlation: PBESOL (taken from the pseudopotentials)
+      - spin-orbit coupling: off
+      - cutoffs: ecutwfc = 88.0 Ry, ecutrho = 352.0 Ry (largest recommended: 44 Ha = 88 Ry)
+      - occupations = fixed, nspin = 1
+      - SCF k-mesh: 8 x 8 x 8 Monkhorst-Pack, shift 0 0 0 (29 irreducible k-points)
+      - SCF convergence: conv_thr = 1e-08 Ry
+    Band structure
+      - k-path: GAMMA-X-U | K-GAMMA-L-W-X (193 k-points, K_POINTS crystal; points named from their
+        coordinates by symmetry)
+      - nbnd = 16 in the bands calculation
+      - 16 electrons -> 8 occupied bands (two electrons per band)
+      - band gap: 5.039 eV (computed here from the bands output; DFT band gaps are typically
+        underestimated)
+      - SCF converged; all three QE stages (SCF, bands, bands.x) finished
+    Perturbed-structure ensemble
+      - measured over 50 structures: per-axis RMS displacement Na 0.120, Cl 0.092 A; RMS strain
+        0.54%
+      - 51 structures; DFT was run on structure_000 (unperturbed) only
+    Software
+      - Quantum ESPRESSO v.7.5 (pw.x, bands.x); 1 MPI process(es) x 1 thread(s), GPU on
+
+3. Agent and harness (for CS / LLM engineers)
+    - base model: Qwen/Qwen3.8-27B
+    - decoding: max_new_tokens 5000, do_sample True, temperature 0.3
+    - run: completed in 32 steps of 80 allowed, 10.7 min; 32 tool calls: note 8, write_file 5,
+      run_python 5, search_docs 4, get_pseudopotential 2, validate_qe_input 2, read_file 2,
+      generate_cif 1, get_kpath 1, run_espresso_workflow 1, done 1
+    - prompt: a fixed system prompt (29,208 chars) -- agent protocol (one JSON tool call per step),
+      numbered working rules, INVARIANTS the agent's scripts must assert in code (atom/species
+      counts and electron count read from the actual structure and pw.out, never from memory; k-path
+      from seekpath on the cell in use; unit conversions), and DECISION RULES (relativistic
+      treatment, k-path source, primitive cell, plotting) -- plus a task prompt (6,630 chars) giving
+      a 7-step workflow (fetch structure, perturb, pseudopotentials, decide settings, write inputs,
+      run QE, plot) with done criteria. No examples or templates: the agent writes every script.
+    - tools: deterministic Python functions, each returning JSON -- Materials Project fetch, Pseudo-
+      Dojo fetch (reports z_valence/relativity/functional parsed from the downloaded UPF and the
+      matching recommended cutoff), a k-path tool (seekpath's standard path, shared by the QE input
+      and the plot), file read/write, Python execution (exit code), a QE input validator (namelists,
+      nat/ntyp, k-path), a QE runner, and a documentation search (BM25 + embeddings + reranker over
+      the ASE and QE docs). Facts the model is weak at come from tools, not from its memory.
+    - context: each step re-prompts with the task, notes, files written, unresolved errors and the
+      last 32 tool calls; trim_history on (superseded file versions, resolved failures and duplicate
+      notes dropped, plus a progress ledger)
+    - harness guards: a second consecutive note, a repeated doc search, or rewriting a file with
+      identical content is refused; model output that is not a valid tool call is fed back as an
+      error; results (gap, convergence, outputs) are re-derived from files on disk rather than
+      trusted from the agent's own summary
+    - QE launch command: module load espresso/7.5-libxc-7.0.0-gpu-cu13 && srun --overlap -n 4 -c 32
+      --gpus-per-task=1 --gpu-bind=closest pw.x -in pw.in > pw.out 2>&1
+
+4. Errors, uncertainties and difficulties
+    - generate_structures.py: 1 failed run(s), fixed at step 7
+        step 4: ImportError: cannot import name 'crystal_strain' from 'ase.spacegroup'
+        (/pscratch/sd/b/brenthu/chem_llm/.venv/lib/python3.14/site-packages/a
+    - plot_bands.py: 1 failed run(s), fixed at step 29
+        step 25: TypeError: unsupported format string passed to NoneType.__format__
+    - documentation lookups, grouped by what the agent did next:
+        setup_jobs.py: 2 lookup(s) (steps 14-15): write_espresso_in ASE ase.io.espresso input_data
+        kpts kpath; chem_llm.kpath scf_kmesh standard_kpath kp_atoms kp_kpts kp_save
+        generate_structures.py: 1 lookup(s) (step 5): ase.spacegroup crystal_strain
+        plot_bands.py: 1 lookup(s) (step 26): chem_llm.qe_output read_pw_out fermi_energy_eV None
+        insulator fixed oc
+    - notes where the agent flagged doubt or an assumption:
+        step 23: Next: verify nbnd against 'number of electrons' in pw.out per INVARIANT 2, then
+                 write and run plot_bands.py (STEP 7).
+    - agent's own scientific assumptions:
+        * 300 K thermal displacements: NaCl is stable at 300 K (melting point ~1074 K).
+        * Scalar-relativistic pseudopotentials: both Na (Z=11) and Cl (Z=17) are below Z=54, no
+          spin-orbit physics targeted.
+        * occupations='fixed': NaCl is a clear insulator (band_gap ~5 eV from Materials Project).
+        * nspin=1: non-magnetic (moment_per_formula_unit_muB = 0.0).
+        * ecutwfc=88 Ry: max of the two element-specific recommended cutoffs (Na 44 Ha, Cl 29 Ha),
+          converted from Ha to Ry (1 Ha = 2 Ry).
+        * nbnd=16: 2x the 8 occupied bands (16 valence electrons / 2 for spin-unpolarized).
+    - agent's own items for expert review:
+        * The band gap of 5.04 eV is close to the Materials Project value of 5.0037 eV, which is
+          good. PBEsol typically underestimates gaps, so this is reasonable.
+        * The displacement amplitudes (Na 0.110 A, Cl 0.089 A) are representative estimates from
+          typical Debye-Waller factors at 300 K, not from a full phonon calculation. For production-
+          quality thermal averaging, a phonon calculation would be needed.
+        * The 1% random strain is a simple approximation; a proper finite-temperature treatment
+          would use a supercell with phonon-derived displacements.
+
+5. Where the time went
+    wall time 10m40s
+      model generation               9m51s   92%
+      Quantum ESPRESSO               0m21s    3%
+    model: 32 calls, 18 s each on average (max 101 s); prompt 17,015 tokens on average (max 24,320); replies 305 tokens on average; 16.5 tokens/s generated
+    Quantum ESPRESSO by stage: scf 0m04s, bands_scf 0m15s, bands_post 0m03s
+    by workflow step (ends at the agent's checkpoint note):
+      STEP 1 Fetch the base NaCl structure with         3m06s  (done at step 8)
+      STEP 3 Fetch pseudopotentials for every element   0m15s  (done at step 11)
+      STEP 5 First call get_kpath on structures/struc   2m28s  (done at step 21)
+      STEP 6 Run run_espresso_workflow on calculation   0m34s  (done at step 23)
