@@ -82,6 +82,53 @@ step through in-process `transformers`.
   Fe failed: the agent put `starting_magnetization` in `input_data`, and ASE's per-species
   value, taken from the atoms' zero moments, overrode it. The rule now says to set moments on
   the cell, and `validate_qe_input` flags spin-polarized inputs with zero moments (61135fe).
+- *Sweep 5, all 14:* **14/14 pass in about 20 min**, each checked against its golden
+  reference. Fe is now spin-polarized at 2.25 μB/atom (PBE ≈ 2.2–2.3; experiment 2.22).
+  Run archives also keep the agent's final scripts and band plot (0e1f853).
+- *Sweep 6, 21 cases:* the 14 pass again. A new **stretch suite** of 7 compounds never used
+  for tuning passed 5 on the first attempt:
+  - Al: band bottom at −11.1 eV;
+  - CdTe: 0.549 eV, direct at Γ;
+  - LiF: 8.59 eV;
+  - PbTe: 0.054 eV with spin-orbit, direct at L;
+  - Bi2Se3: 0.122 eV with spin-orbit, camel-back valence band near Γ (band inversion).
+
+  The two failures (5f94842):
+  - Ni ran non-magnetic. Materials Project reports fcc Ni as "not magnetic, ordering
+    Unknown" but with a 0.71 μB moment, so the rule now decides on the moment.
+  - hBN missed my expected range, which was taken from literature for other stackings.
+    It is now anchored to Materials Project's 3.97 eV for the same structure, with the
+    correction documented.
+
+  Also found and fixed my own bug: a misplaced decorator had registered a helper as
+  `validate_qe_input`, so validation crashed all sweep. A test now checks every tool's
+  registration.
+- *Sweep 7, 21 cases:* **21/21 pass**. Ni is now spin-polarized at 0.61 μB/atom (PBE ≈ 0.62,
+  experiment ≈ 0.6). hBN gave exactly the same 3.712 eV again. Every case now has a golden
+  reference. Median run: 34 steps, 10.4 min; the slowest is Bi2Se3 with spin-orbit at
+  29 min. The whole 21-compound sweep took 48 min, 8 at a time.
+
+| sweep | cases | passed | median steps | median wall (min) |
+|---|---|---|---|---|
+| test34 rerun (in-process transformers, before this week) | 5 | 5 | 54 | 42.6 |
+| 1: vLLM + LangGraph | 6 | 6 | 48 | 38.6 |
+| 2: tool fixes (stopped early) | 8 of 14 finished | 8 | 34 | 17.4 |
+| 4: QE on dedicated GPUs, k-mesh rule | 14 | 13 | 35 | 9.4 |
+| 5: magnetization fix | 14 | 14 | 38 | 10.2 |
+| 6: + 7 never-tuned compounds | 21 | 19 | 37 | 10.9 |
+| 7: Ni moment rule, validator fix | 21 | 21 | 34 | 10.4 |
+
+**Still open**
+- The extended and stretch suites were run on the same prompt they are scored with. A
+  fresh set of held-out compounds would be a fairer test of generalization.
+- Expected gap ranges are hand-set (one was wrong: hBN). Deriving them from Materials
+  Project's gap for the selected structure would be more principled.
+- Each sweep runs the same 14–21 compounds once. With sampling at temperature 0.3, the pass
+  rate over several repeats is the honest number; so far it is 21/21, 19/21 and 14/14 on
+  the last three sweeps.
+- Spin-polarized band plots show the majority spin only.
+- No LangSmith experiments yet: the integration is built and tested offline, but it needs
+  a `LANGSMITH_API_KEY`.
 
 ## Week of 2026-10-05
 

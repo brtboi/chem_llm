@@ -23,6 +23,14 @@ ESPRESSO, and plot a band structure. See README.md for the package API.
   (`chem_llm/llm.py`). Each run logs `metrics` (time per phase), `prompt` (version hash +
   system prompt) and `outcome`; `trace.jsonl` is written per step. `chem-llm --diff-runs A B`.
 - `pytest` (no GPU/network; `chem_llm.testing` scripts the model and mocks QE) after any change.
+- Benchmark: `chem-llm-bench run everything --parallel 8 --label "why"` (suites in
+  `bench/suites.yaml`; results in `bench/RESULTS.md`, per-run folders in `bench/runs/`, golden
+  references in `bench/references/`). Record each sweep and what it showed in CHANGELOG.md.
+- On 80 GB nodes: vLLM on GPUs 0-1 (`CUDA_VISIBLE_DEVICES=0,1 TP=2 GPU_MEM=0.90
+  scripts/serve_vllm.sh`), QE on 2-3 (`quantum_espresso.gpu_ids: [2, 3]` in config.yaml).
+  Never let QE share a GPU with vLLM or another QE job: time-slicing made jobs >10x slower.
+- Don't edit package code while a sweep is running: cases start at different times and
+  import the package when they start.
 
 ## Checking a run's physics
 A band plot can look smooth and plausible while being wrong. Check degeneracies at the
