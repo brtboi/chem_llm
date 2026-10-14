@@ -217,3 +217,12 @@ def test_validate_qe_input_through_the_tool_table(tmp_path):
                   "ATOMIC_SPECIES\nFe 55.8 Fe.upf\nATOMIC_POSITIONS crystal\nFe 0 0 0\n")
     result = TOOL_DISPATCH["validate_qe_input"](path=str(pw))
     assert result["success"] is False and any("non-magnetic" in i for i in result["issues"])
+
+
+def test_validator_flags_heavy_elements_without_spin_orbit():
+    from chem_llm.tools.qe_validate import _check_spin_orbit
+
+    species = "ATOMIC_SPECIES\nCs 132.9 Cs.upf\nPb 207.2 Pb.pbesol-sr.UPF\nBr 79.9 Br.upf\n"
+    assert "Cs, Pb" in _check_spin_orbit("&SYSTEM\n   nat = 5\n/\n" + species)[0]
+    assert _check_spin_orbit("&SYSTEM\n   noncolin = .true.\n   lspinorb = .true.\n/\n" + species) == []
+    assert _check_spin_orbit("&SYSTEM\n/\nATOMIC_SPECIES\nGa 69.7 Ga.upf\nAs 74.9 As.upf\n") == []

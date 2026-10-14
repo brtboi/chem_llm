@@ -111,6 +111,20 @@ def _extract_card_lines(text: str, card: str) -> list[str]:
     return lines
 
 
+def _check_spin_orbit(text: str) -> list[str]:
+    """Elements past Xe need spin-orbit (the relativistic DECISION RULE);
+    sweep 8's CsPbBr3 ran without it (gap 1.60 eV instead of ~0.39)."""
+    from ase.data import atomic_numbers
+
+    species = re.findall(r"^\s*([A-Z][a-z]?)\d*\s+[-+0-9.eE]+\s+\S+\.(?:upf|UPF)\b", text, re.M)
+    heavy = sorted({s for s in species if atomic_numbers.get(s, 0) > 54})
+    if heavy and not re.search(r"^\s*lspinorb\s*=\s*\.?t", text, re.M | re.I):
+        return [f"{', '.join(heavy)} (atomic number > 54) without lspinorb = .true.: the relativistic DECISION "
+                "RULE requires fully relativistic pseudopotentials and spin-orbit (noncolin and lspinorb) "
+                "for any element past Xe, whatever the task targets"]
+    return []
+
+
 def _check_magnetization(text: str) -> list[str]:
     """A spin-polarized input whose starting magnetizations are all zero
     converges to the non-magnetic state with no error (sweep 4's Fe:
@@ -202,6 +216,7 @@ def validate_qe_input(path: str):
     issues.extend(_check_namelist_membership(text, binary))
     issues.extend(check_bands_kpath(file_path, file_path.parent / "band_labels.dat"))
     issues.extend(_check_magnetization(text))
+    issues.extend(_check_spin_orbit(text))
 
     return {
         "success": not issues,
