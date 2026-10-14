@@ -330,6 +330,7 @@ record holds:
 | `prompt` | the full system prompt, and `version`, a hash of the system prompt and task |
 | `metrics` | seconds per phase (`llm`, `quantum_espresso`, `agent_scripts`, ...), per tool, per QE stage and per workflow STEP; prompt/completion tokens; tokens/s |
 | `outcome` | band gap, SCF convergence, electron count and plot, read back from disk |
+| `code` | the git commit the package ran from, and any uncommitted files |
 | `final_state.steps` | one record per step: model seconds, tool seconds, prompt and completion tokens |
 
 `<work_dir>/trace.jsonl` gets the same per-step records as each step finishes, so a run
@@ -338,6 +339,61 @@ killed mid-way (for example by an expired allocation) still leaves its trajector
 `chem-llm --diff-runs A B` puts two runs side by side: outcome, steps, time per phase,
 tokens, tool calls, the settings that differ, and a unified diff of the system prompt and
 task. Runs with the same prompt `version` saw identical instructions.
+
+### Run archive
+
+A work dir is cleared when the next run starts, so every run also gets a permanent folder
+under `paths.archive_dir` (default `<work_root>/_archive`; this repo's `config.yaml` uses
+`./bench`):
+
+```
+<archive>/index.jsonl                  one line per run, ever
+<archive>/prompts/<sha>.txt            each distinct system prompt, once
+<archive>/runs/<date>_<time>_<case>/
+    progress.txt    the readable live stream, written as the run goes
+    summary.txt     the run summary
+    changes.txt     what changed since the previous run of the same case: commits in
+                    between, system prompt diff, settings, result deltas
+    record.json     config, metrics, outcome, prompt version, git commit
+    checks.json     benchmark checks (benchmark runs)
+```
+
+`agent.run(..., case="zno", label="why this run")` groups runs and says why each was made.
+
+## Benchmark
+
+`chem-llm-bench` replaces one-off sandbox folders with named suites and a single history:
+
+```bash
+chem-llm-bench list                                   # suites and cases, with what each tests
+chem-llm-bench run core --parallel 6 --label "occupations rule v2"
+chem-llm-bench run zno gaas                           # single cases
+chem-llm-bench report                                 # regenerate bench/RESULTS.md
+chem-llm-bench promote bench/runs/<run>               # make a validated run the golden reference
+```
+
+- **Cases.** [`bench/suites.yaml`](bench/suites.yaml) lists each compound, what it tests and
+  the expected physics: a gap range or metal, spin-orbit required or forbidden, magnetic
+  moment.
+- **Running.** Cases run in parallel processes against one vLLM server. Quantum ESPRESSO
+  takes turns on the GPUs through a node-local lock, and the waiting is timed separately.
+- **Scoring.** Each run is scored from the files it produced, never from the agent's own
+  summary:
+  - the agent finished and all QE stages finished with a converged SCF;
+  - a plot was made;
+  - the band gap is in range;
+  - spin-orbit, smearing and magnetization are as expected;
+  - once a validated run has been promoted, the band energies at every high-symmetry point
+    match it within 0.15 eV.
+- **Results.** [`bench/RESULTS.md`](bench/RESULTS.md) shows the latest result per case and
+  each case's history, with links to every run's progress, summary and changes.
+
+**LangSmith.** With `LANGSMITH_API_KEY` set, `chem-llm-bench run core --langsmith` also
+records the sweep as an experiment on a LangSmith dataset named after the suite. Every check
+is its own feedback score, so experiments (prompt versions, models, settings) can be
+compared side by side in its UI. Add `LANGSMITH_TRACING=true` to trace every agent step
+inside each run, which shows where a failing run went wrong. The local index and
+`RESULTS.md` work without it.
 
 ## Repository layout
 
@@ -356,6 +412,8 @@ chem_llm/            the package
   telemetry.py       per-step timing, trace.jsonl, run metrics
   rundiff.py         prompt versions, --diff-runs
   testing.py         scripted model and tool mocks for running the loop without a GPU
+  archive.py         the permanent per-run record and "what changed since last time"
+  bench.py           chem-llm-bench: suites, checks, parallel runner, RESULTS.md, LangSmith
   tools/             the agent's tools: files, Python, QE, Materials Project, pseudopotentials,
                      docs search, QE input validation
   retrieval/         documentation scraping, chunking, BM25 + embedding search, reranking
@@ -363,6 +421,8 @@ chem_llm/            the package
   config.py          legacy module constants, used by the sandbox run scripts
 main.ipynb           walkthrough: settings, docs index, one run, a sweep
 config.example.yaml  every setting, documented
+bench/               suites.yaml, golden references, run archive, index.jsonl, RESULTS.md
+CHANGELOG.md         weekly progress log
 tests/               pytest suite (scripted model, QE mocked; a live vLLM test is skipped without a server)
 scripts/             serve_vllm.sh, build_doc_index.py, build_qe_namelists.py (regenerates tools/qe_namelists.py)
 sandbox/             past experiment runs and their run_test*.py drivers
