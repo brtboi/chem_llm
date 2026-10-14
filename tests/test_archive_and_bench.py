@@ -131,7 +131,7 @@ def test_qe_slots_limit_concurrency(monkeypatch, tmp_path):
     inside, peak, lock = [0], [0], threading.Lock()
 
     def job():
-        with _qe_slot(2, {}):
+        with _qe_slot(["a", "b"], {}):
             with lock:
                 inside[0] += 1
                 peak[0] = max(peak[0], inside[0])
@@ -143,3 +143,31 @@ def test_qe_slots_limit_concurrency(monkeypatch, tmp_path):
     [t.start() for t in threads]
     [t.join() for t in threads]
     assert peak[0] == 2
+
+
+def test_scf_kmesh_follows_the_reciprocal_lattice():
+    from ase import Atoms
+
+    from chem_llm.kpath import scf_kmesh
+
+    rutile_like = Atoms("Ti", cell=[4.6, 4.6, 2.96], pbc=True)
+    assert scf_kmesh(rutile_like) == [6, 6, 9]          # short c axis -> more points
+    assert scf_kmesh(rutile_like, metal=True) == [10, 10, 15]
+
+
+def test_dedicated_gpu_mode_pins_one_gpu_per_job(monkeypatch, tmp_path):
+    import chem_llm.tools as tools
+    from chem_llm.settings import Settings, activated
+
+    seen = []
+    monkeypatch.setattr("os.getuid", lambda: f"gpu{tmp_path.name}")
+    monkeypatch.setattr(tools, "_run_qe_steps",
+                        lambda wd, qe, s, steps, t, env=None: seen.append((qe.mpi_prefix, qe.pw_args, steps, env)) or {})
+    s = Settings(work_root=tmp_path)
+    s.qe.gpu_ids, s.qe.single_gpu_prefix, s.qe.pw_args = [2, 3], "srun -n 1", "-nk 4"
+    (tmp_path / "calc").mkdir()
+    with activated(s):
+        tools.run_espresso_workflow(str(tmp_path / "calc"))
+    prefix, pw_args, steps, env = seen[0]
+    assert prefix == "srun -n 1" and pw_args == "" and env == {"CUDA_VISIBLE_DEVICES": "2"}
+    assert all(a == "" for _, _, a, _, _ in steps)

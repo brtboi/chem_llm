@@ -16,6 +16,13 @@
 # system prompt, which prefix caching computes once. Several runs can share
 # one server.
 #
+# Sharing GPUs with Quantum ESPRESSO: on 80 GB A100s, serve on two GPUs and
+# give QE the other two to itself (quantum_espresso.gpu_ids: [2, 3]) --
+#     CUDA_VISIBLE_DEVICES=0,1 TP=2 GPU_MEM=0.90 scripts/serve_vllm.sh
+# Processes time-slicing one GPU run many times slower than alone. On 40 GB
+# A100s the model needs all four GPUs (the default); keep QE at one job at a
+# time there (quantum_espresso.max_concurrent: 1).
+#
 # Every setting below can be overridden from the environment.
 set -euo pipefail
 

@@ -40,6 +40,23 @@ step through in-process `transformers`.
 - CLI flags renamed: `--pretty-progress` (live stream), `--summarize` (summary at the end),
   `--summarize-log` (past run) (1299a57).
 
+**Benchmark sweeps (this week)**
+- *Sweep 1, core suite, 6 compounds in parallel:* **6/6 pass in 45 min**. The same five
+  test34 compounds took 252 min one at a time on in-process transformers. TiO2 1.838 eV,
+  with every high-symmetry point within 0.009 eV of the reference runs; it is now the golden
+  reference. ZnO 0.754, GaAs 0.077, graphite semimetal, CsPbBr3 0.373 with spin-orbit,
+  MoS2 1.203 (e40bd1c).
+- *What sweep 1 exposed, and the fixes* (e3df222):
+  - ZnO, GaAs and MoS2 each spent ~30 of their ~40 min waiting for the single QE slot,
+    mostly behind 20 min of bands.x symmetry analysis for CsPbBr3. Fixes: `lsym=.false.`,
+    and up to 3 QE jobs at once (`srun --overlap`).
+  - 5 of 6 plot scripts mis-unpacked the tick list. `plot_axis` now also returns plain
+    `tick_x`/`tick_labels`.
+  - Hand-written `pw.out` regexes failed. New `chem_llm.qe_output.read_pw_out` /
+    `band_edges`.
+  - Up to 7 failed attempts on invented spglib APIs for a space-group check. The rule now
+    points to the space group the k-path tool already returns.
+
 ## Week of 2026-10-05
 
 - `generate_cif` picks the most stable Materials Project structure, not the first one

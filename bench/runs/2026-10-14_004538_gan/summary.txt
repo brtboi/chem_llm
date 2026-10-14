@@ -1,0 +1,130 @@
+chem_llm run summary -- GaN (P6_3mc)
+====================================
+completed in 36 steps, 21.4 min | Qwen/Qwen3.8-27B
+work dir: /pscratch/sd/b/brenthu/chem_llm/bench/work/gan
+band gap: 1.866 eV (computed from the bands output)
+plot:     calculations/000/bands_000.pdf
+
+1. What the agent did
+    step  1  fetched the GaN structure (P6_3mc) from the Materials Project: mp-804 ->
+             structures/gan_base.cif
+    step  3  wrote reduce_primitive.py: 2 versions, run 2x (1 failed) -> OK at step 7
+    step  9  wrote generate_structures.py: 2 versions, run 2x (1 failed) -> OK at step 13
+    step 15  fetched the Ga pseudopotential from Pseudo-Dojo -> Ga.upf
+    step 16  fetched the N pseudopotential from Pseudo-Dojo -> N.upf
+    step 27  wrote setup_jobs.py: 1 version, run 1x -> OK at step 28
+    step 29  validated calculations/000/pw.in: OK
+    step 30  validated calculations/000/bands.in: OK
+    step 31  ran Quantum ESPRESSO in calculations/000: OK (scf, bands_scf, bands_post)
+    step 33  wrote plot_bands.py: 1 version, run 1x -> OK at step 34
+             8 documentation lookup(s) along the way (where they clustered: section 4)
+
+2. DFT setup (to reproduce the calculation)
+    Structure
+      - source: Materials Project mp-804 (GaN, P6_3mc #186)
+      - cell used for DFT: Ga2N2, 4 atoms, P6_3mc (#186); a, b, c = 3.1889, 3.1889, 5.1924 A; alpha,
+        beta, gamma = 90.00, 90.00, 120.00 deg; volume 45.728 A^3
+      - fractional positions: Ga (0.6667, 0.3333, 0.4991); Ga (0.3333, 0.6667, 0.9991); N (0.6667,
+        0.3333, 0.8759); N (0.3333, 0.6667, 0.3759)
+    Pseudopotentials (Pseudo-Dojo)
+      - Ga: Ga.upf -- norm-conserving, scalar-relativistic, PBESOL, stringent table; z_valence 21;
+        recommended ecutwfc 57.0 Ha (114 Ry)
+      - N: N.upf -- norm-conserving, scalar-relativistic, PBESOL, stringent table; z_valence 5;
+        recommended ecutwfc 42.0 Ha (84 Ry)
+    pw.x settings
+      - exchange-correlation: PBESOL (taken from the pseudopotentials)
+      - spin-orbit coupling: off
+      - cutoffs: ecutwfc = 114.0 Ry, ecutrho = 456.0 Ry (largest recommended: 57 Ha = 114 Ry)
+      - occupations = fixed
+      - SCF k-mesh: 4 x 4 x 2 Monkhorst-Pack, shift 0 0 0 (8 irreducible k-points)
+      - SCF convergence: conv_thr = 1e-08 Ry
+    Band structure
+      - k-path: GAMMA-M-K-GAMMA-A-L-H-A | L-M | H-K (312 k-points, K_POINTS crystal; points named
+        from their coordinates by symmetry)
+      - nbnd = 64 in the bands calculation
+      - 52 electrons -> 26 occupied bands (two electrons per band)
+      - band gap: 1.866 eV (computed here from the bands output; DFT band gaps are typically
+        underestimated)
+      - SCF converged; all three QE stages (SCF, bands, bands.x) finished
+    Perturbed-structure ensemble
+      - temperature: 300.0 K (as set in generate_structures.py)
+      - measured over 50 structures: per-axis RMS displacement Ga 0.059, N 0.044 A; RMS strain 0.47%
+      - 51 structures; DFT was run on structure_000 (unperturbed) only
+    Software
+      - Quantum ESPRESSO v.7.5 (pw.x, bands.x); 4 MPI process(es) x 1 thread(s), GPU on
+
+3. Agent and harness (for CS / LLM engineers)
+    - base model: Qwen/Qwen3.8-27B
+    - decoding: max_new_tokens 5000, do_sample True, temperature 0.3
+    - run: completed in 36 steps of 80 allowed, 21.4 min; 35 tool calls: search_docs 8, note 6,
+      write_file 6, run_python 6, get_pseudopotential 2, validate_qe_input 2, generate_cif 1,
+      get_kpath 1, run_espresso_workflow 1, read_file 1, done 1
+    - prompt: a fixed system prompt (26,696 chars) -- agent protocol (one JSON tool call per step),
+      numbered working rules, INVARIANTS the agent's scripts must assert in code (atom/species
+      counts and electron count read from the actual structure and pw.out, never from memory; k-path
+      from seekpath on the cell in use; unit conversions), and DECISION RULES (relativistic
+      treatment, k-path source, primitive cell, plotting) -- plus a task prompt (6,627 chars) giving
+      a 7-step workflow (fetch structure, perturb, pseudopotentials, decide settings, write inputs,
+      run QE, plot) with done criteria. No examples or templates: the agent writes every script.
+    - tools: deterministic Python functions, each returning JSON -- Materials Project fetch, Pseudo-
+      Dojo fetch (reports z_valence/relativity/functional parsed from the downloaded UPF and the
+      matching recommended cutoff), a k-path tool (seekpath's standard path, shared by the QE input
+      and the plot), file read/write, Python execution (exit code), a QE input validator (namelists,
+      nat/ntyp, k-path), a QE runner, and a documentation search (BM25 + embeddings + reranker over
+      the ASE and QE docs). Facts the model is weak at come from tools, not from its memory.
+    - context: each step re-prompts with the task, notes, files written, unresolved errors and the
+      last 32 tool calls; trim_history on (superseded file versions, resolved failures and duplicate
+      notes dropped, plus a progress ledger)
+    - harness guards: a second consecutive note, a repeated doc search, or rewriting a file with
+      identical content is refused; model output that is not a valid tool call is fed back as an
+      error; results (gap, convergence, outputs) are re-derived from files on disk rather than
+      trusted from the agent's own summary
+    - protocol issues this run: 1 refused call(s)
+    - QE launch command: module load espresso/7.5-libxc-7.0.0-gpu-cu13 && srun --overlap -n 4 -c 32
+      --gpus-per-task=1 --gpu-bind=closest pw.x -in pw.in > pw.out 2>&1
+
+4. Errors, uncertainties and difficulties
+    - reduce_primitive.py: 1 failed run(s), fixed at step 7
+        step 4: TypeError: 'numpy.ndarray' object is not callable
+    - generate_structures.py: 1 failed run(s), fixed at step 13
+        step 10: ImportError: cannot import name 'crystal_strain' from 'ase.spacegroup'
+        (/pscratch/sd/b/brenthu/chem_llm/.venv/lib/python3.14/site-packages/a
+    - documentation lookups, grouped by what the agent did next:
+        setup_jobs.py: 5 lookup(s) (steps 21-25): write_espresso_in kpts parameter format list of
+        k-points for bands cal; bands.x input variables BANDS namelist filband lsym prefix outdir;
+        write_espresso_in pseudopotentials parameter dict species filename; chem_llm.kpath kp_kpts
+        kp_save standard_kpath function signatures; chem_llm.kpath kp_kpts kp_save standard_kpath
+        kp_atoms function signat
+        reduce_primitive.py: 1 lookup(s) (step 5): ase.Atoms cell ndarray array property
+        generate_structures.py: 1 lookup(s) (step 11): ase apply strain to cell Atoms cell array
+        get_kpath: 1 lookup(s) (step 18): write_espresso_in ASE function signature parameters
+        input_data
+    - harness refused 1 call(s) as loops: step 26 (search_docs)
+    - agent's own scientific assumptions:
+        * T=300 K: wurtzite GaN is the stable phase at room temperature and up to ~1000 K
+        * Scalar-relativistic pseudopotentials: Ga (Z=31) and N (Z=7) are both below Z=54, no spin-
+          orbit target
+        * ecutwfc=114 Ry: from Ga's recommended 57 Ha (converted to Ry), N's 42 Ha is lower so Ga
+          dominates
+        * nbnd=64: 52 total valence electrons / 2 = 26 occupied bands, padded well above for
+          conduction bands
+        * occupations='fixed': GaN is a semiconductor with ~1.74 eV gap from MP
+    - agent's own needs expert review:
+        * The band gap of 1.866 eV is reasonable for PBEsol (experimental ~3.4 eV, PBEsol typically
+          underestimates by ~1.5 eV)
+        * The k-mesh 4x4x2 for SCF may be slightly coarse for production-quality results; 6x6x3 or
+          higher would be more converged
+        * The thermal displacement amplitudes (U_N=0.002 A^2, U_Ga=0.004 A^2) are estimates based on
+          typical Debye-Waller factors for GaN at 300 K, not from a phonon calculation
+
+5. Where the time went
+    wall time 21m24s
+      Quantum ESPRESSO              15m20s   72%
+      model generation               5m19s   25%
+    model: 36 calls, 9 s each on average (max 45 s); prompt 17,398 tokens on average (max 29,886); replies 236 tokens on average; 26.7 tokens/s generated
+    Quantum ESPRESSO by stage: wait_for_gpus 6m12s, scf 0m33s, bands_scf 8m11s, bands_post 0m24s
+    by workflow step (ends at the agent's checkpoint note):
+      STEP 1 Fetch the base GaN structure with          0m08s  (done at step 2)
+      STEP 2 Write and run generate_structures          2m12s  (done at step 14)
+      STEP 3 Fetch pseudopotentials for every element   0m26s  (done at step 17)
+      STEP 6 Run run_espresso_workflow on calculation  17m11s  (done at step 32)

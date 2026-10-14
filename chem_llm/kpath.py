@@ -34,7 +34,7 @@ from pathlib import Path
 
 import numpy as np
 
-__all__ = ["standard_kpath", "kp_atoms", "kp_kpts", "kp_save", "load_kpath", "plot_axis"]
+__all__ = ["standard_kpath", "kp_atoms", "kp_kpts", "kp_save", "load_kpath", "plot_axis", "scf_kmesh"]
 
 DEFAULT_DENSITY = 0.025  # 1/A between consecutive k-points (incl. the 2*pi)
 
@@ -108,6 +108,23 @@ def standard_kpath(atoms, density: float = DEFAULT_DENSITY, symprec: float = 0.0
         "spacegroup": f"{r['spacegroup_international']} (#{r['spacegroup_number']})",
         "density_per_angstrom": density,
     }
+
+
+# SCF Monkhorst-Pack spacing (1/A, including the 2*pi): about 0.02 eV/atom
+# total-energy convergence for insulators; metals need about twice as dense.
+SCF_SPACING_INSULATOR = 0.25
+SCF_SPACING_METAL = 0.15
+
+
+def scf_kmesh(atoms, metal: bool = False, spacing: float | None = None) -> list[int]:
+    """The SCF Monkhorst-Pack mesh for `atoms`' cell: along each reciprocal
+    vector b_i, ceil(|b_i| / spacing) points, so the sampling is equally
+    dense in every direction -- a short real-space axis (rutile's c) gets
+    MORE points, not fewer. Pass the cell the SCF runs on (kp_atoms(kp))."""
+    cell = np.asarray(atoms.cell[:], dtype=float)
+    spacing = spacing or (SCF_SPACING_METAL if metal else SCF_SPACING_INSULATOR)
+    lengths = np.linalg.norm(2 * np.pi * np.linalg.inv(cell).T, axis=1)
+    return [max(1, int(np.ceil(b / spacing))) for b in lengths]
 
 
 def kp_atoms(kp: dict):

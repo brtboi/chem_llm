@@ -175,6 +175,15 @@ class QESettings:
     # (/tmp), so runs on other nodes never wait on them. Time spent waiting
     # is reported as the "wait_for_gpus" stage. 0 = no limit.
     max_concurrent: int = 1
+    # Dedicated QE GPUs: with a list (e.g. [2, 3] while vLLM serves on GPUs
+    # 0-1), each QE job takes ONE of these GPUs to itself -- one MPI rank,
+    # CUDA_VISIBLE_DEVICES pinned, launched with single_gpu_prefix -- and as
+    # many jobs run at once as there are GPUs listed (max_concurrent is then
+    # ignored). Jobs sharing a GPU with each other or with the model server
+    # time-slice it and run many times slower (sweep 2: a 3-minute bands run
+    # made no progress in 24 minutes).
+    gpu_ids: list[int] | None = None
+    single_gpu_prefix: str = field(default_factory=lambda: "srun --overlap -n 1 -c 32" if _on_perlmutter() else "")
 
     def shell_command(self, exe: str, in_file: str, out_file: str, args: str = "") -> str:
         """Full shell command for one QE step, including any module load.

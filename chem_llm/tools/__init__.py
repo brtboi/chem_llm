@@ -1,4 +1,5 @@
 import contextlib
+import dataclasses
 import os
 from pathlib import Path
 import re
@@ -285,28 +286,34 @@ def run_espresso_workflow(
     _release_cached_gpu_memory()
 
     timings = {}  # seconds per stage, for the run's timing breakdown
-    with _qe_slot(qe.max_concurrent, timings):
+    if qe.gpu_ids:
+        with _qe_slot([f"gpu{i}" for i in qe.gpu_ids], timings) as slot:
+            gpu = slot[3:]
+            one_gpu = dataclasses.replace(qe, mpi_prefix=qe.single_gpu_prefix, pw_args="")
+            steps = [(n, exe, "" if exe == qe.pw_x else a, i, o) for n, exe, a, i, o in steps]
+            return _run_qe_steps(work_dir, one_gpu, settings, steps, timings, {"CUDA_VISIBLE_DEVICES": gpu})
+    with _qe_slot([str(i) for i in range(qe.max_concurrent)], timings):
         return _run_qe_steps(work_dir, qe, settings, steps, timings)
 
 
 @contextlib.contextmanager
-def _qe_slot(slots: int, timings: dict):
-    """Hold one of this node's `slots` QE slots (QESettings.max_concurrent)
-    for the block: slot i is an flock on a node-local file."""
-    if slots <= 0:
-        yield
+def _qe_slot(slots: list[str], timings: dict):
+    """Hold one of this node's QE slots for the block and yield its name:
+    each slot is an flock on a node-local file. No slots = no limit."""
+    if not slots:
+        yield None
         return
     import fcntl
 
     started = time.perf_counter()
-    handles = [open(f"/tmp/chem_llm_qe_{os.getuid()}.{i}.lock", "a") for i in range(slots)]
+    handles = {s: open(f"/tmp/chem_llm_qe_{os.getuid()}.{s}.lock", "a") for s in slots}
     held = None
     try:
         while held is None:
-            for h in handles:
+            for name, h in handles.items():
                 try:
                     fcntl.flock(h, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    held = h
+                    held = name
                     break
                 except BlockingIOError:
                     continue
@@ -315,15 +322,15 @@ def _qe_slot(slots: int, timings: dict):
         waited = time.perf_counter() - started
         if waited >= 1:
             timings["wait_for_gpus"] = round(waited, 1)
-        yield
+        yield held
     finally:
         if held is not None:
-            fcntl.flock(held, fcntl.LOCK_UN)
-        for h in handles:
+            fcntl.flock(handles[held], fcntl.LOCK_UN)
+        for h in handles.values():
             h.close()
 
 
-def _run_qe_steps(work_dir: Path, qe, settings, steps, timings: dict) -> dict:
+def _run_qe_steps(work_dir: Path, qe, settings, steps, timings: dict, extra_env: dict | None = None) -> dict:
     completed = []
     outputs = {}
     for name, exe, args, in_file, out_file in steps:
@@ -341,7 +348,7 @@ def _run_qe_steps(work_dir: Path, qe, settings, steps, timings: dict) -> dict:
         # oversubscription that made even a single SCF iteration take many
         # minutes. Serial runs (no mpi_prefix) have no k-point parallelism
         # to hand those cores to, so the configured default is 1 thread.
-        env = {**settings.subprocess_env(), "OMP_NUM_THREADS": str(qe.omp_num_threads)}
+        env = {**settings.subprocess_env(), "OMP_NUM_THREADS": str(qe.omp_num_threads), **(extra_env or {})}
         started = time.perf_counter()
         result = subprocess.run(
             ["bash", "-c", command], cwd=work_dir, capture_output=True, text=True,
@@ -424,7 +431,8 @@ def generate_cif(
         with MPRester(active_settings().mp_api_key) as mpr:
             docs = mpr.materials.summary.search(
                 formula=composition,
-                fields=["material_id", "structure", "symmetry", "energy_above_hull", "band_gap"],
+                fields=["material_id", "structure", "symmetry", "energy_above_hull", "band_gap",
+                        "is_magnetic", "ordering", "total_magnetization_normalized_formula_units"],
             )
 
         if not docs:
@@ -508,6 +516,13 @@ def generate_cif(
             # Materials Project's PBE gap: a hint for occupations (near 0 ->
             # metal or semimetal -> smearing), not a target to reproduce
             "band_gap_eV": selected_doc.band_gap,
+            # Materials Project's magnetic ground state (spin-polarized PBE):
+            # FM / FiM -> run spin-polarized (the magnetism DECISION RULE)
+            "magnetism": {
+                "is_magnetic": getattr(selected_doc, "is_magnetic", None),
+                "ordering": str(getattr(selected_doc, "ordering", None) or "Unknown").split(".")[-1],
+                "moment_per_formula_unit_muB": getattr(selected_doc, "total_magnetization_normalized_formula_units", None),
+            },
             "candidate_material_ids": candidate_material_ids,
             "space_group": {
                 "symbol": selected_doc.symmetry.symbol,
