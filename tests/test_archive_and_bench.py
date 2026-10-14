@@ -171,3 +171,27 @@ def test_dedicated_gpu_mode_pins_one_gpu_per_job(monkeypatch, tmp_path):
     prefix, pw_args, steps, env = seen[0]
     assert prefix == "srun -n 1 /usr/bin/env CUDA_VISIBLE_DEVICES=2" and pw_args == "" and env is None
     assert all(a == "" for _, _, a, _, _ in steps)
+
+
+def test_validator_flags_a_spin_polarized_input_with_zero_moments(tmp_path):
+    from chem_llm.tools.qe_validate import _check_magnetization
+
+    fe = "&SYSTEM\n   nspin = 2\n   starting_magnetization = 0.5\n   starting_magnetization(1) = 0.0\n/\n"
+    issues = _check_magnetization(fe)
+    assert len(issues) == 2 and "non-magnetic" in issues[1]
+    assert _check_magnetization("&SYSTEM\n   nspin = 2\n   starting_magnetization(1) = 0.5\n/\n") == []
+    assert _check_magnetization("&SYSTEM\n   ecutwfc = 40\n/\n") == []
+
+
+def test_ase_writes_moments_from_the_atoms(tmp_path):
+    """The behaviour the magnetism rule relies on."""
+    import io
+
+    from ase.build import bulk
+    from ase.io.espresso import write_espresso_in
+
+    fe = bulk("Fe")
+    fe.set_initial_magnetic_moments([0.5])
+    out = io.StringIO()
+    write_espresso_in(out, fe, input_data={"nspin": 2, "ecutwfc": 40}, pseudopotentials={"Fe": "Fe.upf"})
+    assert "starting_magnetization(1) = 0.5" in out.getvalue()

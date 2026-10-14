@@ -139,6 +139,28 @@ def _extract_card_lines(text: str, card: str) -> list[str]:
     ),
     {"path": "string. Path to the QE input file to validate."},
 )
+def _check_magnetization(text: str) -> list[str]:
+    """A spin-polarized input whose starting magnetizations are all zero
+    converges to the non-magnetic state with no error (sweep 4's Fe:
+    starting_magnetization = 0.5 in input_data, overridden by the
+    starting_magnetization(1) = 0.0 ASE writes from the atoms' moments)."""
+    if not re.search(r"^\s*nspin\s*=\s*2\b", text, re.M | re.I):
+        return []
+    issues = []
+    if re.search(r"^\s*starting_magnetization\s*=", text, re.M | re.I):
+        issues.append("starting_magnetization without a species index: pw.x needs starting_magnetization(i) "
+                      "per species. With write_espresso_in, set the moments on the Atoms "
+                      "(atoms.set_initial_magnetic_moments) instead of in input_data -- ASE writes "
+                      "starting_magnetization(i) from them")
+    values = [float(v.replace("d", "e").replace("D", "e")) for v in re.findall(
+        r"^\s*starting_magnetization\(\d+\)\s*=\s*([-+0-9.eEdD]+)", text, re.M | re.I)]
+    if not values or all(abs(v) < 1e-8 for v in values):
+        issues.append("nspin = 2 but every starting_magnetization(i) is zero (or missing): the SCF will converge to "
+                      "the non-magnetic state. Set the initial moments on the cell, e.g. "
+                      "prim.set_initial_magnetic_moments([...]) after kp_atoms(kp), before write_espresso_in")
+    return issues
+
+
 def validate_qe_input(path: str):
     file_path = Path(path)
     if not file_path.exists():
@@ -179,6 +201,7 @@ def validate_qe_input(path: str):
 
     issues.extend(_check_namelist_membership(text, binary))
     issues.extend(check_bands_kpath(file_path, file_path.parent / "band_labels.dat"))
+    issues.extend(_check_magnetization(text))
 
     return {
         "success": not issues,

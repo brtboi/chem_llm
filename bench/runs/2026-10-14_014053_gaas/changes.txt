@@ -1,0 +1,54 @@
+Changes since the previous gaas run (2026-10-14T00:29, runs/2026-10-13_234637_gaas)
+
+code: aa25297186 -> 1b8c79f4b3
+  5 commit(s) in between:
+    6cd6021 2026-10-13 README: run archive, benchmark (chem-llm-bench), LangSmith
+    e40bd1c 2026-10-14 bench sweep 1 (core): 6/6 pass in 45 min; TiO2 golden reference
+    e3df222 2026-10-14 Fixes from sweep 1: pw.out reader, plain tick lists, bands.x lsym off, concurrent QE
+    15c2b0a 2026-10-14 Sweep 2 results; dedicated QE GPUs, SCF k-mesh from the cell, magnetism rule
+    1b8c79f 2026-10-14 Pin dedicated QE GPUs inside the srun step; no CUDA context in agent processes
+  uncommitted changes at run time: sandbox/test34/cspbbr3/generate_structures.py, sandbox/test34/cspbbr3/log.jsonl, sandbox/test34/cspbbr3/plot_bands.py, sandbox/test34/cspbbr3/reduce_cell.py, sandbox/test34/cspbbr3/setup_jobs.py, sandbox/test34/cspbbr3/template/Br.pbesol_upf.upf, sandbox/test34/cspbbr3/template/Cs.pbesol_upf.upf, sandbox/test34/cspbbr3/template/Pb.pbesol_upf.upf, sandbox/test34/gaas/generate_structures.py, sandbox/test34/gaas/log.jsonl, sandbox/test34/gaas/plot_bands.py, sandbox/test34/gaas/reduce_primitive.py
+
+prompt: version 1f0e056a45e3 -> bf159bbfc3bb
+  task text changed
+  system prompt: 24 line(s) added, 4 removed:
+    +11. Quantum ESPRESSO runs ONLY through the run_espresso_workflow tool, which already knows where pw.x / bands.x are and how to launch them on this machine. Never search the filesystem for QE binaries
+    -INVARIANT 2: the number of valence electrons / occupied bands used anywhere in a DFT calculation is a property of the specific pseudopotential used, not the element -- semicore pseudopotentials (e.g.
+    +INVARIANT 2: the number of valence electrons / occupied bands used anywhere in a DFT calculation is a property of the specific pseudopotential used, not the element -- semicore pseudopotentials (e.g.
+    +    from chem_llm.qe_output import read_pw_out, band_edges
+    +    pw = read_pw_out('calculations/000/pw.out')
+    +    # pw['n_electrons'], pw['n_occupied'] (already 1 electron/band with spin-orbit),
+    +    # pw['fermi_energy_eV'] (smearing runs), pw['spin_orbit'], pw['total_magnetization']
+    +    edges = band_edges(E, pw['n_occupied'])   # -> edges['vbm'], edges['cbm'], edges['gap'] in eV
+    -INVARIANT 4: the band plot's x-axis, ticks and line segments come from chem_llm.kpath.plot_axis(kpath.json, NNN.bands.dat), which also refuses to run if bands.x computed a different k-point list than
+    +INVARIANT 4: the band plot's x-axis, ticks and line segments come from chem_llm.kpath.plot_axis(kpath.json, NNN.bands.dat), which also refuses to run if bands.x computed a different k-point list than
+    -  CHECK IN CODE: assert the space group is unchanged by the reduction, and that the reduced atom count divides the original evenly. Then derive nat/ntyp and the k-path FROM THE REDUCED cell (INVARIAN
+    +  CHECK IN CODE: assert the space group is unchanged by the reduction, and that the reduced atom count divides the original evenly. The space group of a cell is standard_kpath(atoms)['spacegroup'], e
+    +  The SCF mesh (pw.in) is NEVER typed by hand: compute it in setup_jobs.py for the cell the SCF runs on, `kpts = scf_kmesh(prim, metal=...)` from chem_llm.kpath (even spacing along every reciprocal v
+    +RULE: magnetism
+    +  IF   generate_cif's magnetism reports ordering 'FM' or 'FiM' (or is_magnetic true with a nonzero moment) -- e.g. bcc Fe, Co, Ni
+    +  THEN run spin-polarized: nspin=2 and starting_magnetization(i)=0.5 for each magnetic species (the transition-metal / rare-earth ones) in BOTH pw.in and bands.in, with smearing (a ferromagnet is a m
+    +  IF   ordering is 'AFM': antiferromagnetic order needs a magnetic supercell -- say so in a note and in the done summary, and run non-spin-polarized unless the task asks for the supercell.
+    +  ELSE (ordering 'NM' / 'Unknown' with ~0 moment) run nspin=1.
+    +
+    -  Use chem_llm.kpath.plot_axis per INVARIANT 4 with plain matplotlib: one ax.plot(x[s], E[s, band]) per band per segment slice s, ax.axvline at every tick x, ax.set_xticks/ax.set_xticklabels from tic
+    +  Use chem_llm.kpath.plot_axis per INVARIANT 4 and chem_llm.qe_output per INVARIANT 2 with plain matplotlib:
+    +    ax = plot_axis(kpath_json, bands_dat); x, E = ax['x'], ax['energies']
+    +    pw = read_pw_out(pw_out)
+    +    zero = pw['fermi_energy_eV'] if metal else band_edges(E, pw['n_occupied'])['vbm']
+    +    for s in ax['segments']:
+    +        for b in range(E.shape[1]): plt.plot(x[s], E[s, b] - zero, 'k-', lw=1)
+    +    for t in ax['tick_x']: plt.axvline(t, color='gray', lw=0.5)
+    +    plt.xticks(ax['tick_x'], ax['tick_labels']); plt.xlim(x[0], x[-1]); plt.ylim(-10, 10)
+
+settings: unchanged
+
+result:
+  completed                        True -> True        
+  benchmark checks passed          True -> True        
+  band gap                     0.077 eV -> 0.076 eV       *
+  steps                              48 -> 35             *
+  wall time                   42.94 min -> 7.77 min       *
+  model time                   8.92 min -> 6.57 min       *
+  failed script runs                  5 -> 2              *
+  refused calls                       0 -> 1              *

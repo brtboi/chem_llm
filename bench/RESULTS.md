@@ -1,6 +1,6 @@
 # Benchmark results
 
-Generated 2026-10-14 01:40 by `chem-llm-bench report` from `bench/index.jsonl`; do not edit by hand. Each run's folder under `bench/runs/` has its live progress, summary, the checks and what changed since the previous run of that compound.
+Generated 2026-10-14 02:05 by `chem-llm-bench report` from `bench/index.jsonl`; do not edit by hand. Each run's folder under `bench/runs/` has its live progress, summary, the checks and what changed since the previous run of that compound.
 
 ## Suite `core`
 
@@ -8,12 +8,12 @@ The compounds developed against: rutile TiO2 (the reference benchmark) and the t
 
 | case | what it tests | last run | result | failed checks | gap eV (expected) | steps | wall min | prompt | commit | records |
 |---|---|---|---|---|---|---|---|---|---|---|
-| tio2 | reference benchmark; direct gap at Gamma, checked at every high-symmetry point | 2026-10-14T00:45 | pass | - | 1.730 (1.7-2.0) | 33 | 9.66 | d780f938 | e3df222f | [summary](runs/2026-10-14_003549_tio2/summary.txt), [progress](runs/2026-10-14_003549_tio2/progress.txt), [changes](runs/2026-10-14_003549_tio2/changes.txt) |
-| zno | polar hexagonal cell, no inversion centre; Zn 3d semicore | 2026-10-14T00:53 | pass | - | 0.754 (0.4-1.1) | 39 | 17.42 | b86da611 | e3df222f | [summary](runs/2026-10-14_003549_zno/summary.txt), [progress](runs/2026-10-14_003549_zno/progress.txt), [changes](runs/2026-10-14_003549_zno/changes.txt) |
-| gaas | III-V with a small direct gap (PBE nearly closes it) | 2026-10-14T00:29 | pass | - | 0.077 (0.02-0.6) | 48 | 42.94 | 1f0e056a | aa252971 | [summary](runs/2026-10-13_234637_gaas/summary.txt), [progress](runs/2026-10-13_234637_gaas/progress.txt), [changes](runs/2026-10-13_234637_gaas/changes.txt) |
-| graphite | semimetal, needs smearing; layered hexagonal | 2026-10-14T01:02 | pass | - | -0.005 (metal) | 32 | 26.8 | 24c763aa | e3df222f | [summary](runs/2026-10-14_003549_graphite/summary.txt), [progress](runs/2026-10-14_003549_graphite/progress.txt), [changes](runs/2026-10-14_003549_graphite/changes.txt) |
-| cspbbr3 | heavy elements, spin-orbit required (it shrinks the gap by ~1 eV) | 2026-10-14T00:22 | pass | - | 0.373 (0.2-0.9) | 46 | 36.3 | 5763242e | aa252971 | [summary](runs/2026-10-13_234637_cspbbr3/summary.txt), [progress](runs/2026-10-13_234637_cspbbr3/progress.txt), [changes](runs/2026-10-13_234637_cspbbr3/changes.txt) |
-| mos2 | layered dichalcogenide with an indirect gap | 2026-10-14T00:54 | pass | - | 1.203 (0.75-1.5) | 42 | 18.67 | 1bc2d5b7 | e3df222f | [summary](runs/2026-10-14_003549_mos2/summary.txt), [progress](runs/2026-10-14_003549_mos2/progress.txt), [changes](runs/2026-10-14_003549_mos2/changes.txt) |
+| tio2 | reference benchmark; direct gap at Gamma, checked at every high-symmetry point | 2026-10-14T01:48 | pass | - | 1.848 (1.7-2.0) | 32 | 8.06 | 386d0dec | 1b8c79f4 | [summary](runs/2026-10-14_014053_tio2/summary.txt), [progress](runs/2026-10-14_014053_tio2/progress.txt), [changes](runs/2026-10-14_014053_tio2/changes.txt) |
+| zno | polar hexagonal cell, no inversion centre; Zn 3d semicore | 2026-10-14T01:50 | pass | - | 0.755 (0.4-1.1) | 35 | 9.42 | a34e4452 | 1b8c79f4 | [summary](runs/2026-10-14_014053_zno/summary.txt), [progress](runs/2026-10-14_014053_zno/progress.txt), [changes](runs/2026-10-14_014053_zno/changes.txt) |
+| gaas | III-V with a small direct gap (PBE nearly closes it) | 2026-10-14T01:48 | pass | - | 0.076 (0.02-0.6) | 35 | 7.77 | bf159bbf | 1b8c79f4 | [summary](runs/2026-10-14_014053_gaas/summary.txt), [progress](runs/2026-10-14_014053_gaas/progress.txt), [changes](runs/2026-10-14_014053_gaas/changes.txt) |
+| graphite | semimetal, needs smearing; layered hexagonal | 2026-10-14T01:47 | pass | - | -0.005 (metal) | 26 | 6.36 | a5f858fe | 1b8c79f4 | [summary](runs/2026-10-14_014053_graphite/summary.txt), [progress](runs/2026-10-14_014053_graphite/progress.txt), [changes](runs/2026-10-14_014053_graphite/changes.txt) |
+| cspbbr3 | heavy elements, spin-orbit required (it shrinks the gap by ~1 eV) | 2026-10-14T01:54 | pass | - | 0.390 (0.2-0.9) | 36 | 13.34 | 1e677c8d | 1b8c79f4 | [summary](runs/2026-10-14_014053_cspbbr3/summary.txt), [progress](runs/2026-10-14_014053_cspbbr3/progress.txt), [changes](runs/2026-10-14_014053_cspbbr3/changes.txt) |
+| mos2 | layered dichalcogenide with an indirect gap | 2026-10-14T01:52 | pass | - | 1.203 (0.75-1.5) | 39 | 11.26 | e0c22990 | 1b8c79f4 | [summary](runs/2026-10-14_014053_mos2/summary.txt), [progress](runs/2026-10-14_014053_mos2/progress.txt), [changes](runs/2026-10-14_014053_mos2/changes.txt) |
 
 ## Suite `extended`
 
@@ -21,14 +21,14 @@ Compounds the prompt was never tuned on: elemental and ionic insulators, an indi
 
 | case | what it tests | last run | result | failed checks | gap eV (expected) | steps | wall min | prompt | commit | records |
 |---|---|---|---|---|---|---|---|---|---|---|
-| si | textbook indirect gap (CBM near X, not at a labelled point) | 2026-10-14T01:37 | pass | - | 0.473 (0.4-0.8) | 33 | 22.13 | 7543c481 | 15c2b0a2 | [summary](runs/2026-10-14_011451_si/summary.txt), [progress](runs/2026-10-14_011451_si/progress.txt), [changes](runs/2026-10-14_011451_si/changes.txt) |
-| diamond | wide indirect gap; degenerate valence pairs at X | 2026-10-14T00:57 | pass | - | 4.055 (3.8-4.5) | 27 | 12.99 | e982a950 | e3df222f | [summary](runs/2026-10-14_004443_diamond/summary.txt), [progress](runs/2026-10-14_004443_diamond/progress.txt), [changes](runs/2026-10-14_004443_diamond/changes.txt) |
-| gan | nitride with Ga 3d semicore states; direct gap at Gamma | 2026-10-14T01:07 | pass | - | 1.866 (1.4-2.4) | 36 | 21.4 | d86c1598 | e3df222f | [summary](runs/2026-10-14_004538_gan/summary.txt), [progress](runs/2026-10-14_004538_gan/progress.txt), [changes](runs/2026-10-14_004538_gan/changes.txt) |
-| nacl | ionic wide-gap insulator, alkali semicore | 2026-10-14T01:05 | pass | - | 5.038 (4.4-5.6) | 31 | 12.48 | 078b8223 | e3df222f | [summary](runs/2026-10-14_005324_nacl/summary.txt), [progress](runs/2026-10-14_005324_nacl/progress.txt), [changes](runs/2026-10-14_005324_nacl/changes.txt) |
-| mgo | ionic oxide, direct gap at Gamma | never | - | - | - (4.0-5.3) | - | - | - | - | - |
-| srtio3 | perovskite oxide, indirect R-Gamma gap from Ti 3d conduction bands | never | - | - | - (1.4-2.3) | - | - | - | - | - |
-| cu | d-band metal, needs smearing | never | - | - | - (metal) | - | - | - | - | - |
-| fe | ferromagnetic metal; must be spin-polarized (~2.2 muB/atom) | never | - | - | - (metal) | - | - | - | - | - |
+| si | textbook indirect gap (CBM near X, not at a labelled point) | 2026-10-14T01:46 | pass | - | 0.472 (0.4-0.8) | 31 | 5.93 | 116c1e3e | 1b8c79f4 | [summary](runs/2026-10-14_014053_si/summary.txt), [progress](runs/2026-10-14_014053_si/progress.txt), [changes](runs/2026-10-14_014053_si/changes.txt) |
+| diamond | wide indirect gap; degenerate valence pairs at X | 2026-10-14T01:55 | pass | - | 4.055 (3.8-4.5) | 28 | 8.82 | c0591c8d | 1b8c79f4 | [summary](runs/2026-10-14_014657_diamond/summary.txt), [progress](runs/2026-10-14_014657_diamond/progress.txt), [changes](runs/2026-10-14_014657_diamond/changes.txt) |
+| gan | nitride with Ga 3d semicore states; direct gap at Gamma | 2026-10-14T02:01 | pass | - | 1.877 (1.4-2.4) | 45 | 14.11 | 0eda10c0 | 1b8c79f4 | [summary](runs/2026-10-14_014723_gan/summary.txt), [progress](runs/2026-10-14_014723_gan/progress.txt), [changes](runs/2026-10-14_014723_gan/changes.txt) |
+| nacl | ionic wide-gap insulator, alkali semicore | 2026-10-14T01:59 | pass | - | 5.039 (4.4-5.6) | 41 | 10.72 | a2a1bc08 | 1b8c79f4 | [summary](runs/2026-10-14_014847_nacl/summary.txt), [progress](runs/2026-10-14_014847_nacl/progress.txt), [changes](runs/2026-10-14_014847_nacl/changes.txt) |
+| mgo | ionic oxide, direct gap at Gamma | 2026-10-14T01:58 | pass | - | 4.782 (4.0-5.3) | 38 | 9.42 | ecccdae1 | 1b8c79f4 | [summary](runs/2026-10-14_014905_mgo/summary.txt), [progress](runs/2026-10-14_014905_mgo/progress.txt), [changes](runs/2026-10-14_014905_mgo/changes.txt) |
+| srtio3 | perovskite oxide, indirect R-Gamma gap from Ti 3d conduction bands | 2026-10-14T02:02 | pass | - | 1.839 (1.4-2.3) | 41 | 11.9 | 7474fe80 | 1b8c79f4 | [summary](runs/2026-10-14_015026_srtio3/summary.txt), [progress](runs/2026-10-14_015026_srtio3/progress.txt), [changes](runs/2026-10-14_015026_srtio3/changes.txt) |
+| cu | d-band metal, needs smearing | 2026-10-14T02:00 | pass | - | -2.366 (metal) | 29 | 8.24 | ca08fb33 | 1b8c79f4 | [summary](runs/2026-10-14_015217_cu/summary.txt), [progress](runs/2026-10-14_015217_cu/progress.txt), [changes](runs/2026-10-14_015217_cu/changes.txt) |
+| fe | ferromagnetic metal; must be spin-polarized (~2.2 muB/atom) | 2026-10-14T02:03 | **FAIL** | magnetization | -1.883 (metal) | 30 | 8.74 | 14ff4b5c | 1b8c79f4 | [summary](runs/2026-10-14_015422_fe/summary.txt), [progress](runs/2026-10-14_015422_fe/progress.txt), [changes](runs/2026-10-14_015422_fe/changes.txt) |
 
 ## Suite `all`
 
@@ -36,20 +36,20 @@ core + extended.
 
 | case | what it tests | last run | result | failed checks | gap eV (expected) | steps | wall min | prompt | commit | records |
 |---|---|---|---|---|---|---|---|---|---|---|
-| tio2 | reference benchmark; direct gap at Gamma, checked at every high-symmetry point | 2026-10-14T00:45 | pass | - | 1.730 (1.7-2.0) | 33 | 9.66 | d780f938 | e3df222f | [summary](runs/2026-10-14_003549_tio2/summary.txt), [progress](runs/2026-10-14_003549_tio2/progress.txt), [changes](runs/2026-10-14_003549_tio2/changes.txt) |
-| zno | polar hexagonal cell, no inversion centre; Zn 3d semicore | 2026-10-14T00:53 | pass | - | 0.754 (0.4-1.1) | 39 | 17.42 | b86da611 | e3df222f | [summary](runs/2026-10-14_003549_zno/summary.txt), [progress](runs/2026-10-14_003549_zno/progress.txt), [changes](runs/2026-10-14_003549_zno/changes.txt) |
-| gaas | III-V with a small direct gap (PBE nearly closes it) | 2026-10-14T00:29 | pass | - | 0.077 (0.02-0.6) | 48 | 42.94 | 1f0e056a | aa252971 | [summary](runs/2026-10-13_234637_gaas/summary.txt), [progress](runs/2026-10-13_234637_gaas/progress.txt), [changes](runs/2026-10-13_234637_gaas/changes.txt) |
-| graphite | semimetal, needs smearing; layered hexagonal | 2026-10-14T01:02 | pass | - | -0.005 (metal) | 32 | 26.8 | 24c763aa | e3df222f | [summary](runs/2026-10-14_003549_graphite/summary.txt), [progress](runs/2026-10-14_003549_graphite/progress.txt), [changes](runs/2026-10-14_003549_graphite/changes.txt) |
-| cspbbr3 | heavy elements, spin-orbit required (it shrinks the gap by ~1 eV) | 2026-10-14T00:22 | pass | - | 0.373 (0.2-0.9) | 46 | 36.3 | 5763242e | aa252971 | [summary](runs/2026-10-13_234637_cspbbr3/summary.txt), [progress](runs/2026-10-13_234637_cspbbr3/progress.txt), [changes](runs/2026-10-13_234637_cspbbr3/changes.txt) |
-| mos2 | layered dichalcogenide with an indirect gap | 2026-10-14T00:54 | pass | - | 1.203 (0.75-1.5) | 42 | 18.67 | 1bc2d5b7 | e3df222f | [summary](runs/2026-10-14_003549_mos2/summary.txt), [progress](runs/2026-10-14_003549_mos2/progress.txt), [changes](runs/2026-10-14_003549_mos2/changes.txt) |
-| si | textbook indirect gap (CBM near X, not at a labelled point) | 2026-10-14T01:37 | pass | - | 0.473 (0.4-0.8) | 33 | 22.13 | 7543c481 | 15c2b0a2 | [summary](runs/2026-10-14_011451_si/summary.txt), [progress](runs/2026-10-14_011451_si/progress.txt), [changes](runs/2026-10-14_011451_si/changes.txt) |
-| diamond | wide indirect gap; degenerate valence pairs at X | 2026-10-14T00:57 | pass | - | 4.055 (3.8-4.5) | 27 | 12.99 | e982a950 | e3df222f | [summary](runs/2026-10-14_004443_diamond/summary.txt), [progress](runs/2026-10-14_004443_diamond/progress.txt), [changes](runs/2026-10-14_004443_diamond/changes.txt) |
-| gan | nitride with Ga 3d semicore states; direct gap at Gamma | 2026-10-14T01:07 | pass | - | 1.866 (1.4-2.4) | 36 | 21.4 | d86c1598 | e3df222f | [summary](runs/2026-10-14_004538_gan/summary.txt), [progress](runs/2026-10-14_004538_gan/progress.txt), [changes](runs/2026-10-14_004538_gan/changes.txt) |
-| nacl | ionic wide-gap insulator, alkali semicore | 2026-10-14T01:05 | pass | - | 5.038 (4.4-5.6) | 31 | 12.48 | 078b8223 | e3df222f | [summary](runs/2026-10-14_005324_nacl/summary.txt), [progress](runs/2026-10-14_005324_nacl/progress.txt), [changes](runs/2026-10-14_005324_nacl/changes.txt) |
-| mgo | ionic oxide, direct gap at Gamma | never | - | - | - (4.0-5.3) | - | - | - | - | - |
-| srtio3 | perovskite oxide, indirect R-Gamma gap from Ti 3d conduction bands | never | - | - | - (1.4-2.3) | - | - | - | - | - |
-| cu | d-band metal, needs smearing | never | - | - | - (metal) | - | - | - | - | - |
-| fe | ferromagnetic metal; must be spin-polarized (~2.2 muB/atom) | never | - | - | - (metal) | - | - | - | - | - |
+| tio2 | reference benchmark; direct gap at Gamma, checked at every high-symmetry point | 2026-10-14T01:48 | pass | - | 1.848 (1.7-2.0) | 32 | 8.06 | 386d0dec | 1b8c79f4 | [summary](runs/2026-10-14_014053_tio2/summary.txt), [progress](runs/2026-10-14_014053_tio2/progress.txt), [changes](runs/2026-10-14_014053_tio2/changes.txt) |
+| zno | polar hexagonal cell, no inversion centre; Zn 3d semicore | 2026-10-14T01:50 | pass | - | 0.755 (0.4-1.1) | 35 | 9.42 | a34e4452 | 1b8c79f4 | [summary](runs/2026-10-14_014053_zno/summary.txt), [progress](runs/2026-10-14_014053_zno/progress.txt), [changes](runs/2026-10-14_014053_zno/changes.txt) |
+| gaas | III-V with a small direct gap (PBE nearly closes it) | 2026-10-14T01:48 | pass | - | 0.076 (0.02-0.6) | 35 | 7.77 | bf159bbf | 1b8c79f4 | [summary](runs/2026-10-14_014053_gaas/summary.txt), [progress](runs/2026-10-14_014053_gaas/progress.txt), [changes](runs/2026-10-14_014053_gaas/changes.txt) |
+| graphite | semimetal, needs smearing; layered hexagonal | 2026-10-14T01:47 | pass | - | -0.005 (metal) | 26 | 6.36 | a5f858fe | 1b8c79f4 | [summary](runs/2026-10-14_014053_graphite/summary.txt), [progress](runs/2026-10-14_014053_graphite/progress.txt), [changes](runs/2026-10-14_014053_graphite/changes.txt) |
+| cspbbr3 | heavy elements, spin-orbit required (it shrinks the gap by ~1 eV) | 2026-10-14T01:54 | pass | - | 0.390 (0.2-0.9) | 36 | 13.34 | 1e677c8d | 1b8c79f4 | [summary](runs/2026-10-14_014053_cspbbr3/summary.txt), [progress](runs/2026-10-14_014053_cspbbr3/progress.txt), [changes](runs/2026-10-14_014053_cspbbr3/changes.txt) |
+| mos2 | layered dichalcogenide with an indirect gap | 2026-10-14T01:52 | pass | - | 1.203 (0.75-1.5) | 39 | 11.26 | e0c22990 | 1b8c79f4 | [summary](runs/2026-10-14_014053_mos2/summary.txt), [progress](runs/2026-10-14_014053_mos2/progress.txt), [changes](runs/2026-10-14_014053_mos2/changes.txt) |
+| si | textbook indirect gap (CBM near X, not at a labelled point) | 2026-10-14T01:46 | pass | - | 0.472 (0.4-0.8) | 31 | 5.93 | 116c1e3e | 1b8c79f4 | [summary](runs/2026-10-14_014053_si/summary.txt), [progress](runs/2026-10-14_014053_si/progress.txt), [changes](runs/2026-10-14_014053_si/changes.txt) |
+| diamond | wide indirect gap; degenerate valence pairs at X | 2026-10-14T01:55 | pass | - | 4.055 (3.8-4.5) | 28 | 8.82 | c0591c8d | 1b8c79f4 | [summary](runs/2026-10-14_014657_diamond/summary.txt), [progress](runs/2026-10-14_014657_diamond/progress.txt), [changes](runs/2026-10-14_014657_diamond/changes.txt) |
+| gan | nitride with Ga 3d semicore states; direct gap at Gamma | 2026-10-14T02:01 | pass | - | 1.877 (1.4-2.4) | 45 | 14.11 | 0eda10c0 | 1b8c79f4 | [summary](runs/2026-10-14_014723_gan/summary.txt), [progress](runs/2026-10-14_014723_gan/progress.txt), [changes](runs/2026-10-14_014723_gan/changes.txt) |
+| nacl | ionic wide-gap insulator, alkali semicore | 2026-10-14T01:59 | pass | - | 5.039 (4.4-5.6) | 41 | 10.72 | a2a1bc08 | 1b8c79f4 | [summary](runs/2026-10-14_014847_nacl/summary.txt), [progress](runs/2026-10-14_014847_nacl/progress.txt), [changes](runs/2026-10-14_014847_nacl/changes.txt) |
+| mgo | ionic oxide, direct gap at Gamma | 2026-10-14T01:58 | pass | - | 4.782 (4.0-5.3) | 38 | 9.42 | ecccdae1 | 1b8c79f4 | [summary](runs/2026-10-14_014905_mgo/summary.txt), [progress](runs/2026-10-14_014905_mgo/progress.txt), [changes](runs/2026-10-14_014905_mgo/changes.txt) |
+| srtio3 | perovskite oxide, indirect R-Gamma gap from Ti 3d conduction bands | 2026-10-14T02:02 | pass | - | 1.839 (1.4-2.3) | 41 | 11.9 | 7474fe80 | 1b8c79f4 | [summary](runs/2026-10-14_015026_srtio3/summary.txt), [progress](runs/2026-10-14_015026_srtio3/progress.txt), [changes](runs/2026-10-14_015026_srtio3/changes.txt) |
+| cu | d-band metal, needs smearing | 2026-10-14T02:00 | pass | - | -2.366 (metal) | 29 | 8.24 | ca08fb33 | 1b8c79f4 | [summary](runs/2026-10-14_015217_cu/summary.txt), [progress](runs/2026-10-14_015217_cu/progress.txt), [changes](runs/2026-10-14_015217_cu/changes.txt) |
+| fe | ferromagnetic metal; must be spin-polarized (~2.2 muB/atom) | 2026-10-14T02:03 | **FAIL** | magnetization | -1.883 (metal) | 30 | 8.74 | 14ff4b5c | 1b8c79f4 | [summary](runs/2026-10-14_015422_fe/summary.txt), [progress](runs/2026-10-14_015422_fe/progress.txt), [changes](runs/2026-10-14_015422_fe/changes.txt) |
 
 ## History
 
@@ -57,6 +57,7 @@ core + extended.
 
 | date | label | backend | result | failed checks | gap eV | steps | wall min | model min | prompt | commit |
 |---|---|---|---|---|---|---|---|---|---|---|
+| 2026-10-14T01:50 | sweep 4: QE pinned to dedicated GPUs 2-3 | vllm | pass | - | 0.755 | 35 | 9.42 | 8.3 | a34e4452 | 1b8c79f4 |
 | 2026-10-14T00:53 | sweep 2: qe_output reader, tick lists, lsym off, 3 QE slots; extended baseline | vllm | pass | - | 0.754 | 39 | 17.42 | 5.52 | b86da611 | e3df222f |
 | 2026-10-14T00:25 | sweep 1: vLLM + LangGraph, 1ebd4df plot fixes | vllm | pass | - | 0.754 | 47 | 38.65 | 6.23 | 5e9cf136 | aa252971 |
 | 2026-10-07T00:26 | test34 rerun (in-process transformers, before the benchmark existed) | qwen | pass | - | 0.754 | 54 | 42.64 | - | - | 8030a6a9 |
@@ -65,6 +66,7 @@ core + extended.
 
 | date | label | backend | result | failed checks | gap eV | steps | wall min | model min | prompt | commit |
 |---|---|---|---|---|---|---|---|---|---|---|
+| 2026-10-14T01:48 | sweep 4: QE pinned to dedicated GPUs 2-3 | vllm | pass | - | 0.076 | 35 | 7.77 | 6.57 | bf159bbf | 1b8c79f4 |
 | 2026-10-14T00:29 | sweep 1: vLLM + LangGraph, 1ebd4df plot fixes | vllm | pass | - | 0.077 | 48 | 42.94 | 8.92 | 1f0e056a | aa252971 |
 | 2026-10-07T01:46 | test34 rerun (in-process transformers, before the benchmark existed) | qwen | pass | - | 0.077 | 55 | 80.21 | - | - | 8030a6a9 |
 
@@ -72,6 +74,7 @@ core + extended.
 
 | date | label | backend | result | failed checks | gap eV | steps | wall min | model min | prompt | commit |
 |---|---|---|---|---|---|---|---|---|---|---|
+| 2026-10-14T01:47 | sweep 4: QE pinned to dedicated GPUs 2-3 | vllm | pass | - | -0.005 | 26 | 6.36 | 5.16 | a5f858fe | 1b8c79f4 |
 | 2026-10-14T01:02 | sweep 2: qe_output reader, tick lists, lsym off, 3 QE slots; extended baseline | vllm | pass | - | -0.005 | 32 | 26.8 | 5.33 | 24c763aa | e3df222f |
 | 2026-10-13T23:58 | sweep 1: vLLM + LangGraph, 1ebd4df plot fixes | vllm | pass | - | -0.005 | 50 | 12.33 | 7.06 | 21ba0266 | aa252971 |
 | 2026-10-07T02:18 | test34 rerun (in-process transformers, before the benchmark existed) | qwen | pass | - | -0.005 | 40 | 31.94 | - | - | 8030a6a9 |
@@ -80,6 +83,7 @@ core + extended.
 
 | date | label | backend | result | failed checks | gap eV | steps | wall min | model min | prompt | commit |
 |---|---|---|---|---|---|---|---|---|---|---|
+| 2026-10-14T01:54 | sweep 4: QE pinned to dedicated GPUs 2-3 | vllm | pass | - | 0.390 | 36 | 13.34 | 8.93 | 1e677c8d | 1b8c79f4 |
 | 2026-10-14T00:22 | sweep 1: vLLM + LangGraph, 1ebd4df plot fixes | vllm | pass | - | 0.373 | 46 | 36.3 | 6.62 | 5763242e | aa252971 |
 | 2026-10-07T03:17 | test34 rerun (in-process transformers, before the benchmark existed) | qwen | pass | - | 0.386 | 58 | 59.15 | - | - | 8030a6a9 |
 
@@ -87,6 +91,7 @@ core + extended.
 
 | date | label | backend | result | failed checks | gap eV | steps | wall min | model min | prompt | commit |
 |---|---|---|---|---|---|---|---|---|---|---|
+| 2026-10-14T01:52 | sweep 4: QE pinned to dedicated GPUs 2-3 | vllm | pass | - | 1.203 | 39 | 11.26 | 8.92 | e0c22990 | 1b8c79f4 |
 | 2026-10-14T00:54 | sweep 2: qe_output reader, tick lists, lsym off, 3 QE slots; extended baseline | vllm | pass | - | 1.203 | 42 | 18.67 | 6.58 | 1bc2d5b7 | e3df222f |
 | 2026-10-14T00:31 | sweep 1: vLLM + LangGraph, 1ebd4df plot fixes | vllm | pass | - | 1.203 | 63 | 45.29 | 6.84 | 499c9704 | aa252971 |
 | 2026-10-07T03:55 | test34 rerun (in-process transformers, before the benchmark existed) | qwen | pass | - | 1.203 | 47 | 38.37 | - | - | 8030a6a9 |
@@ -95,6 +100,7 @@ core + extended.
 
 | date | label | backend | result | failed checks | gap eV | steps | wall min | model min | prompt | commit |
 |---|---|---|---|---|---|---|---|---|---|---|
+| 2026-10-14T01:48 | sweep 4: QE pinned to dedicated GPUs 2-3 | vllm | pass | - | 1.848 | 32 | 8.06 | 6.13 | 386d0dec | 1b8c79f4 |
 | 2026-10-14T00:45 | sweep 2: qe_output reader, tick lists, lsym off, 3 QE slots; extended baseline | vllm | pass | - | 1.730 | 33 | 9.66 | 4.45 | d780f938 | e3df222f |
 | 2026-10-13T23:54 | sweep 1: vLLM + LangGraph, 1ebd4df plot fixes | vllm | pass | - | 1.838 | 30 | 8.32 | 4.57 | 6868c3d7 | aa252971 |
 
@@ -102,6 +108,7 @@ core + extended.
 
 | date | label | backend | result | failed checks | gap eV | steps | wall min | model min | prompt | commit |
 |---|---|---|---|---|---|---|---|---|---|---|
+| 2026-10-14T01:46 | sweep 4: QE pinned to dedicated GPUs 2-3 | vllm | pass | - | 0.472 | 31 | 5.93 | 5.13 | 116c1e3e | 1b8c79f4 |
 | 2026-10-14T01:37 | sweep 3: dedicated QE GPUs, scf_kmesh, magnetism rule | vllm | pass | - | 0.473 | 33 | 22.13 | 7.41 | 7543c481 | 15c2b0a2 |
 | 2026-10-14T00:44 | sweep 2: qe_output reader, tick lists, lsym off, 3 QE slots; extended baseline | vllm | pass | - | 0.472 | 34 | 8.74 | 4.54 | f8789fb5 | e3df222f |
 
@@ -109,16 +116,43 @@ core + extended.
 
 | date | label | backend | result | failed checks | gap eV | steps | wall min | model min | prompt | commit |
 |---|---|---|---|---|---|---|---|---|---|---|
+| 2026-10-14T01:55 | sweep 4: QE pinned to dedicated GPUs 2-3 | vllm | pass | - | 4.055 | 28 | 8.82 | 7.92 | c0591c8d | 1b8c79f4 |
 | 2026-10-14T00:57 | sweep 2: qe_output reader, tick lists, lsym off, 3 QE slots; extended baseline | vllm | pass | - | 4.055 | 27 | 12.99 | 5.14 | e982a950 | e3df222f |
 
 ### nacl: ionic wide-gap insulator, alkali semicore
 
 | date | label | backend | result | failed checks | gap eV | steps | wall min | model min | prompt | commit |
 |---|---|---|---|---|---|---|---|---|---|---|
+| 2026-10-14T01:59 | sweep 4: QE pinned to dedicated GPUs 2-3 | vllm | pass | - | 5.039 | 41 | 10.72 | 9.71 | a2a1bc08 | 1b8c79f4 |
 | 2026-10-14T01:05 | sweep 2: qe_output reader, tick lists, lsym off, 3 QE slots; extended baseline | vllm | pass | - | 5.038 | 31 | 12.48 | 4.93 | 078b8223 | e3df222f |
 
 ### gan: nitride with Ga 3d semicore states; direct gap at Gamma
 
 | date | label | backend | result | failed checks | gap eV | steps | wall min | model min | prompt | commit |
 |---|---|---|---|---|---|---|---|---|---|---|
+| 2026-10-14T02:01 | sweep 4: QE pinned to dedicated GPUs 2-3 | vllm | pass | - | 1.877 | 45 | 14.11 | 12.77 | 0eda10c0 | 1b8c79f4 |
 | 2026-10-14T01:07 | sweep 2: qe_output reader, tick lists, lsym off, 3 QE slots; extended baseline | vllm | pass | - | 1.866 | 36 | 21.4 | 5.31 | d86c1598 | e3df222f |
+
+### mgo: ionic oxide, direct gap at Gamma
+
+| date | label | backend | result | failed checks | gap eV | steps | wall min | model min | prompt | commit |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 2026-10-14T01:58 | sweep 4: QE pinned to dedicated GPUs 2-3 | vllm | pass | - | 4.782 | 38 | 9.42 | 8.59 | ecccdae1 | 1b8c79f4 |
+
+### cu: d-band metal, needs smearing
+
+| date | label | backend | result | failed checks | gap eV | steps | wall min | model min | prompt | commit |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 2026-10-14T02:00 | sweep 4: QE pinned to dedicated GPUs 2-3 | vllm | pass | - | -2.366 | 29 | 8.24 | 7.07 | ca08fb33 | 1b8c79f4 |
+
+### srtio3: perovskite oxide, indirect R-Gamma gap from Ti 3d conduction bands
+
+| date | label | backend | result | failed checks | gap eV | steps | wall min | model min | prompt | commit |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 2026-10-14T02:02 | sweep 4: QE pinned to dedicated GPUs 2-3 | vllm | pass | - | 1.839 | 41 | 11.9 | 10.53 | 7474fe80 | 1b8c79f4 |
+
+### fe: ferromagnetic metal; must be spin-polarized (~2.2 muB/atom)
+
+| date | label | backend | result | failed checks | gap eV | steps | wall min | model min | prompt | commit |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 2026-10-14T02:03 | sweep 4: QE pinned to dedicated GPUs 2-3 | vllm | **FAIL** | magnetization | -1.883 | 30 | 8.74 | 6.86 | 14ff4b5c | 1b8c79f4 |
