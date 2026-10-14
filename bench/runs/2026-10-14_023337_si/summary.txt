@@ -1,0 +1,129 @@
+chem_llm run summary -- Si (Fd-3m)
+==================================
+completed in 39 steps, 10.9 min | Qwen/Qwen3.8-27B
+work dir: /pscratch/sd/b/brenthu/chem_llm/bench/work/si
+band gap: 0.472 eV (computed from the bands output)
+plot:     calculations/000/bands_000.pdf
+
+1. What the agent did
+    step  2  fetched the Si structure (Fd-3m) from the Materials Project: mp-149 ->
+             structures/si_base.cif
+    step  4  wrote reduce_primitive.py: 2 versions, run 2x (1 failed) -> OK at step 8
+    step 10  wrote generate_structures.py: 2 versions, run 2x (1 failed) -> OK at step 14
+    step 16  fetched the Si pseudopotential from Pseudo-Dojo -> Si.pbesol-n-rrkjus_psl.1.0.0.UPF
+    step 26  wrote setup_jobs.py: 1 version, run 1x -> OK at step 27
+    step 28  validated calculations/000/pw.in: issues ERROR executing validate_qe_input:
+             _check_magnetization() got an unexpected keyword argument 'path'
+    step 30  validated calculations/000/bands.in: issues ERROR executing validate_qe_input:
+             _check_magnetization() got an unexpected keyword argument 'path'
+    step 32  ran Quantum ESPRESSO in calculations/000: OK (scf, bands_scf, bands_post)
+    step 34  wrote plot_bands.py: 2 versions, run 2x (1 failed) -> OK at step 38
+             6 documentation lookup(s) along the way (where they clustered: section 4)
+
+2. DFT setup (to reproduce the calculation)
+    Structure
+      - source: Materials Project mp-149 (Si, Fd-3m #227)
+      - cell used for DFT: Si2, 2 atoms, Fd-3m (#227); a, b, c = 3.8493, 3.8493, 3.8493 A; alpha,
+        beta, gamma = 60.00, 60.00, 60.00 deg; volume 40.330 A^3
+      - fractional positions: Si (0.7500, 0.7500, 0.7500); Si (0.5000, 0.5000, 0.5000)
+    Pseudopotentials (Pseudo-Dojo)
+      - Si: Si.pbesol-n-rrkjus_psl.1.0.0.UPF -- norm-conserving, scalar-relativistic, PBESOL,
+        stringent table; z_valence 4; recommended ecutwfc 18.0 Ha (36 Ry)
+    pw.x settings
+      - exchange-correlation: PBESOL (taken from the pseudopotentials)
+      - spin-orbit coupling: off
+      - cutoffs: ecutwfc = 36.0 Ry, ecutrho = 144.0 Ry (largest recommended: 18 Ha = 36 Ry)
+      - occupations = fixed
+      - SCF k-mesh: 8 x 8 x 8 Monkhorst-Pack, shift 0 0 0 (29 irreducible k-points)
+      - SCF convergence: conv_thr = 1e-08 Ry
+    Band structure
+      - k-path: GAMMA-X-U | K-GAMMA-L-W-X (200 k-points, K_POINTS crystal; points named from their
+        coordinates by symmetry)
+      - nbnd = 8 in the bands calculation
+      - 8 electrons -> 4 occupied bands (two electrons per band)
+      - band gap: 0.472 eV (computed here from the bands output; DFT band gaps are typically
+        underestimated)
+      - SCF converged; all three QE stages (SCF, bands, bands.x) finished
+    Perturbed-structure ensemble
+      - temperature: 300.0 K (as set in generate_structures.py)
+      - measured over 50 structures: per-axis RMS displacement Si 0.019 A; RMS strain 0.04%
+      - 51 structures; DFT was run on structure_000 (unperturbed) only
+    Software
+      - Quantum ESPRESSO v.7.5 (pw.x, bands.x); 1 MPI process(es) x 1 thread(s), GPU on
+
+3. Agent and harness (for CS / LLM engineers)
+    - base model: Qwen/Qwen3.8-27B
+    - decoding: max_new_tokens 5000, do_sample True, temperature 0.3
+    - run: completed in 39 steps of 80 allowed, 10.9 min; 39 tool calls: note 11, write_file 7,
+      run_python 7, search_docs 6, validate_qe_input 2, generate_cif 1, get_pseudopotential 1,
+      get_kpath 1, read_file 1, run_espresso_workflow 1, done 1
+    - prompt: a fixed system prompt (29,073 chars) -- agent protocol (one JSON tool call per step),
+      numbered working rules, INVARIANTS the agent's scripts must assert in code (atom/species
+      counts and electron count read from the actual structure and pw.out, never from memory; k-path
+      from seekpath on the cell in use; unit conversions), and DECISION RULES (relativistic
+      treatment, k-path source, primitive cell, plotting) -- plus a task prompt (6,640 chars) giving
+      a 7-step workflow (fetch structure, perturb, pseudopotentials, decide settings, write inputs,
+      run QE, plot) with done criteria. No examples or templates: the agent writes every script.
+    - tools: deterministic Python functions, each returning JSON -- Materials Project fetch, Pseudo-
+      Dojo fetch (reports z_valence/relativity/functional parsed from the downloaded UPF and the
+      matching recommended cutoff), a k-path tool (seekpath's standard path, shared by the QE input
+      and the plot), file read/write, Python execution (exit code), a QE input validator (namelists,
+      nat/ntyp, k-path), a QE runner, and a documentation search (BM25 + embeddings + reranker over
+      the ASE and QE docs). Facts the model is weak at come from tools, not from its memory.
+    - context: each step re-prompts with the task, notes, files written, unresolved errors and the
+      last 32 tool calls; trim_history on (superseded file versions, resolved failures and duplicate
+      notes dropped, plus a progress ledger)
+    - harness guards: a second consecutive note, a repeated doc search, or rewriting a file with
+      identical content is refused; model output that is not a valid tool call is fed back as an
+      error; results (gap, convergence, outputs) are re-derived from files on disk rather than
+      trusted from the agent's own summary
+    - QE launch command: module load espresso/7.5-libxc-7.0.0-gpu-cu13 && srun --overlap -n 4 -c 32
+      --gpus-per-task=1 --gpu-bind=closest pw.x -in pw.in > pw.out 2>&1
+
+4. Errors, uncertainties and difficulties
+    - reduce_primitive.py: 1 failed run(s), fixed at step 8
+        step 5: AssertionError: Atom count mismatch: 2 vs 2
+    - generate_structures.py: 1 failed run(s), fixed at step 14
+        step 11: ImportError: cannot import name 'crystal_str' from 'ase.spacegroup'
+        (/pscratch/sd/b/brenthu/chem_llm/.venv/lib/python3.14/site-packages/ase/
+    - plot_bands.py: 1 failed run(s), fixed at step 38
+        step 35: TypeError: unsupported format string passed to NoneType.__format__
+    - documentation lookups, grouped by what the agent did next:
+        setup_jobs.py: 4 lookup(s) (steps 21-24): chem_llm.kpath scf_kmesh function signature;
+        chem_llm.kpath scf_kmesh kp_kpts kp_save standard_kpath kp_atoms; chem_llm.kpath scf_kmesh
+        function
+        generate_structures.py: 1 lookup(s) (step 12): ase.spacegroup crystal_str import
+        get_kpath: 1 lookup(s) (step 18): write_espresso_in ASE function signature parameters
+    - notes where the agent flagged doubt or an assumption:
+        step 6: My assert `len(prim) * 2 == len(base)` was wrong — it assumed the base was a
+                conventional cell (8 atoms).
+        step 31: validate_qe_input has a bug (unexpected keyword argument 'path') but I can manually
+                 verify the inputs.
+    - agent's own scientific assumptions:
+        * T=300 K for thermal displacements (Si diamond stable at RT).
+        * RMS displacement 0.02 A (consistent with experimental Debye-Waller factors).
+        * 0.1% random strain (small perturbation, representative of lattice imperfections).
+        * Fixed occupations (Si is a clear semiconductor, gap ~0.5-1.1 eV).
+        * Scalar-relativistic pseudopotential (Si Z=14 < 54, no spin-orbit needed).
+        * ecutwfc=36 Ry (18 Ha * 2, per INVARIANT 5), ecutrho=144 Ry (4x ratio).
+    - agent's own items for expert review:
+        * The band gap (0.472 eV) is lower than experimental (~1.1 eV), as expected for PBEsol. A
+          hybrid functional or GW correction would be needed for quantitative agreement.
+        * The k-point mesh (8x8x8) is reasonable for a 2-atom cell but could be refined for higher
+          accuracy.
+        * The thermal displacement amplitude (0.02 A) is a rough estimate; a full phonon calculation
+          would give temperature-dependent amplitudes.
+
+5. Where the time went
+    wall time 10m53s
+      model generation               9m54s   91%
+      Quantum ESPRESSO               0m15s    2%
+    model: 39 calls, 15 s each on average (max 111 s); prompt 18,254 tokens on average (max 28,270); replies 253 tokens on average; 16.6 tokens/s generated
+    Quantum ESPRESSO by stage: scf 0m03s, bands_scf 0m10s, bands_post 0m02s
+    by workflow step (ends at the agent's checkpoint note):
+      STEP 1 Fetch the base Si structure with           0m14s  (done at step 3)
+      STEP 2 Write and run generate_structures          2m50s  (done at step 15)
+      STEP 3 Fetch pseudopotentials for every element   0m12s  (done at step 17)
+      STEP 4 Before writing setup_jobs                  0m44s  (done at step 25)
+      STEP 5 First call get_kpath on structures/struc   2m26s  (done at step 31)
+      STEP 6 Run run_espresso_workflow on calculation   0m49s  (done at step 33)

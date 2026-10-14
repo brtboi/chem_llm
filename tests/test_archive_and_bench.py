@@ -196,3 +196,24 @@ def test_ase_writes_moments_from_the_atoms(tmp_path):
     out = io.StringIO()
     write_espresso_in(out, fe, input_data={"nspin": 2, "ecutwfc": 40}, pseudopotentials={"Fe": "Fe.upf"})
     assert "starting_magnetization(1) = 0.5" in out.getvalue()
+
+
+def test_every_tool_dispatches_to_its_own_function():
+    """Sweep 6: a helper inserted under validate_qe_input's @register_tool was
+    registered as the tool, and every validation call crashed."""
+    from chem_llm.tools import TOOL_DISPATCH, TOOLS
+
+    for t in TOOLS:
+        fn = TOOL_DISPATCH.get(t["name"])
+        if fn is not None and getattr(fn, "__module__", "").startswith("chem_llm"):
+            assert fn.__name__ == t["name"], (t["name"], fn.__name__)
+
+
+def test_validate_qe_input_through_the_tool_table(tmp_path):
+    from chem_llm.tools import TOOL_DISPATCH
+
+    pw = tmp_path / "pw.in"
+    pw.write_text("&SYSTEM\n   nat = 1\n   ntyp = 1\n   nspin = 2\n   starting_magnetization(1) = 0.0\n/\n"
+                  "ATOMIC_SPECIES\nFe 55.8 Fe.upf\nATOMIC_POSITIONS crystal\nFe 0 0 0\n")
+    result = TOOL_DISPATCH["validate_qe_input"](path=str(pw))
+    assert result["success"] is False and any("non-magnetic" in i for i in result["issues"])
