@@ -43,9 +43,9 @@ def test_log_record_has_prompt_metrics_and_outcome(run_scripted, tmp_path):
     assert rec["run_id"] == result.state.run_id
     assert len(rec["prompt"]["version"]) == 12 and rec["prompt"]["system"]
     m = rec["metrics"]
-    assert set(m["phases_s"]) >= {"llm", "agent_scripts", "harness"}
+    assert set(m["phases_s"]) == {"llm", "run_code", "qe", "other_tools"}
     assert m["llm"]["calls"] == 4 and m["llm"]["prompt_tokens"]["max"] > 0
-    assert m["tools"]["run_python"]["calls"] == 1
+    assert m["n_tools"] == {"note": 1, "write_file": 1, "run_python": 1, "done": 1}
     assert "band_gap" in rec["outcome"]
     assert rec["config"]["backend"] == "custom"
     assert result.metrics == m
@@ -108,7 +108,7 @@ def test_mocked_qe_reports_stage_timings(run_scripted):
         {"tool": "done", "args": {"summary": "x"}},
     ])
     assert result.metrics["qe_stages_s"] == {"scf": 1.0, "bands_scf": 2.0, "bands_post": 0.5}
-    assert "quantum_espresso" in result.metrics["phases_s"]
+    assert "qe" in result.metrics["phases_s"] and result.metrics["n_tools"]["run_espresso_workflow"] == 1
 
 
 def test_progress_observer_sees_every_step(run_scripted):

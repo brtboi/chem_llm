@@ -126,6 +126,16 @@ step through in-process `transformers`.
   start and passed at 0.390 eV (0cebfb2). This is the first failure that came purely from
   sampling variance, which is why rules that matter now also get a deterministic check.
 
+- *Run records, simplified (2026-10-16):*
+  - Each archived `record.json` now holds every step's tool call (full arguments and
+    result), so you can see exactly what the agent called with what.
+  - Total tokens are at the top level, and `prompt.system_file` / `task_file` point to the
+    exact prompt texts.
+  - Time is split four ways (`llm`, `run_code`, `qe`, `other_tools`), and `n_tools` counts
+    calls per tool.
+  - `code.uncommitted_changes` lists only package files.
+  - All 112 archived runs were rebuilt in this format from their logs.
+
 **Still open**
 - The extended and stretch suites were run on the same prompt they are scored with. A
   fresh set of held-out compounds would be a fairer test of generalization.

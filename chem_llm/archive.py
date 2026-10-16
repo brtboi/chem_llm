@@ -4,7 +4,8 @@ A work dir is cleared at the start of each run (all but *.jsonl), so
 anything meant to last lives in the archive instead (settings.archive_dir):
 
     <archive>/index.jsonl                one line per run, every run ever
-    <archive>/prompts/<sha>.txt          each distinct system prompt, once
+    <archive>/prompts/<sha>.txt          each distinct system prompt and task text,
+                                         once (named by record.json's prompt shas)
     <archive>/runs/<date>_<time>_<case>/
         progress.txt                     the readable live stream (--pretty-progress),
                                          written as the run goes
@@ -12,8 +13,10 @@ anything meant to last lives in the archive instead (settings.archive_dir):
         changes.txt                      what changed since the previous run of the
                                          same case: code commits, prompt, settings,
                                          and the result
-        record.json                      the log record without the full history:
-                                         config, metrics, outcome, prompt version, code
+        record.json                      the run: outcome, tokens, metrics, settings,
+                                         prompt version, code version, and every step
+                                         with its tool call (arguments and result) and
+                                         timing -- see archive_record()
         scripts/                         the final version of every script the agent
                                          wrote (top level of the work dir)
         bands.pdf                        the band-structure plot, when there is one
@@ -51,8 +54,14 @@ def code_version(repo: Path = REPO_ROOT) -> dict:
         branch = git("rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
     except (OSError, subprocess.TimeoutExpired):
         return {}
-    dirty = [line[3:] for line in status if line.strip()]
-    return {"commit": head.stdout.strip(), "branch": branch, "dirty": dirty}
+    changed = [line[3:] for line in status if line.strip()]
+    return {"commit": head.stdout.strip(), "branch": branch,
+            "uncommitted_changes": [f for f in changed if _is_code(f)]}
+
+
+def _is_code(path: str) -> bool:
+    """Files that change what a run does (not run outputs or notes)."""
+    return path.startswith(("chem_llm/", "scripts/")) or path in ("pyproject.toml", "config.example.yaml")
 
 
 def commits_between(old: str | None, new: str | None, repo: Path = REPO_ROOT) -> list[str] | None:
@@ -141,14 +150,12 @@ class RunArchive:
         prompt = record.get("prompt") or {}
         if prompt.get("system") and prompt.get("system_sha"):
             store_prompt(self.archive, prompt["system"], prompt["system_sha"])
-        slim = {k: v for k, v in record.items() if k != "final_state"}
-        slim["prompt"] = {k: v for k, v in prompt.items() if k != "system"}
-        fs = record.get("final_state") or {}
-        slim["final_result"] = fs.get("final_result")
-        slim["steps"] = fs.get("steps")
+        task = (record.get("final_state") or {}).get("task")
+        if task and prompt.get("task_sha"):
+            store_prompt(self.archive, task, prompt["task_sha"])
         entry = _index_entry(self, record, extra)
-        slim["case"], slim["label"], slim["meta"] = self.case, self.label, self.meta
-        (self.dir / "record.json").write_text(json.dumps(slim, indent=1, default=str))
+        out = archive_record(record, self.case, self.label, self.meta)
+        (self.dir / "record.json").write_text(json.dumps(out, indent=1, default=str))
         if summary is not None:
             (self.dir / "summary.txt").write_text(summary)
         self._keep_artifacts(Path(record.get("work_dir") or ""), record.get("outcome") or {})
@@ -173,6 +180,95 @@ class RunArchive:
         plot = Path(outcome["plot"]) if outcome.get("plot") else None
         if plot and plot.is_file() and plot.stat().st_size < 5_000_000:
             shutil.copy2(plot, self.dir / f"bands{plot.suffix}")
+
+
+RESULT_CAP = 20_000  # characters per string inside a tool result
+
+
+def _cap(value):
+    """Tool results can be long (a whole file read, a QE output tail);
+    strings beyond RESULT_CAP are cut, with the cut stated."""
+    if isinstance(value, str) and len(value) > RESULT_CAP:
+        return value[:RESULT_CAP] + f" ... [{len(value) - RESULT_CAP:,} more characters cut in the archive]"
+    if isinstance(value, dict):
+        return {k: _cap(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_cap(v) for v in value]
+    return value
+
+
+def archive_record(record: dict, case: str, label: str | None, meta: dict | None = None) -> dict:
+    """The archived record.json of one run, built from its log.jsonl record.
+
+    Top level: what ran (run_id, case, label, suite, purpose, model, backend),
+    how it went (completed, num_steps, wall_s, tokens, outcome, final_result),
+    and why (prompt, config, code). `steps` is every agent step in order: the
+    tool it called with the full arguments, the result, and the step's model
+    and tool time and tokens. The prompt texts themselves are in
+    prompts/<system_sha>.txt and prompts/<task_sha>.txt next to runs/.
+    """
+    fs = record.get("final_state") or {}
+    prompt = record.get("prompt") or {}
+    metrics = dict(record.get("metrics") or {})
+    llm = metrics.get("llm") or {}
+    p_tok = (llm.get("prompt_tokens") or {}).get("total")
+    c_tok = (llm.get("completion_tokens") or {}).get("total")
+    code = dict(record.get("code") or {})
+    if "dirty" in code:  # runs logged before 2026-10-16
+        code["uncommitted_changes"] = [f for f in code.pop("dirty") or [] if _is_code(f)]
+    meta = dict(meta or {})
+
+    history = fs.get("history") or []
+    by_index = {e.get("step"): e for e in history}
+    steps = []
+    timing = fs.get("steps") or []
+    for rec in timing:
+        entries = [by_index[i] for i in rec.get("history", []) if i in by_index]
+        main = entries[-1] if entries else {}
+        step = {"step": rec.get("step"), "tool": main.get("tool", rec.get("tool")),
+                "args": main.get("args"), "result": _cap(main.get("result"))}
+        if len(entries) > 1:
+            step["also_logged"] = [{"tool": e["tool"], "args": e.get("args"), "result": _cap(e.get("result"))}
+                                   for e in entries[:-1]]
+        for key in ("llm_s", "tool_s", "prompt_tokens", "completion_tokens", "t_start", "t_end"):
+            if rec.get(key) is not None:
+                step[key] = rec[key]
+        steps.append(step)
+    if not timing:  # runs logged before per-step timing existed
+        steps = [{"step": e.get("step"), "tool": e.get("tool"), "args": e.get("args"), "result": _cap(e.get("result"))}
+                 for e in history]
+
+    return {
+        "run_id": record.get("run_id"),
+        "timestamp": record.get("timestamp"),
+        "case": case,
+        "label": label,
+        "suite": meta.pop("suite", None),
+        "purpose": meta.pop("purpose", None),
+        **meta,
+        "model": record.get("model"),
+        "backend": (record.get("config") or {}).get("backend"),
+        "completed": record.get("completed"),
+        "num_steps": len(history) or record.get("num_steps"),
+        "wall_s": metrics.get("wall_s", round(record.get("runtime") or 0, 1)),
+        "total_tokens": (p_tok or 0) + (c_tok or 0) if (p_tok or c_tok) else None,
+        "prompt_tokens": p_tok,
+        "completion_tokens": c_tok,
+        "outcome": record.get("outcome"),
+        "final_result": fs.get("final_result"),
+        "prompt": {
+            "version": prompt.get("version"),
+            "system_sha": prompt.get("system_sha"),
+            "task_sha": prompt.get("task_sha"),
+            "system_file": f"prompts/{prompt['system_sha']}.txt" if prompt.get("system_sha") else None,
+            "task_file": f"prompts/{prompt['task_sha']}.txt" if prompt.get("task_sha") else None,
+        },
+        "metrics": metrics,
+        "config": record.get("config"),
+        "code": code,
+        "work_dir": record.get("work_dir"),
+        "steps": steps,
+    }
 
 
 def _slug(text: str) -> str:
@@ -204,7 +300,7 @@ def _index_entry(run: RunArchive, record: dict, extra: dict | None) -> dict:
         "steps": len(hist),
         "wall_min": round((record.get("runtime") or 0) / 60, 2),
         "llm_min": round(phases.get("llm", 0) / 60, 2) if phases else None,
-        "qe_min": round(phases.get("quantum_espresso", 0) / 60, 2) if phases else None,
+        "qe_min": round(phases.get("qe", phases.get("quantum_espresso", 0)) / 60, 2) if phases else None,
         "failed_scripts": sum(1 for e in hist if e["tool"] == "run_python"
                               and isinstance(e.get("result"), dict) and e["result"].get("returncode") not in (0, None)),
         "refused": sum(1 for e in hist if e["tool"] == "refused"),
@@ -240,8 +336,9 @@ def describe_changes(previous: dict | None, current: dict, archive: Path | None 
         lines += [f"    {c}" for c in commits[-40:]]
     elif commits == []:
         lines.append("  same commit")
-    if new_c.get("dirty"):
-        lines.append(f"  uncommitted changes at run time: {', '.join(new_c['dirty'][:12])}")
+    uncommitted = new_c.get("uncommitted_changes", [f for f in new_c.get("dirty") or [] if _is_code(f)])
+    if uncommitted:
+        lines.append(f"  uncommitted changes to the code at run time: {', '.join(uncommitted[:12])}")
 
     lines.append("")
     if previous.get("prompt_version") and previous.get("prompt_version") == current.get("prompt_version"):

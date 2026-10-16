@@ -23,26 +23,26 @@ import re
 import time
 from pathlib import Path
 
-# What each tool's time counts as.
+# Where a run's time goes, in four buckets: the model, the agent's own
+# scripts (run_python), Quantum ESPRESSO (run_espresso_workflow), and every
+# other tool call. What is left of the wall time (the harness itself) is
+# well under 1% and not reported.
 PHASE_OF_TOOL = {
-    "run_espresso_workflow": "quantum_espresso",
-    "run_python": "agent_scripts",
-    "search_docs": "doc_search",
-    "generate_cif": "materials_project",
-    "get_pseudopotential": "pseudopotentials",
-    "get_kpath": "kpath_and_validation",
-    "validate_qe_input": "kpath_and_validation",
+    "run_espresso_workflow": "qe",
+    "run_python": "run_code",
 }
 PHASE_LABELS = {
     "llm": "model generation",
+    "run_code": "running the agent's scripts",
+    "qe": "Quantum ESPRESSO",
+    "other_tools": "other tool calls",
+    # runs logged before 2026-10-16 used finer buckets
     "quantum_espresso": "Quantum ESPRESSO",
-    "agent_scripts": "agent's Python scripts",
+    "agent_scripts": "running the agent's scripts",
     "doc_search": "documentation search",
     "materials_project": "Materials Project fetch",
     "pseudopotentials": "pseudopotential fetch",
     "kpath_and_validation": "k-path / input validation",
-    "other_tools": "other tools (files, notes)",
-    "model_load": "model load",
     "harness": "harness overhead",
 }
 
@@ -145,11 +145,10 @@ def run_metrics(state, wall_s: float, model_load_s: float | None = None) -> dict
         t = tools.setdefault(r["tool"], {"calls": 0, "seconds": 0.0})
         t["calls"] += 1
         t["seconds"] = round(t["seconds"] + r["tool_s"], 3)
-    phases = {"llm": round(llm_s, 1)}
+    phases = {"llm": round(llm_s, 1), "run_code": 0.0, "qe": 0.0, "other_tools": 0.0}
     for tool, t in tools.items():
         phase = PHASE_OF_TOOL.get(tool, "other_tools")
-        phases[phase] = round(phases.get(phase, 0.0) + t["seconds"], 1)
-    phases["harness"] = round(max(0.0, wall_s - sum(phases.values())), 1)
+        phases[phase] = round(phases[phase] + t["seconds"], 1)
 
     prompt = [r["prompt_tokens"] for r in steps if r.get("prompt_tokens") is not None]
     completion = [r["completion_tokens"] for r in steps if r.get("completion_tokens") is not None]
@@ -167,7 +166,7 @@ def run_metrics(state, wall_s: float, model_load_s: float | None = None) -> dict
                                    "max": round(max(r.get("llm_s") or 0 for r in steps), 1)}
 
     out = {"wall_s": round(wall_s, 1), "phases_s": phases, "llm": llm,
-           "tools": dict(sorted(tools.items(), key=lambda kv: -kv[1]["seconds"])),
+           "n_tools": {name: t["calls"] for name, t in sorted(tools.items(), key=lambda kv: -kv[1]["calls"])},
            "qe_stages_s": _qe_stage_times(state.history),
            "workflow_stages": _workflow_stages(state.history, steps, state.task)}
     if model_load_s is not None:
@@ -190,7 +189,7 @@ def format_timing(metrics: dict | None) -> list[str]:
              + (f" (+ {_mmss(metrics['model_load_s'])} loading the model before the run)"
                 if (metrics.get("model_load_s") or 0) >= 1 else "")]
     for phase, s in sorted(metrics.get("phases_s", {}).items(), key=lambda kv: -kv[1]):
-        if phase not in ("llm", "quantum_espresso") and s < 0.05 * wall and s < 30:
+        if phase not in ("llm", "qe", "quantum_espresso") and s < 0.05 * wall and s < 30:
             continue  # minor phases
         pct = f"{100 * s / wall:4.0f}%" if wall else ""
         lines.append(f"      {PHASE_LABELS.get(phase, phase):<28} {_mmss(s):>7} {pct}")

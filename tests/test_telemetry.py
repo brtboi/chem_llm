@@ -21,12 +21,11 @@ def test_phases_tools_and_tokens():
          {"step": 3, "tool": "run_espresso_workflow", "llm_s": 10.0, "tool_s": 90.0, "prompt_tokens": 12000, "completion_tokens": 0, "history": [3], "t_end": 205}],
     )
     m = run_metrics(s, wall_s=210.0, model_load_s=120.0)
-    assert m["phases_s"] == {"llm": 100.0, "materials_project": 5.0, "agent_scripts": 10.0,
-                             "quantum_espresso": 90.0, "harness": 5.0}
+    assert m["phases_s"] == {"llm": 100.0, "run_code": 10.0, "qe": 90.0, "other_tools": 5.0}
     assert m["llm"]["prompt_tokens"] == {"total": 32000, "mean": 10667, "max": 12000}
     assert m["llm"]["completion_tokens_per_s"] == 5.0
     assert m["qe_stages_s"] == {"scf": 20.0, "bands_scf": 70.0}
-    assert list(m["tools"])[0] == "run_espresso_workflow"  # slowest first
+    assert m["n_tools"] == {"generate_cif": 1, "run_python": 1, "run_espresso_workflow": 1}
     text = "\n".join(format_timing(m))
     assert "model generation" in text and "Quantum ESPRESSO" in text and "loading the model" in text
 

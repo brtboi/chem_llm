@@ -351,7 +351,7 @@ def run_langsmith(names: list[str], *, suite: str, label: str | None, backend: s
     results = evaluate(
         target, data=dataset, evaluators=[scores], max_concurrency=parallel,
         experiment_prefix=(label or "run").replace(" ", "-")[:40],
-        metadata={"commit": code.get("commit"), "dirty": bool(code.get("dirty")), "backend": backend,
+        metadata={"commit": code.get("commit"), "uncommitted_changes": bool(code.get("uncommitted_changes")), "backend": backend,
                   "system_prompt_sha": _sha(SYSTEM_PROMPT_TEMPLATE)},
     )
     write_report()

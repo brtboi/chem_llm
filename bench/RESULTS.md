@@ -1,6 +1,6 @@
 # Benchmark results
 
-Generated 2026-10-14 05:11 by `chem-llm-bench report` from `bench/index.jsonl`; do not edit by hand. Each run's folder under `bench/runs/` has its live progress, summary, the checks and what changed since the previous run of that compound.
+Generated 2026-10-16 11:09 by `chem-llm-bench report` from `bench/index.jsonl`; do not edit by hand. Each run's folder under `bench/runs/` has its live progress, summary, the checks and what changed since the previous run of that compound.
 
 ## Suite `core`
 

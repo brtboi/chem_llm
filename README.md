@@ -328,9 +328,9 @@ record holds:
 | `run_id` | unique id, also on every line of the trace |
 | `config` | backend, model, decoding, history settings, QE launch command |
 | `prompt` | the full system prompt, and `version`, a hash of the system prompt and task |
-| `metrics` | seconds per phase (`llm`, `quantum_espresso`, `agent_scripts`, ...), per tool, per QE stage and per workflow STEP; prompt/completion tokens; tokens/s |
+| `metrics` | `wall_s`; `phases_s` (`llm`, `run_code`, `qe`, `other_tools`); `n_tools` (calls per tool); model calls, tokens and tokens/s; seconds per QE stage and per workflow STEP |
 | `outcome` | band gap, SCF convergence, electron count and plot, read back from disk |
-| `code` | the git commit the package ran from, and any uncommitted files |
+| `code` | the git commit the package ran from, and `uncommitted_changes`: package files edited but not committed at run time (so the code was not exactly that commit) |
 | `final_state.steps` | one record per step: model seconds, tool seconds, prompt and completion tokens |
 
 `<work_dir>/trace.jsonl` gets the same per-step records as each step finishes, so a run
@@ -348,13 +348,15 @@ under `paths.archive_dir` (default `<work_root>/_archive`; this repo's `config.y
 
 ```
 <archive>/index.jsonl                  one line per run, ever
-<archive>/prompts/<sha>.txt            each distinct system prompt, once
+<archive>/prompts/<sha>.txt            each distinct system prompt and task text, once
 <archive>/runs/<date>_<time>_<case>/
     progress.txt    the readable live stream, written as the run goes
     summary.txt     the run summary
     changes.txt     what changed since the previous run of the same case: commits in
                     between, system prompt diff, settings, result deltas
-    record.json     config, metrics, outcome, prompt version, git commit
+    record.json     the run: outcome, total tokens, metrics, settings, prompt version (with the
+                    paths of its prompt files), git commit, and every step -- the tool
+                    call with its full arguments and result, model and tool seconds, tokens
     checks.json     benchmark checks (benchmark runs)
 ```
 

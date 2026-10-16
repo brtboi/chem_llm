@@ -82,8 +82,8 @@ def _numbers(entry: dict) -> dict:
         "steps": len(history),
         "wall time (min)": round(entry["runtime"] / 60, 1) if entry.get("runtime") else None,
         "model generation (min)": round(phases["llm"] / 60, 1) if "llm" in phases else None,
-        "Quantum ESPRESSO (min)": round(phases.get("quantum_espresso", 0) / 60, 1) if phases else None,
-        "agent scripts (min)": round(phases.get("agent_scripts", 0) / 60, 1) if phases else None,
+        "Quantum ESPRESSO (min)": round(phases.get("qe", phases.get("quantum_espresso", 0)) / 60, 1) if phases else None,
+        "agent scripts (min)": round(phases.get("run_code", phases.get("agent_scripts", 0)) / 60, 1) if phases else None,
         "s per model call": (llm.get("seconds_per_call") or {}).get("mean"),
         "prompt tokens (mean)": (llm.get("prompt_tokens") or {}).get("mean"),
         "prompt tokens (max)": (llm.get("prompt_tokens") or {}).get("max"),
@@ -94,6 +94,13 @@ def _numbers(entry: dict) -> dict:
         "notes": calls.get("note", 0),
         "doc searches": calls.get("search_docs", 0),
     }
+
+
+def _tool_counts(entry: dict) -> dict:
+    m = entry.get("metrics") or {}
+    if m.get("n_tools"):
+        return dict(m["n_tools"])
+    return {k: v["calls"] for k, v in (m.get("tools") or {}).items()}  # runs logged before 2026-10-16
 
 
 def _fmt(v) -> str:
@@ -140,8 +147,7 @@ def diff_runs(spec_a: str, spec_b: str) -> str:
     na, nb = _numbers(a), _numbers(b)
     lines += _table([(k, na[k], nb[k]) for k in na])
 
-    ta = {k: v["calls"] for k, v in ((a.get("metrics") or {}).get("tools") or {}).items()}
-    tb = {k: v["calls"] for k, v in ((b.get("metrics") or {}).get("tools") or {}).items()}
+    ta, tb = _tool_counts(a), _tool_counts(b)
     if not ta:
         ta = Counter(e["tool"] for e in (a.get("final_state") or {}).get("history", []))
     if not tb:
