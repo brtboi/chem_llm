@@ -136,6 +136,19 @@ step through in-process `transformers`.
   - `code.uncommitted_changes` lists only package files.
   - All 112 archived runs were rebuilt in this format from their logs.
 
+- *Run record format 2 (2026-10-16):* `log.jsonl` and `record.json` now share one versioned
+  schema (`chem_llm/runlog.py`):
+  - compound and space group, `total_steps`, `runtime`, `total_tokens`, `outcome`;
+  - the raw system prompt and task;
+  - every step with its full tool call, workflow phase, time and tokens;
+  - `config`, now including `temperature` and the git commit;
+  - `metrics` with `operations` (llm / tools / qe / code / total, each time + tokens),
+    `phases` (all 7 workflow steps), `n_tools` and `qe_stages`.
+
+  Older logs are upgraded on read, so replay and the summaries still work on them. All 112
+  archived records were rebuilt in format 2. Fixed: two runs of one case started in the same
+  second shared an archive folder.
+
 **Still open**
 - The extended and stretch suites were run on the same prompt they are scored with. A
   fresh set of held-out compounds would be a fairer test of generalization.

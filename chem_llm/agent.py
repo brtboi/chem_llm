@@ -429,17 +429,18 @@ class DFTAgent:
             functional=functional,
         )
 
-        from .archive import RunArchive, code_version
+        from .archive import RunArchive
         from .progress import Observers, ProgressPrinter
 
         config = self.run_config(prompt)
-        run_archive = RunArchive(s.archive_root, case or compound, label, meta) if archive else None
+        given = {"compound": compound, "spacegroup": spacegroup,
+                 **({"spacegroup_number": spacegroup_number} if spacegroup_number else {})}
+        run_archive = RunArchive(s.archive_root, case or compound, label, {**given, **(meta or {})}) if archive else None
         observer = on_step
         if run_archive is not None:
             observer = Observers(on_step, ProgressPrinter(run_archive.progress_stream))
         kwargs = dict(
-            log_extra={"config": config, "code": code_version(),
-                       **({"model_load_s": round(load_s, 1)} if load_s else {})},
+            log_extra={"config": config, **given, **({"model_load_s": round(load_s, 1)} if load_s else {})},
             outcome=_outcome,
             step_source=self._loaded.step_source_factory(s, verbose),
             observer=observer,
@@ -498,34 +499,36 @@ class DFTAgent:
 
     def run_config(self, task: str | None = None) -> dict:
         """What this agent runs with, as recorded with each run (no
-        credentials): model and decoding, loop and history settings, prompt
-        sizes, and how Quantum ESPRESSO is launched."""
-        from .agent_core import SYSTEM_PROMPT_TEMPLATE
+        credentials): model and sampling, loop and history settings, how
+        Quantum ESPRESSO is launched, and the git commit the code ran from."""
+        from .archive import code_version
         from .tools import TOOLS
 
         s = self.settings
         if self.backend == "claude":
-            decoding = {"max_tokens": s.model.claude_max_tokens, "effort": s.model.claude_effort}
+            sampling = {"temperature": None, "max_tokens": s.model.claude_max_tokens, "effort": s.model.claude_effort}
         elif self.backend == "custom":
-            decoding = {}
+            sampling = {"temperature": None}
         else:
-            decoding = {"max_new_tokens": s.model.max_new_tokens, "do_sample": s.model.do_sample,
-                        **({"temperature": s.model.temperature} if s.model.do_sample else {})}
+            # temperature 0 = greedy (do_sample false): the same prompt gives the same reply
+            sampling = {"temperature": s.model.temperature if s.model.do_sample else 0.0,
+                        "do_sample": s.model.do_sample, "max_new_tokens": s.model.max_new_tokens}
+        code = code_version()
         return {
             "backend": self.backend,
             "model": self.model_name,
             **({"vllm_url": s.model.vllm_url} if self.backend == "vllm" else {}),
-            "decoding": decoding,
+            **sampling,
             "max_steps": s.agent.max_steps,
             "max_history": s.agent.max_history,
             "trim_history": s.agent.trim_history,
             "read_max_chars": s.agent.read_max_chars,
-            "system_prompt_chars": len(SYSTEM_PROMPT_TEMPLATE),
-            "task_chars": len(task) if task else None,
             "tools": [t["name"] for t in TOOLS],
             "qe_command": s.qe.shell_command(s.qe.pw_x, "pw.in", "pw.out"),
             "qe_omp_threads": s.qe.omp_num_threads,
             "chem_llm_version": __import__("chem_llm").__version__,
+            "code_commit": code.get("commit"),
+            "uncommitted_changes": code.get("uncommitted_changes", []),
         }
 
     def __repr__(self) -> str:

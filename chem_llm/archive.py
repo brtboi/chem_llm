@@ -4,8 +4,6 @@ A work dir is cleared at the start of each run (all but *.jsonl), so
 anything meant to last lives in the archive instead (settings.archive_dir):
 
     <archive>/index.jsonl                one line per run, every run ever
-    <archive>/prompts/<sha>.txt          each distinct system prompt and task text,
-                                         once (named by record.json's prompt shas)
     <archive>/runs/<date>_<time>_<case>/
         progress.txt                     the readable live stream (--pretty-progress),
                                          written as the run goes
@@ -13,10 +11,9 @@ anything meant to last lives in the archive instead (settings.archive_dir):
         changes.txt                      what changed since the previous run of the
                                          same case: code commits, prompt, settings,
                                          and the result
-        record.json                      the run: outcome, tokens, metrics, settings,
-                                         prompt version, code version, and every step
-                                         with its tool call (arguments and result) and
-                                         timing -- see archive_record()
+        record.json                      the run record, format 2 (chem_llm.runlog): the
+                                         same fields as the work dir's log.jsonl, with
+                                         very long tool results cut
         scripts/                         the final version of every script the agent
                                          wrote (top level of the work dir)
         bands.pdf                        the band-structure plot, when there is one
@@ -109,20 +106,18 @@ def append_index(archive: Path, entry: dict) -> None:
             f.write(json.dumps(entry, default=str) + "\n")
 
 
-def store_prompt(archive: Path, text: str, sha: str) -> Path:
-    path = Path(archive) / "prompts" / f"{sha}.txt"
-    if not path.exists():
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text)
-    return path
-
-
-def load_prompt(archive: Path, sha: str | None) -> str | None:
+def _system_prompt(archive: Path, entry: dict) -> str | None:
+    """A run's system prompt, from its record.json (or, for runs archived
+    before format 2, prompts/<system_sha>.txt)."""
+    try:
+        return json.loads((Path(archive) / entry["dir"] / "record.json").read_text())["prompt"]["system"]
+    except (OSError, KeyError, TypeError, ValueError):
+        pass
+    sha = entry.get("system_sha")
     path = Path(archive) / "prompts" / f"{sha}.txt"
     return path.read_text() if sha and path.exists() else None
 
 
-# ----------------------------------------------------------------------
 class RunArchive:
     """The archive folder of one run. Created when the run starts (so the
     progress stream is on disk from the first step); finish() writes the
@@ -134,8 +129,16 @@ class RunArchive:
         self.label = label
         self.meta = dict(meta or {})
         stamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-        self.dir = self.archive / "runs" / f"{stamp}_{_slug(case)}"
-        self.dir.mkdir(parents=True, exist_ok=True)
+        base = self.archive / "runs" / f"{stamp}_{_slug(case)}"
+        (self.archive / "runs").mkdir(parents=True, exist_ok=True)
+        # two runs of one case started in the same second must not share a folder
+        for n in range(1, 1000):
+            self.dir = base if n == 1 else base.with_name(f"{base.name}-{n}")
+            try:
+                self.dir.mkdir()
+                break
+            except FileExistsError:
+                continue
         self.progress_path = self.dir / "progress.txt"
         self._progress = self.progress_path.open("a", encoding="utf-8")
 
@@ -144,18 +147,14 @@ class RunArchive:
         return self._progress
 
     def finish(self, record: dict, summary: str | None, extra: dict | None = None) -> dict:
-        """Write summary / record / changes and the index line; returns the
-        index entry."""
+        """Write record.json / summary / changes and the index line; returns
+        the index entry. `record` is the run's log.jsonl record (any format)."""
+        from .runlog import for_archive, upgrade
+
         self._progress.close()
-        prompt = record.get("prompt") or {}
-        if prompt.get("system") and prompt.get("system_sha"):
-            store_prompt(self.archive, prompt["system"], prompt["system_sha"])
-        task = (record.get("final_state") or {}).get("task")
-        if task and prompt.get("task_sha"):
-            store_prompt(self.archive, task, prompt["task_sha"])
+        record = upgrade(record)
         entry = _index_entry(self, record, extra)
-        out = archive_record(record, self.case, self.label, self.meta)
-        (self.dir / "record.json").write_text(json.dumps(out, indent=1, default=str))
+        (self.dir / "record.json").write_text(json.dumps(for_archive(record), indent=1, default=str))
         if summary is not None:
             (self.dir / "summary.txt").write_text(summary)
         self._keep_artifacts(Path(record.get("work_dir") or ""), record.get("outcome") or {})
@@ -163,7 +162,6 @@ class RunArchive:
         (self.dir / "changes.txt").write_text(describe_changes(previous, entry, self.archive))
         append_index(self.archive, entry)
         return entry
-
 
     def _keep_artifacts(self, work_dir: Path, outcome: dict) -> None:
         """Copy the agent's scripts and the plot: the work dir is cleared by
@@ -182,135 +180,51 @@ class RunArchive:
             shutil.copy2(plot, self.dir / f"bands{plot.suffix}")
 
 
-RESULT_CAP = 20_000  # characters per string inside a tool result
-
-
-def _cap(value):
-    """Tool results can be long (a whole file read, a QE output tail);
-    strings beyond RESULT_CAP are cut, with the cut stated."""
-    if isinstance(value, str) and len(value) > RESULT_CAP:
-        return value[:RESULT_CAP] + f" ... [{len(value) - RESULT_CAP:,} more characters cut in the archive]"
-    if isinstance(value, dict):
-        return {k: _cap(v) for k, v in value.items()}
-    if isinstance(value, list):
-        return [_cap(v) for v in value]
-    return value
-
-
-def archive_record(record: dict, case: str, label: str | None, meta: dict | None = None) -> dict:
-    """The archived record.json of one run, built from its log.jsonl record.
-
-    Top level: what ran (run_id, case, label, suite, purpose, model, backend),
-    how it went (completed, num_steps, wall_s, tokens, outcome, final_result),
-    and why (prompt, config, code). `steps` is every agent step in order: the
-    tool it called with the full arguments, the result, and the step's model
-    and tool time and tokens. The prompt texts themselves are in
-    prompts/<system_sha>.txt and prompts/<task_sha>.txt next to runs/.
-    """
-    fs = record.get("final_state") or {}
-    prompt = record.get("prompt") or {}
-    metrics = dict(record.get("metrics") or {})
-    llm = metrics.get("llm") or {}
-    p_tok = (llm.get("prompt_tokens") or {}).get("total")
-    c_tok = (llm.get("completion_tokens") or {}).get("total")
-    code = dict(record.get("code") or {})
-    if "dirty" in code:  # runs logged before 2026-10-16
-        code["uncommitted_changes"] = [f for f in code.pop("dirty") or [] if _is_code(f)]
-    meta = dict(meta or {})
-
-    history = fs.get("history") or []
-    by_index = {e.get("step"): e for e in history}
-    steps = []
-    timing = fs.get("steps") or []
-    for rec in timing:
-        entries = [by_index[i] for i in rec.get("history", []) if i in by_index]
-        main = entries[-1] if entries else {}
-        step = {"step": rec.get("step"), "tool": main.get("tool", rec.get("tool")),
-                "args": main.get("args"), "result": _cap(main.get("result"))}
-        if len(entries) > 1:
-            step["also_logged"] = [{"tool": e["tool"], "args": e.get("args"), "result": _cap(e.get("result"))}
-                                   for e in entries[:-1]]
-        for key in ("llm_s", "tool_s", "prompt_tokens", "completion_tokens", "t_start", "t_end"):
-            if rec.get(key) is not None:
-                step[key] = rec[key]
-        steps.append(step)
-    if not timing:  # runs logged before per-step timing existed
-        steps = [{"step": e.get("step"), "tool": e.get("tool"), "args": e.get("args"), "result": _cap(e.get("result"))}
-                 for e in history]
-
-    return {
-        "run_id": record.get("run_id"),
-        "timestamp": record.get("timestamp"),
-        "case": case,
-        "label": label,
-        "suite": meta.pop("suite", None),
-        "purpose": meta.pop("purpose", None),
-        **meta,
-        "model": record.get("model"),
-        "backend": (record.get("config") or {}).get("backend"),
-        "completed": record.get("completed"),
-        "num_steps": len(history) or record.get("num_steps"),
-        "wall_s": metrics.get("wall_s", round(record.get("runtime") or 0, 1)),
-        "total_tokens": (p_tok or 0) + (c_tok or 0) if (p_tok or c_tok) else None,
-        "prompt_tokens": p_tok,
-        "completion_tokens": c_tok,
-        "outcome": record.get("outcome"),
-        "final_result": fs.get("final_result"),
-        "prompt": {
-            "version": prompt.get("version"),
-            "system_sha": prompt.get("system_sha"),
-            "task_sha": prompt.get("task_sha"),
-            "system_file": f"prompts/{prompt['system_sha']}.txt" if prompt.get("system_sha") else None,
-            "task_file": f"prompts/{prompt['task_sha']}.txt" if prompt.get("task_sha") else None,
-        },
-        "metrics": metrics,
-        "config": record.get("config"),
-        "code": code,
-        "work_dir": record.get("work_dir"),
-        "steps": steps,
-    }
-
-
 def _slug(text: str) -> str:
     return "".join(c if c.isalnum() or c in "-_" else "-" for c in text.lower()).strip("-") or "run"
 
 
 def _index_entry(run: RunArchive, record: dict, extra: dict | None) -> dict:
-    m = record.get("metrics") or {}
-    out = record.get("outcome") or {}
+    """One index.jsonl line for a format-2 record."""
+    from .history import run_succeeded
+    from .rundiff import prompt_snapshot
+    from .telemetry import operation_times
+
+    times = operation_times(record.get("metrics"))
     cfg = record.get("config") or {}
-    hist = (record.get("final_state") or {}).get("history", [])
-    phases = m.get("phases_s") or {}
+    prompt = record.get("prompt") or {}
+    snap = prompt_snapshot(prompt["system"], prompt["task"] or "") if prompt.get("system") else {}
+    steps = record.get("steps") or []
+    meta = {k: v for k, v in run.meta.items() if k not in ("compound", "spacegroup", "spacegroup_number")}
     entry = {
         "run_id": record.get("run_id"),
         "dir": str(run.dir.relative_to(run.archive)),
         "time": record.get("timestamp"),
         "case": run.case,
         "label": run.label,
-        **run.meta,
+        **meta,
         "backend": cfg.get("backend"),
         "model": record.get("model"),
-        "prompt_version": (record.get("prompt") or {}).get("version"),
-        "system_sha": (record.get("prompt") or {}).get("system_sha"),
-        "task_sha": (record.get("prompt") or {}).get("task_sha"),
-        "code": record.get("code") or {},
+        "prompt_version": snap.get("version"),
+        "system_sha": snap.get("system_sha"),
+        "task_sha": snap.get("task_sha"),
+        "code": {"commit": cfg.get("code_commit"), "uncommitted_changes": cfg.get("uncommitted_changes") or []},
         "completed": record.get("completed"),
-        "band_gap": out.get("band_gap"),
-        "dft_finished": out.get("dft_finished"),
-        "steps": len(hist),
+        "band_gap": (record.get("outcome") or {}).get("band_gap"),
+        "dft_finished": (record.get("outcome") or {}).get("dft_finished"),
+        "steps": record.get("total_steps"),
         "wall_min": round((record.get("runtime") or 0) / 60, 2),
-        "llm_min": round(phases.get("llm", 0) / 60, 2) if phases else None,
-        "qe_min": round(phases.get("qe", phases.get("quantum_espresso", 0)) / 60, 2) if phases else None,
-        "failed_scripts": sum(1 for e in hist if e["tool"] == "run_python"
-                              and isinstance(e.get("result"), dict) and e["result"].get("returncode") not in (0, None)),
-        "refused": sum(1 for e in hist if e["tool"] == "refused"),
-        "config": {k: cfg.get(k) for k in ("decoding", "max_steps", "max_history", "trim_history")},
+        "llm_min": round(times["llm"] / 60, 2) if times else None,
+        "qe_min": round(times["qe"] / 60, 2) if times else None,
+        "total_tokens": record.get("total_tokens"),
+        "failed_scripts": sum(1 for s in steps if s.get("tool") == "run_python" and not run_succeeded(s.get("result"))),
+        "refused": sum(1 for s in steps if s.get("tool") == "refused"),
+        "config": {k: cfg.get(k) for k in ("temperature", "do_sample", "max_steps", "max_history", "trim_history")},
     }
     entry.update(extra or {})
     return entry
 
 
-# ----------------------------------------------------------------------
 def _fmt(v, unit="") -> str:
     if v is None:
         return "-"
@@ -347,8 +261,8 @@ def describe_changes(previous: dict | None, current: dict, archive: Path | None 
         lines.append(f"prompt: version {previous.get('prompt_version') or 'not recorded'} -> {current.get('prompt_version')}")
         if previous.get("task_sha") and previous.get("task_sha") != current.get("task_sha"):
             lines.append("  task text changed")
-        old_sys = load_prompt(archive, previous.get("system_sha")) if archive else None
-        new_sys = load_prompt(archive, current.get("system_sha")) if archive else None
+        old_sys = _system_prompt(archive, previous) if archive else None
+        new_sys = _system_prompt(archive, current) if archive else None
         if old_sys and new_sys and old_sys != new_sys:
             diff = [d for d in difflib.unified_diff(old_sys.splitlines(), new_sys.splitlines(), n=0, lineterm="")
                     if d[:1] in "+-" and not d.startswith(("+++", "---"))]

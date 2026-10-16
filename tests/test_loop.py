@@ -34,20 +34,26 @@ def test_steps_are_timed_and_traced(run_scripted, tmp_path):
         assert s["prompt_tokens"] > 0 and s["completion_tokens"] > 0
     trace = records(tmp_path / "run", "trace.jsonl")
     assert len(trace) == 4 and {t["run_id"] for t in trace} == {result.state.run_id}
-    assert trace[2]["entries"][0]["tool"] == "run_python"
+    assert trace[2]["tool"] == "run_python" and trace[2]["args"] == {"path": "hello.py"}
+    assert trace[2]["result"]["stdout"] == "hi\n" and trace[2]["format_version"] == 2
 
 
 def test_log_record_has_prompt_metrics_and_outcome(run_scripted, tmp_path):
     result, _ = run_scripted(HELLO)
     rec = records(tmp_path / "run")[-1]
-    assert rec["run_id"] == result.state.run_id
-    assert len(rec["prompt"]["version"]) == 12 and rec["prompt"]["system"]
+    assert rec["format_version"] == 2 and rec["run_id"] == result.state.run_id
+    assert rec["prompt"]["system"].startswith("You are") and rec["prompt"]["task"].startswith("\nBuild")
+    assert (rec["compound"], rec["spacegroup"], rec["total_steps"]) == ("Si", "Fd-3m", 4)
+    assert rec["total_tokens"] == sum(s["tokens"] for s in rec["steps"]) > 0
+    assert rec["steps"][1]["args"] == {"path": "hello.py", "content": "print('hi')\n"}
     m = rec["metrics"]
-    assert set(m["phases_s"]) == {"llm", "run_code", "qe", "other_tools"}
-    assert m["llm"]["calls"] == 4 and m["llm"]["prompt_tokens"]["max"] > 0
+    assert set(m["operations"]) == {"llm", "tools", "qe", "code", "total"}
+    assert m["operations"]["llm"]["tokens"] == m["operations"]["total"]["tokens"] > 0
+    assert set(m["phases"]) == {"1_structure", "2_perturbed_structures", "3_pseudopotentials", "4_qe_settings",
+                                "5_qe_inputs", "6_run_qe", "7_plot"}
     assert m["n_tools"] == {"note": 1, "write_file": 1, "run_python": 1, "done": 1}
     assert "band_gap" in rec["outcome"]
-    assert rec["config"]["backend"] == "custom"
+    assert rec["config"]["backend"] == "custom" and "temperature" in rec["config"] and "code_commit" in rec["config"]
     assert result.metrics == m
 
 
@@ -107,8 +113,8 @@ def test_mocked_qe_reports_stage_timings(run_scripted):
         {"tool": "run_espresso_workflow", "args": {"directory": "calculations/000"}},
         {"tool": "done", "args": {"summary": "x"}},
     ])
-    assert result.metrics["qe_stages_s"] == {"scf": 1.0, "bands_scf": 2.0, "bands_post": 0.5}
-    assert "qe" in result.metrics["phases_s"] and result.metrics["n_tools"]["run_espresso_workflow"] == 1
+    assert result.metrics["n_tools"]["run_espresso_workflow"] == 1
+    assert result.metrics["qe_stages"] == {"scf": 1.0, "bands_scf": 2.0, "bands_post": 0.5}
 
 
 def test_progress_observer_sees_every_step(run_scripted):

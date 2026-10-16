@@ -320,25 +320,37 @@ is read from a tool result or a file, never generated. In Python, the same summa
 
 ## Run records
 
-Each run appends one JSON record to `<work_dir>/log.jsonl`. Alongside the full history, the
-record holds:
+Each run appends one JSON record to `<work_dir>/log.jsonl`, and the same record (with very
+long tool results cut) is kept as `record.json` in the run's archive folder. The format is
+versioned (`format_version`, now 2; see `chem_llm/runlog.py`). Older records are upgraded when
+read, so replay, `--summarize-log` and `--diff-runs` accept every log.
 
 | field | contents |
 |---|---|
-| `run_id` | unique id, also on every line of the trace |
-| `config` | backend, model, decoding, history settings, QE launch command |
-| `prompt` | the full system prompt, and `version`, a hash of the system prompt and task |
-| `metrics` | `wall_s`; `phases_s` (`llm`, `run_code`, `qe`, `other_tools`); `n_tools` (calls per tool); model calls, tokens and tokens/s; seconds per QE stage and per workflow STEP |
+| `format_version`, `run_id`, `timestamp` | record format, unique id (also on every `trace.jsonl` line), finish time |
+| `compound`, `spacegroup`, `spacegroup_number` | what was run (the number only when it was given) |
+| `model`, `work_dir`, `completed` | the model, where it ran, whether the agent called `done` |
+| `total_steps`, `runtime`, `total_tokens` | agent steps, wall-clock seconds, prompt + completion tokens |
 | `outcome` | band gap, SCF convergence, electron count and plot, read back from disk |
-| `code` | the git commit the package ran from, and `uncommitted_changes`: package files edited but not committed at run time (so the code was not exactly that commit) |
-| `final_state.steps` | one record per step: model seconds, tool seconds, prompt and completion tokens |
+| `prompt` | `{system, task}`: the raw system prompt and task text |
+| `steps` | every step: `phase` (workflow STEP), `tool`, full `args`, `result`, `llm_time`, `tool_time`, `tokens` |
+| `config` | backend, model, `temperature`, `do_sample`, `max_new_tokens`, step/history limits, QE launch, tools, `code_commit`, `uncommitted_changes` |
+| `metrics` | `operations` and `phases` (each `{time, tokens}`), `n_tools`, `qe_stages` -- below |
 
-`<work_dir>/trace.jsonl` gets the same per-step records as each step finishes, so a run
-killed mid-way (for example by an expired allocation) still leaves its trajectory.
+`metrics.operations` splits the run into `llm` (the model generating), `tools` (Materials
+Project, pseudopotentials, doc search, files, notes, k-path, validation), `qe`, `code` (the
+agent's scripts) and `total`. Every token is spent by the model, so `llm.tokens` is the run's
+total. The tokens listed under `tools`, `qe` and `code` are those of the model calls that chose
+those calls. `metrics.phases` gives the same `{time, tokens}` per workflow STEP 1-7 of the task.
+Each step is attributed by what it did, and a doc search counts toward the step it prepares.
 
-`chem-llm --diff-runs A B` puts two runs side by side: outcome, steps, time per phase,
+`<work_dir>/trace.jsonl` gets each step (same fields as `steps`, plus `run_id`) as it
+finishes, so a run killed mid-way (for example by an expired allocation) still leaves its
+trajectory.
+
+`chem-llm --diff-runs A B` puts two runs side by side: outcome, steps, time per operation,
 tokens, tool calls, the settings that differ, and a unified diff of the system prompt and
-task. Runs with the same prompt `version` saw identical instructions.
+task.
 
 ### Run archive
 
@@ -348,15 +360,12 @@ under `paths.archive_dir` (default `<work_root>/_archive`; this repo's `config.y
 
 ```
 <archive>/index.jsonl                  one line per run, ever
-<archive>/prompts/<sha>.txt            each distinct system prompt and task text, once
 <archive>/runs/<date>_<time>_<case>/
     progress.txt    the readable live stream, written as the run goes
     summary.txt     the run summary
     changes.txt     what changed since the previous run of the same case: commits in
                     between, system prompt diff, settings, result deltas
-    record.json     the run: outcome, total tokens, metrics, settings, prompt version (with the
-                    paths of its prompt files), git commit, and every step -- the tool
-                    call with its full arguments and result, model and tool seconds, tokens
+    record.json     the run record (same fields as log.jsonl, long tool results cut)
     checks.json     benchmark checks (benchmark runs)
 ```
 

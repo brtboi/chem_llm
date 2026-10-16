@@ -48,8 +48,11 @@ def parse_run_spec(spec: str) -> tuple[Path, int]:
 def _load(spec: str) -> dict:
     from .report import load_log_entry
 
+    from .runlog import upgrade
+
     path, index = parse_run_spec(spec)
     entry, work_dir = load_log_entry(path, index)
+    entry = dict(upgrade(entry))
     entry["_label"] = f"{path}@{index}"
     entry["_work_dir"] = work_dir
     return entry
@@ -70,24 +73,27 @@ def _numbers(entry: dict) -> dict:
     """Comparable figures for one run; None where the run did not record them."""
     from .history import run_succeeded
 
-    history = (entry.get("final_state") or {}).get("history", [])
+    from .runlog import history_of
+
+    history = history_of(entry)
     calls = Counter(e["tool"] for e in history)
+    from .telemetry import operation_times
+
     m = entry.get("metrics") or {}
-    phases = m.get("phases_s") or {}
-    llm = m.get("llm") or {}
+    times = operation_times(m)
+    tokens = entry.get("total_tokens")
     outcome = entry.get("outcome") or {}
+    minutes = lambda k: round(times[k] / 60, 1) if times.get(k) is not None else None
     return {
         "completed": entry.get("completed"),
         "band gap (eV)": outcome.get("band_gap"),
         "steps": len(history),
         "wall time (min)": round(entry["runtime"] / 60, 1) if entry.get("runtime") else None,
-        "model generation (min)": round(phases["llm"] / 60, 1) if "llm" in phases else None,
-        "Quantum ESPRESSO (min)": round(phases.get("qe", phases.get("quantum_espresso", 0)) / 60, 1) if phases else None,
-        "agent scripts (min)": round(phases.get("run_code", phases.get("agent_scripts", 0)) / 60, 1) if phases else None,
-        "s per model call": (llm.get("seconds_per_call") or {}).get("mean"),
-        "prompt tokens (mean)": (llm.get("prompt_tokens") or {}).get("mean"),
-        "prompt tokens (max)": (llm.get("prompt_tokens") or {}).get("max"),
-        "completion tokens/s": llm.get("completion_tokens_per_s"),
+        "model generation (min)": minutes("llm"),
+        "tool calls (min)": minutes("tools"),
+        "Quantum ESPRESSO (min)": minutes("qe"),
+        "agent scripts (min)": minutes("code"),
+        "total tokens": tokens,
         "failed run_python": sum(1 for e in history if e["tool"] == "run_python" and not run_succeeded(e.get("result"))),
         "refused calls": calls.get("refused", 0),
         "unparseable replies": calls.get("parse_error", 0),
@@ -140,8 +146,10 @@ def diff_runs(spec_a: str, spec_b: str) -> str:
              f"A: {a['_label']}  ({a.get('timestamp', '?')[:19]}, {a.get('model', '?')})",
              f"B: {b['_label']}  ({b.get('timestamp', '?')[:19]}, {b.get('model', '?')})"]
     pa, pb = a.get("prompt") or {}, b.get("prompt") or {}
-    lines.append(f"prompt version: A {pa.get('version', 'not recorded')}, B {pb.get('version', 'not recorded')}"
-                 + ("  (same prompt)" if pa.get("version") and pa.get("version") == pb.get("version") else ""))
+    va = prompt_snapshot(pa["system"], pa.get("task") or "")["version"] if pa.get("system") else None
+    vb = prompt_snapshot(pb["system"], pb.get("task") or "")["version"] if pb.get("system") else None
+    lines.append(f"prompt version: A {va or 'not recorded'}, B {vb or 'not recorded'}"
+                 + ("  (same prompt)" if va and va == vb else ""))
 
     lines += ["", "Outcome and cost (* = differs)"]
     na, nb = _numbers(a), _numbers(b)
@@ -149,9 +157,9 @@ def diff_runs(spec_a: str, spec_b: str) -> str:
 
     ta, tb = _tool_counts(a), _tool_counts(b)
     if not ta:
-        ta = Counter(e["tool"] for e in (a.get("final_state") or {}).get("history", []))
+        ta = Counter(s["tool"] for s in a.get("steps") or [])
     if not tb:
-        tb = Counter(e["tool"] for e in (b.get("final_state") or {}).get("history", []))
+        tb = Counter(s["tool"] for s in b.get("steps") or [])
     lines += ["", "Tool calls"]
     lines += _table([(t, ta.get(t, 0), tb.get(t, 0)) for t in sorted(set(ta) | set(tb))])
 
@@ -167,5 +175,5 @@ def diff_runs(spec_a: str, spec_b: str) -> str:
 
     lines += ["", "Prompt"]
     lines += _text_diff(pa.get("system"), pb.get("system"), "system prompt")
-    lines += _text_diff((a.get("final_state") or {}).get("task"), (b.get("final_state") or {}).get("task"), "task")
+    lines += _text_diff(pa.get("task"), pb.get("task"), "task")
     return "\n".join(lines) + "\n"

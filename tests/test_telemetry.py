@@ -12,36 +12,40 @@ def _state(entries, steps):
     return s
 
 
-def test_phases_tools_and_tokens():
+def test_operations_phases_and_tool_counts():
     s = _state(
-        [("generate_cif", {}, {}), ("run_python", {"path": "a.py"}, {"returncode": 0}),
+        [("generate_cif", {}, {}), ("run_python", {"path": "generate_structures.py"}, {"returncode": 0}),
+         ("search_docs", {"query": "x"}, {}),
          ("run_espresso_workflow", {"directory": "c"}, {"success": True, "timings_s": {"scf": 20.0, "bands_scf": 70.0}})],
-        [{"step": 1, "tool": "generate_cif", "llm_s": 40.0, "tool_s": 5.0, "prompt_tokens": 9000, "completion_tokens": 50, "history": [1], "t_end": 45},
-         {"step": 2, "tool": "run_python", "llm_s": 50.0, "tool_s": 10.0, "prompt_tokens": 11000, "completion_tokens": 450, "history": [2], "t_end": 105},
-         {"step": 3, "tool": "run_espresso_workflow", "llm_s": 10.0, "tool_s": 90.0, "prompt_tokens": 12000, "completion_tokens": 0, "history": [3], "t_end": 205}],
+        [{"step": 1, "tool": "generate_cif", "llm_s": 40.0, "tool_s": 5.0, "prompt_tokens": 9000, "completion_tokens": 50, "history": [1]},
+         {"step": 2, "tool": "run_python", "llm_s": 50.0, "tool_s": 10.0, "prompt_tokens": 11000, "completion_tokens": 450, "history": [2]},
+         {"step": 3, "tool": "search_docs", "llm_s": 5.0, "tool_s": 2.0, "prompt_tokens": 11500, "completion_tokens": 20, "history": [3]},
+         {"step": 4, "tool": "run_espresso_workflow", "llm_s": 10.0, "tool_s": 90.0, "prompt_tokens": 12000, "completion_tokens": 0, "history": [4]}],
     )
-    m = run_metrics(s, wall_s=210.0, model_load_s=120.0)
-    assert m["phases_s"] == {"llm": 100.0, "run_code": 10.0, "qe": 90.0, "other_tools": 5.0}
-    assert m["llm"]["prompt_tokens"] == {"total": 32000, "mean": 10667, "max": 12000}
-    assert m["llm"]["completion_tokens_per_s"] == 5.0
-    assert m["qe_stages_s"] == {"scf": 20.0, "bands_scf": 70.0}
-    assert m["n_tools"] == {"generate_cif": 1, "run_python": 1, "run_espresso_workflow": 1}
+    m = run_metrics(s, wall_s=215.0, model_load_s=120.0)
+    ops = m["operations"]
+    assert ops["llm"] == {"time": 105.0, "tokens": 44020}
+    assert ops["tools"] == {"time": 7.0, "tokens": 9050 + 11520}
+    assert ops["code"] == {"time": 10.0, "tokens": 11450}
+    assert ops["qe"] == {"time": 90.0, "tokens": 12000}
+    assert ops["total"] == {"time": 215.0, "tokens": 44020}
+    # the doc search belongs to the step it prepares (QE, STEP 6)
+    assert m["phases"]["1_structure"] == {"time": 45.0, "tokens": 9050}
+    assert m["phases"]["2_perturbed_structures"] == {"time": 60.0, "tokens": 11450}
+    assert m["phases"]["6_run_qe"] == {"time": 107.0, "tokens": 23520}
+    assert m["n_tools"] == {"generate_cif": 1, "run_python": 1, "search_docs": 1, "run_espresso_workflow": 1}
+    assert m["qe_stages"] == {"scf": 20.0, "bands_scf": 70.0}
     text = "\n".join(format_timing(m))
-    assert "model generation" in text and "Quantum ESPRESSO" in text and "loading the model" in text
+    assert "model generation" in text and "Quantum ESPRESSO" in text and "1 fetch + reduce structure" in text
 
 
-def test_workflow_stages_from_checkpoint_notes():
-    s = _state(
-        [("generate_cif", {}, {}), ("note", {"text": "STEP 1 done: fetched mp-149"}, "noted"),
-         ("run_python", {"path": "g.py"}, {"returncode": 0}),
-         ("note", {"text": "STEP 2 checkpoint: 51 structures verified"}, "noted"),
-         ("note", {"text": "STEP 1 done again (should be ignored)"}, "noted")],
-        [{"step": i, "tool": t, "llm_s": 1.0, "tool_s": 0.0, "history": [i], "t_end": 10.0 * i}
-         for i, t in enumerate(["generate_cif", "note", "run_python", "note", "note"], 1)],
-    )
-    stages = run_metrics(s, wall_s=50.0)["workflow_stages"]
-    assert [(st["stage"], st["duration_s"], st["ended_at_step"]) for st in stages] == [(1, 20.0, 2), (2, 20.0, 4)]
-    assert stages[0]["title"].startswith("Fetch the base structure")
+def test_notes_name_their_workflow_step():
+    from chem_llm.telemetry import assign_phases
+
+    s = _state([("note", {"text": "STEP 4 decisions: ecutwfc ..."}, "noted"), ("read_file", {"path": "x.txt"}, {}),
+                ("write_file", {"path": "plot_bands.py"}, {})],
+               [{"step": i, "history": [i]} for i in (1, 2, 3)])
+    assert assign_phases(s.history, s.steps) == [4, 7, 7]
 
 
 def test_old_runs_without_timing():

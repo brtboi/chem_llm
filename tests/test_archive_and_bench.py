@@ -14,17 +14,19 @@ def test_every_run_is_archived(run_scripted, settings):
     assert (d / "summary.txt").read_text().startswith("chem_llm run summary")
     assert "First recorded run of Si" in (d / "changes.txt").read_text()
     record = json.loads((d / "record.json").read_text())
-    assert "final_state" not in record and "system" not in record["prompt"] and record["label"] == "smoke"
+    assert list(record) == ["format_version", "run_id", "timestamp", "compound", "spacegroup", "model", "work_dir",
+                            "completed", "total_steps", "runtime", "total_tokens", "outcome", "prompt", "steps",
+                            "config", "metrics"]
+    assert (record["compound"], record["spacegroup"], record["total_steps"]) == ("Si", "Fd-3m", 4)
+    assert record["prompt"]["system"].startswith("You are") and record["prompt"]["task"]
     assert [s["tool"] for s in record["steps"]] == ["note", "write_file", "run_python", "done"]
     assert record["steps"][1]["args"] == {"path": "hello.py", "content": "print('hi')\n"}
-    assert record["steps"][2]["result"]["stdout"] == "hi\n" and "history" not in record["steps"][2]
-    assert record["total_tokens"] == record["prompt_tokens"] + record["completion_tokens"] > 0
-    assert "meta" not in record and "dirty" not in record["code"]
-    for key in ("system_file", "task_file"):
-        assert (settings.archive_root / record["prompt"][key]).exists()
+    assert record["steps"][2]["result"]["stdout"] == "hi\n"
+    assert record["total_tokens"] == sum(s["tokens"] for s in record["steps"]) > 0
+    assert set(record["metrics"]) == {"operations", "phases", "n_tools", "qe_stages"}
     [entry] = read_index(settings.archive_root)
     assert entry["case"] == "Si" and entry["steps"] == 4 and entry["run_id"] == result.state.run_id
-    assert (settings.archive_root / "prompts" / f"{entry['system_sha']}.txt").exists()
+    assert entry["prompt_version"] and entry["total_tokens"] > 0
     assert (d / "scripts" / "hello.py").read_text() == "print('hi')\n"
 
 

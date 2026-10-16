@@ -469,12 +469,17 @@ def _section_agent(history, config, model, completed, runtime_seconds, by_tool) 
     cfg = config or {}
     backend = cfg.get("backend") or ("qwen" if model and "qwen" in model.lower() else "claude" if model and "claude" in model.lower() else None)
     where = {"qwen": "local open-weights model via transformers, bf16, sharded across the node's GPUs",
+             "vllm": "local open-weights model served by vLLM",
              "claude": "Anthropic API"}.get(backend, "")
     _bullet(lines, f"base model: {model or cfg.get('model', '?')}" + (f" ({where})" if where else ""))
-    if cfg.get("decoding"):
-        _bullet(lines, "decoding: " + ", ".join(f"{k} {v}" for k, v in cfg["decoding"].items())
+    from .runlog import flat_config
+
+    cfg = flat_config(cfg)
+    sampling = {k: cfg[k] for k in ("temperature", "do_sample", "max_new_tokens", "max_tokens", "effort") if k in cfg}
+    if sampling:
+        _bullet(lines, "sampling: " + ", ".join(f"{k} {v}" for k, v in sampling.items())
                        + ("; greedy decoding is deterministic, so a rerun of the same prompt repeats the same trajectory"
-                          if cfg["decoding"].get("do_sample") is False else ""))
+                          if cfg.get("do_sample") is False else ""))
     calls = Counter(e["tool"] for e in history)
     actions = sum(n for t, n in calls.items() if t not in ("refused", "parse_error", "api_error"))
     _bullet(lines, f"run: {'completed' if completed else 'did NOT complete'} in {len(history)} steps"
@@ -693,8 +698,10 @@ def load_log_entry(path: str | Path, index: int = -1) -> tuple[dict, Path]:
 
 def summarize_log(path: str | Path, index: int = -1) -> str:
     """Summary of a recorded run: `path` is a log.jsonl or a work dir."""
+    from .runlog import final_result_of, history_of, upgrade
+
     entry, work_dir = load_log_entry(path, index)
-    fs = entry.get("final_state") or {}
+    entry = upgrade(entry)
     finished_at = None
     if entry.get("timestamp"):
         from datetime import datetime
@@ -703,9 +710,9 @@ def summarize_log(path: str | Path, index: int = -1) -> str:
         except ValueError:
             pass
     return summarize_run(
-        fs.get("history", []),
+        history_of(entry),
         work_dir,
-        final_result=fs.get("final_result"),
+        final_result=final_result_of(entry),
         completed=bool(entry.get("completed")),
         runtime_seconds=entry.get("runtime"),
         model=entry.get("model"),

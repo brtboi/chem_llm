@@ -1,9 +1,9 @@
 """Reproduce a past agent run by re-executing its recorded tool calls, in
 order, without asking an LLM to generate them.
 
-Every run_agent() call appends one line to a log.jsonl -- a JSON object
-whose `final_state.history` is the ordered list of `{step, tool, args,
-result}` calls that run made. `replay_run` reads that list out of a chosen
+Every run_agent() call appends one line to a log.jsonl -- a run record
+(chem_llm.runlog, any format version) whose `steps` hold the ordered tool
+calls that run made. `replay_run` reads that list out of a chosen
 run and drives it back through `run_step_loop` (the same loop `run_agent`
 uses), pulling `{tool, args}` from the recording instead of the model. Tools
 are executed for real, so this reissues the same generate_cif/run_python/
@@ -56,8 +56,8 @@ def load_run(log_file: Path, index: int) -> dict:
 
 def make_replay_step_source(recorded_history: list[dict], verbose: bool = True):
     """Build a `next_tool_call(state, step)` source for `run_step_loop` that
-    replays `recorded_history` (an `AgentState.history`-shaped list, pulled
-    from a past run's `final_state.history`) instead of generating calls."""
+    replays `recorded_history` (a [{step, tool, args, result}] list, from
+    chem_llm.runlog.history_of) instead of generating calls."""
 
     def next_tool_call(state: AgentState, step: int):
         if step > len(recorded_history):
@@ -76,6 +76,14 @@ def make_replay_step_source(recorded_history: list[dict], verbose: bool = True):
             state.add_note(f"Step {step}: failed to parse model output as JSON (replayed): {result}")
             state.log("parse_error", args, result)
             return None
+        if tool == "api_error":
+            state.log("api_error", args, result)  # nothing to re-execute
+            return None
+        if tool == "refused":
+            # the harness refused this call; reissue it so the replay meets
+            # the same refusal
+            args = dict(args)
+            return {"tool": args.pop("tool", "note"), "args": args}
 
         return {"tool": tool, "args": args}
 
@@ -93,9 +101,11 @@ def replay_run(
 ) -> AgentState:
     """Re-execute one recorded run's tool calls, in `work_dir`, and append
     the result to `work_dir / "log.jsonl"`."""
-    final_state = entry.get("final_state", {})
-    task = final_state.get("task", "")
-    recorded_history = final_state.get("history", [])
+    from .runlog import history_of, upgrade
+
+    record = upgrade(entry)
+    task = (record.get("prompt") or {}).get("task") or ""
+    recorded_history = history_of(record)
 
     prepare_work_dir(work_dir, clear_dir, load_path)
     log_file = work_dir / "log.jsonl"

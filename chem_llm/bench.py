@@ -218,9 +218,14 @@ def compare_to_reference(ref: dict, fp: dict | None, tol: float | None = None) -
 
 def promote(run_dir: Path, tolerance: float = 0.15) -> Path:
     """Make a validated run the golden reference for its case."""
+    from .archive import read_index
+
     run_dir = Path(run_dir).resolve()
     record = json.loads((run_dir / "record.json").read_text())
-    name = record["case"]
+    rel = str(run_dir.relative_to(BENCH))
+    name = next((e["case"] for e in read_index(BENCH) if e.get("dir") == rel), None) or record.get("case")
+    if name is None:
+        raise SystemExit(f"{run_dir}: not in bench/index.jsonl, so its case is unknown")
     _, cases = load_suites()
     case = cases[name]
     fp = band_fingerprint(Path(record["work_dir"]), bool((case.get("expect") or {}).get("metal")))

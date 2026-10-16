@@ -722,27 +722,22 @@ def prepare_work_dir(work_dir: Path, clear_dir: bool = False, load_path=None, lo
 
 
 def build_log_entry(state: AgentState, start_time: float, work_dir: Path, clear_dir: bool, load_path, model_name: str, extra: dict | None = None) -> dict:
-    from .rundiff import prompt_snapshot
-    from .telemetry import run_metrics
+    """The run's log.jsonl record, format 2 (chem_llm.runlog). `extra` may
+    carry config, compound / spacegroup / spacegroup_number, model_load_s,
+    and replayed_from."""
+    from .runlog import build_record
 
-    runtime = time.perf_counter() - start_time
-    entry = {
-        "run_id": state.run_id,
-        "timestamp": datetime.now().isoformat(),
-        "model": model_name,
-        "work_dir": str(work_dir),
-        "clear_dir": clear_dir,
-        "load_path": bool(load_path),
-        "runtime": runtime,
-        "num_steps": len(state.history),
-        "completed": state.done,
-        "prompt": prompt_snapshot(SYSTEM_PROMPT_TEMPLATE, state.task),
-        "metrics": run_metrics(state, runtime, model_load_s=(extra or {}).get("model_load_s")),
-        "final_state": state.to_dict(),
-    }
-    if extra:
-        entry.update(extra)
-    return entry
+    extra = dict(extra or {})
+    record = build_record(
+        run_id=state.run_id, timestamp=datetime.now().isoformat(),
+        history=state.history, timing=state.steps, task=state.task, system_prompt=SYSTEM_PROMPT_TEMPLATE,
+        completed=state.done, runtime=time.perf_counter() - start_time, model=model_name, work_dir=work_dir,
+        config=extra.pop("config", None), compound=extra.pop("compound", None),
+        spacegroup=extra.pop("spacegroup", None), spacegroup_number=extra.pop("spacegroup_number", None),
+        model_load_s=extra.pop("model_load_s", None),
+    )
+    record.update(extra)
+    return record
 
 
 def append_log(log_file: Path, entry: dict) -> None:
