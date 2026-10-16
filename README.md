@@ -381,6 +381,7 @@ chem-llm-bench run core --parallel 6 --label "occupations rule v2"
 chem-llm-bench run zno gaas                           # single cases
 chem-llm-bench report                                 # regenerate bench/RESULTS.md
 chem-llm-bench promote bench/runs/<run>               # make a validated run the golden reference
+python scripts/plot_bench.py                          # charts of time and tokens -> bench/visualizations/
 ```
 
 - **Cases.** [`bench/suites.yaml`](bench/suites.yaml) lists each compound, what it tests and

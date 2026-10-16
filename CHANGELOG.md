@@ -149,6 +149,25 @@ step through in-process `transformers`.
   archived records were rebuilt in format 2. Fixed: two runs of one case started in the same
   second shared an archive folder.
 
+- *Visualizations (2026-10-16):* `scripts/plot_bench.py` writes PDFs and a summary to
+  `bench/visualizations/`:
+  - where each run's time and tokens go, by operation and by workflow step;
+  - the five test34 compounds, last week against sweep 8;
+  - agent steps for every compound in every sweep;
+  - the prompt growing over a run.
+
+  Last week's runs predate token and timing logs, so their tokens are reconstructed by
+  replaying their tool calls with that commit's exact system prompt (99.9% of the logged
+  count when checked on sweep-8 runs). Their time split is estimated from progress-log
+  timestamps.
+
+  Same five compounds, last week → sweep 8:
+  - steps fell 25–47%, tokens 26–61%, and wall time 3–7× (e.g. GaAs 80 → 11 min);
+  - the model is about 79% of wall time now, as it was before, but each call is far
+    faster;
+  - in the latest sweep the prompt-writing step (STEP 5, QE inputs) and plotting
+    (STEP 7) take the most tokens.
+
 **Still open**
 - The extended and stretch suites were run on the same prompt they are scored with. A
   fresh set of held-out compounds would be a fairer test of generalization.
