@@ -126,7 +126,7 @@ step through in-process `transformers`.
   start and passed at 0.390 eV (0cebfb2). This is the first failure that came purely from
   sampling variance, which is why rules that matter now also get a deterministic check.
 
-- *Run records, simplified (2026-10-16):*
+- *Run records, simplified (2026-10-16; superseded the same day by format 2, below):*
   - Each archived `record.json` now holds every step's tool call (full arguments and
     result), so you can see exactly what the agent called with what.
   - Total tokens are at the top level, and `prompt.system_file` / `task_file` point to the
@@ -159,11 +159,14 @@ step through in-process `transformers`.
   Last week's runs predate token and timing logs, so their tokens are reconstructed by
   replaying their tool calls with that commit's exact system prompt (99.9% of the logged
   count when checked on sweep-8 runs). Their time split is estimated from progress-log
-  timestamps.
+  timestamps (checked on all 21 sweep-8 runs: model time within 6% median, 14% worst).
 
-  Same five compounds, last week → sweep 8:
-  - steps fell 25–47%, tokens 26–61%, and wall time 3–7× (e.g. GaAs 80 → 11 min);
-  - the model is about 79% of wall time now, as it was before, but each call is far
+  Same five compounds, last week → sweep 8 (CsPbBr3: the passing follow-up rerun, since the
+  failed sweep-8 run was cheap only because it skipped spin-orbit):
+  - steps fell 10–30%, tokens 1–61%, and wall time 3.6–7× (e.g. GaAs 80 → 11 min);
+  - CsPbBr3 gained least: 58 → 52 steps and about the same tokens (1.41 → 1.39 M); its
+    59 → 16 min is mostly faster model calls and QE (17 → 4 min);
+  - the model's share of wall time fell from about 90% to 79%, and each call is far
     faster;
   - in the latest sweep the prompt-writing step (STEP 5, QE inputs) and plotting
     (STEP 7) take the most tokens.
@@ -200,7 +203,7 @@ step through in-process `transformers`.
 ## Week of 2026-09-28
 
 - **Context management:** `trim_history` drops dead material from the prompt (superseded
-  files, resolved failures, duplicate notes), cutting the median prompt by about 19%.
+  files, resolved failures, duplicate notes), cutting the median prompt by 16% (worst run 19%).
   `read_file` can read a line range.
 - **Harness guards:** refuse back-to-back notes and repeated identical doc searches.
 - `get_pseudopotential` reports facts parsed from the UPF file itself (valence, relativistic

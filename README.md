@@ -99,12 +99,15 @@ Precedence is **keyword argument > `Settings` field > environment / `.env` > def
 
 `Settings` has three nested sections:
 
-- `qe` — `QESettings`: `pw_x`, `bands_x`, `module`, `mpi_prefix`, `omp_num_threads`, `timeout_seconds`
-- `model` — `ModelSettings`: `backend`, `qwen_model`, `max_new_tokens`, `temperature`, `do_sample`, and `claude_*`
+- `qe` — `QESettings`: `pw_x`, `bands_x`, `module`, `mpi_prefix`, `pw_args`, `omp_num_threads`,
+  `timeout_seconds`, and for several agents sharing a node `max_concurrent`, `gpu_ids`,
+  `single_gpu_prefix`
+- `model` — `ModelSettings`: `backend`, `qwen_model`, `max_new_tokens`, `temperature`, `do_sample`,
+  `vllm_url`, and `claude_*`
 - `agent` — `AgentSettings`: `max_steps`, `max_history`, `trim_history`, `read_max_chars`
 
 At the top level it holds the credentials (`mp_api_key`, `hf_token`, `anthropic_api_key`) and
-the paths `hf_home`, `doc_index_dir` and `work_root`.
+the paths `hf_home`, `doc_index_dir`, `work_root` and `archive_dir`.
 
 **History trimming.** The prompt shows the agent its last `max_history` tool calls. With
 `trim_history=True` (the default) it drops the provably dead parts of those calls:
@@ -209,8 +212,19 @@ chem-llm TiO2 P4_2/mnm --backend vllm
 (On NERSC, put uv's state on scratch first, `export UV_CACHE_DIR=$PSCRATCH/.uv-cache
 UV_PYTHON_INSTALL_DIR=$PSCRATCH/.uv-python`: the home filesystem refuses file locks. The
 serve script points vLLM's caches at scratch for the same reason.) The server takes 75% of
-each GPU's memory by default, which leaves room for Quantum ESPRESSO on the same GPUs. Set
-`GPU_MEM` to change that, and `MODEL`, `PORT` and `TP` for the other knobs. Set
+each GPU's memory by default (`GPU_MEM`; `MODEL`, `PORT` and `TP` are the other knobs).
+
+Don't let Quantum ESPRESSO share a GPU with vLLM or with another QE job: time-slicing made
+jobs more than 10× slower. On a node with four 80 GB GPUs, serve on two and give QE the other
+two, one job per GPU:
+
+```bash
+CUDA_VISIBLE_DEVICES=0,1 TP=2 GPU_MEM=0.90 scripts/serve_vllm.sh > vllm.log 2>&1 &
+```
+```yaml
+quantum_espresso:
+  gpu_ids: [2, 3]
+``` Set
 `model.vllm_url` in `config.yaml` (or `--vllm-url`) if the server is not on
 `localhost:8000`.
 
@@ -388,7 +402,8 @@ python scripts/plot_bench.py                          # charts of time and token
   the expected physics: a gap range or metal, spin-orbit required or forbidden, magnetic
   moment.
 - **Running.** Cases run in parallel processes against one vLLM server. Quantum ESPRESSO
-  takes turns on the GPUs through a node-local lock, and the waiting is timed separately.
+  jobs take turns through a node-local lock: one GPU each with `qe.gpu_ids`, otherwise
+  `qe.max_concurrent` jobs at once on all GPUs. The waiting is timed separately.
 - **Scoring.** Each run is scored from the files it produced, never from the agent's own
   summary:
   - the agent finished and all QE stages finished with a converged SCF;
@@ -426,8 +441,14 @@ chem_llm/            the package
   testing.py         scripted model and tool mocks for running the loop without a GPU
   archive.py         the permanent per-run record and "what changed since last time"
   bench.py           chem-llm-bench: suites, checks, parallel runner, RESULTS.md, LangSmith
+  state.py, history.py  agent state, the prompt's history and trim_history
+  runlog.py          run record format (versioned; upgrades older logs)
+  progress.py, report.py  --pretty-progress stream, run summary
+  kpath.py           standard k-path, scf_kmesh, plot_axis (k-path shared by QE input and plot)
+  kpath_check.py     checks a bands k-path: endpoints are high-symmetry points, all labelled
+  qe_output.py       read_pw_out, band_edges: pw.out parsing for the agent's scripts
   tools/             the agent's tools: files, Python, QE, Materials Project, pseudopotentials,
-                     docs search, QE input validation
+                     k-path, docs search, QE input validation
   retrieval/         documentation scraping, chunking, BM25 + embedding search, reranking
   main.py, replay.py command-line entry points
   config.py          legacy module constants, used by the sandbox run scripts
@@ -436,7 +457,8 @@ config.example.yaml  every setting, documented
 bench/               suites.yaml, golden references, run archive, index.jsonl, RESULTS.md
 CHANGELOG.md         weekly progress log
 tests/               pytest suite (scripted model, QE mocked; a live vLLM test is skipped without a server)
-scripts/             serve_vllm.sh, build_doc_index.py, build_qe_namelists.py (regenerates tools/qe_namelists.py)
+scripts/             serve_vllm.sh, build_doc_index.py, build_qe_namelists.py (regenerates tools/qe_namelists.py),
+                     plot_bench.py (bench/visualizations/)
 sandbox/             past experiment runs and their run_test*.py drivers
 logs/                historical run logs
 example/, deepseudopot_example/, deepseudopot_agent.ipynb, DEEPSEUDOPOT_HANDOFF.md
