@@ -467,8 +467,9 @@ def _section_agent(history, config, model, completed, runtime_seconds, by_tool) 
 
     lines = ["", "3. Agent and harness (for CS / LLM engineers)"]
     cfg = config or {}
-    backend = cfg.get("backend") or ("qwen" if model and "qwen" in model.lower() else "claude" if model and "claude" in model.lower() else None)
-    where = {"qwen": "local open-weights model via transformers, bf16, sharded across the node's GPUs",
+    backend = cfg.get("backend") or ("huggingface" if model and "qwen" in model.lower() else "claude" if model and "claude" in model.lower() else None)
+    backend = {"qwen": "huggingface"}.get(backend, backend)
+    where = {"huggingface": "local open-weights model via transformers, bf16, sharded across the node's GPUs",
              "vllm": "local open-weights model served by vLLM",
              "claude": "Anthropic API"}.get(backend, "")
     _bullet(lines, f"base model: {model or cfg.get('model', '?')}" + (f" ({where})" if where else ""))

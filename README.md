@@ -61,7 +61,7 @@ Perlmutter. `DFTAgent.default_settings()` returns them as an editable object.
 
 | | default |
 |---|---|
-| model | `Qwen/Qwen3.8-27B`, local (`backend="qwen"`) |
+| model | `Qwen/Qwen3.8-27B`, local (`backend="huggingface"`, in-process transformers) |
 | generation | `max_new_tokens=5000`, sampled at `temperature=0.3` (`do_sample=True`); set `do_sample=False` for reproducible greedy runs |
 | agent loop | `max_steps=80`, `max_history=32`, `trim_history=True`, `read_max_chars=10000` |
 | Quantum ESPRESSO | `pw.x` / `bands.x`, `OMP_NUM_THREADS=1`, 2 h timeout per step |
@@ -103,7 +103,7 @@ Precedence is **keyword argument > `Settings` field > environment / `.env` > def
   `timeout_seconds`, and for several agents sharing a node `max_concurrent`, `gpu_ids`,
   `single_gpu_prefix`
 - `model` — `ModelSettings`: `backend`, `qwen_model`, `max_new_tokens`, `temperature`, `do_sample`,
-  `vllm_url`, and `claude_*`
+  `vllm_url`, `vllm_executable`, and `claude_*`
 - `agent` — `AgentSettings`: `max_steps`, `max_history`, `trim_history`, `read_max_chars`
 
 At the top level it holds the credentials (`mp_api_key`, `hf_token`, `anthropic_api_key`) and
@@ -190,7 +190,7 @@ text generation differs between backends:
 
 | backend | what generates | cost |
 |---|---|---|
-| `qwen` (default) | the local model, loaded into this process with transformers | free; ~50 s per step for the 27B model |
+| `huggingface` (default; `qwen` is the old name) | the local model, loaded into this process with transformers | free; ~50 s per step for the 27B model |
 | `vllm` | the same local model on a [vLLM](https://docs.vllm.ai) server | free; several times faster per step |
 | `claude` | the Anthropic API (`pip install "chem-llm[claude]"`, `ANTHROPIC_API_KEY`) | **bills every step**; a run is 40–60 calls |
 
@@ -228,6 +228,13 @@ quantum_espresso:
 `model.vllm_url` in `config.yaml` (or `--vllm-url`) if the server is not on
 `localhost:8000`.
 
+`--start-vllm` (or choosing vLLM in the guided setup) does this for you on any machine with
+NVIDIA GPUs: a cloud VM (GCP, AWS, Azure), a workstation or a SLURM node. It finds `vllm`
+(`model.vllm_executable`, else `$VLLM_VENV/bin/vllm`, `vllm` on PATH, or
+`$PSCRATCH/venvs/vllm/bin/vllm`) and gives it the GPUs not in `qe.gpu_ids` (at 90% memory;
+all GPUs at 75% without `gpu_ids`). It then waits for the model to load and leaves the
+server running, with its log under `<work_root>/_vllm/`.
+
 ### Tracing
 
 LangChain can send every run (the graph, each step, each model call with its prompt) to
@@ -237,6 +244,40 @@ own timings and prompt version (see [Run records](#run-records)).
 
 ## Command line
 
+Run `chem-llm` with no arguments in a terminal for a guided setup:
+
+1. **Compound:** the formula, then the structure. That can be a space group symbol
+   (`P4_2/mnm`; other spellings like `P42/mnm` are converted), its number (`136`), or a phase
+   name (`rutile`). With a name, the agent lists Materials Project's structures for the formula
+   and picks that phase itself. Or type `s` to search Materials Project here:
+
+   ```
+   Structure, or s to search Materials Project for C: s
+       space group    #  crystal system            MP id   atoms  E above hull    MP gap
+    1  R-3m         166  trigonal        observed  mp-169      2  +0.001 eV/atom  0.20 eV
+    2  P6_3/mmc     194  hexagonal       observed  mp-48       4  +0.003 eV/atom  metal
+    3  Fd-3m        227  cubic           observed  mp-66       2  +0.112 eV/atom  4.11 eV
+    ...
+   ```
+
+   One row per space group: experimentally observed structures first, then by energy above
+   the hull (by PBE energy alone, hypothetical carbon allotropes rank above graphite and
+   diamond). Each row is the entry the run will fetch.
+2. **Model:** Qwen3.8-27B, then any other chat model in the Hugging Face cache (marked "not
+   benchmarked"), then Claude, which asks for confirmation because it bills. If Qwen isn't
+   downloaded, the wizard offers to download it (~56 GB) after checking free disk space.
+3. **Serving**, for a local model: in-process with Hugging Face transformers, or a vLLM
+   server. A server already serving the model is reused. Otherwise one is started after the
+   last screen (`--start-vllm`) and left running for later runs. If vLLM isn't installed,
+   chem-llm stops with an error.
+4. **Work dir and output**, then optionally max steps and ensemble size.
+
+It ends by printing the equivalent command line. `chem-llm -i` starts it explicitly, and
+`chem-llm TiO2` starts it with the formula filled in. From a script or pipe, `chem-llm`
+without a structure still exits with an error rather than prompting.
+
+With flags:
+
 ```bash
 chem-llm TiO2 P4_2/mnm --name rutile --work-dir runs/tio2
 chem-llm TiO2 P4_2/mnm --pretty-progress                # readable live stream
@@ -244,6 +285,7 @@ chem-llm TiO2 P4_2/mnm --summarize > summary.txt        # stdout: just the summa
 chem-llm TiO2 P4_2/mnm --pretty-progress --summarize    # both: progress on stderr, summary on stdout
 chem-llm C Fd-3m --pw-x /opt/qe/bin/pw.x --max-steps 60
 chem-llm TiO2 P4_2/mnm --backend vllm                  # model on a vLLM server (much faster)
+chem-llm TiO2 rutile --backend vllm --start-vllm       # phase name; start a vLLM server if none is up
 chem-llm --summarize-log runs/tio2                      # summary of a past run (no GPU needed)
 chem-llm --diff-runs runs/tio2@0 runs/tio2              # compare two recorded runs
 chem-llm --build-docs                                   # build the documentation index
@@ -260,7 +302,7 @@ chem-llm-replay-copy 17 25                   # replay sandbox/test17 into sandbo
 
 | flag | what it does |
 |---|---|
-| `compound spacegroup` | required: e.g. `TiO2 P4_2/mnm`, `C P6_3/mmc` (Materials Project notation) |
+| `compound spacegroup` | e.g. `TiO2 P4_2/mnm`, `TiO2 136`, or a phase name, `TiO2 rutile` (the agent picks that phase from Materials Project) |
 | `--spacegroup-number N`, `--name NAME` | optional: help pick the structure / label it in the prompt |
 | `--work-dir DIR` | where to run (default `<work_root>/<compound>`) |
 | `--keep` | keep existing files; **by default the work dir is cleared, except `*.jsonl` logs** |
@@ -268,13 +310,15 @@ chem-llm-replay-copy 17 25                   # replay sandbox/test17 into sandbo
 | `--pretty-progress` | readable live stream instead of raw model output (below) |
 | `--summarize` | print the run summary when the run ends; the live stream goes to stderr |
 | `--quiet` | print nothing during the run |
-| `--model`, `--backend {qwen,vllm,claude}` | the model; `claude` bills per step |
+| `--model`, `--backend {huggingface,vllm,claude}` | the model; `claude` bills per step |
+| `--start-vllm` | with `--backend vllm`: start a server if none answers, wait for it, leave it running |
 | `--vllm-url URL` | the vLLM server (default `http://localhost:8000/v1`) |
 | `--max-steps N`, `--structures N` | step limit (80), size of the perturbed ensemble (51) |
 | `--pw-x`, `--bands-x`, `--qe-module` | where Quantum ESPRESSO comes from |
 | `--summarize-log PATH [--index N]` | summary of a recorded run (work dir or `log.jsonl`), then exit |
 | `--diff-runs RUN_A RUN_B` | compare two recorded runs (`dir`, `dir@N` for the N-th record), then exit |
 | `--build-docs` | build the documentation search index, then exit |
+| `-i`, `--interactive` | guided setup (the default in a terminal with no compound and space group) |
 
 Decoding (`temperature`, `do_sample`), history (`max_history`, `trim_history`) and the QE
 launch (`mpi_prefix`, `pw_args`) have no flags: set them in `config.yaml`.
@@ -451,6 +495,10 @@ chem_llm/            the package
                      k-path, docs search, QE input validation
   retrieval/         documentation scraping, chunking, BM25 + embedding search, reranking
   main.py, replay.py command-line entry points
+  interactive.py     chem-llm's guided setup
+  polymorphs.py      Materials Project's structures for a formula; space group parsing
+  local_models.py    chat models in the Hugging Face cache; downloading one
+  vllm_server.py     find, start and wait for a vLLM server
   config.py          legacy module constants, used by the sandbox run scripts
 main.ipynb           walkthrough: settings, docs index, one run, a sweep
 config.example.yaml  every setting, documented

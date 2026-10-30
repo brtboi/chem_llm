@@ -5,6 +5,28 @@ first. Commit hashes link the work to `git log`. Per-run detail, including resul
 changed since the previous run of each compound, is in [`bench/RESULTS.md`](bench/RESULTS.md)
 and `bench/runs/`.
 
+## Week of 2026-10-26
+
+- **Guided setup in the terminal:** `chem-llm` with no arguments (or `-i`) walks through:
+  - the formula and structure: a symbol, a number, or a phase name, or `s` to search
+    Materials Project, observed structures first;
+  - the model: Qwen3.8-27B (offered for download if missing), other cached chat models, or
+    Claude (confirmation required);
+  - the serving: transformers in-process, or vLLM (reused if up, else started and kept
+    running; stops with an error if vLLM isn't installed);
+  - the work dir and output.
+
+  It prints the equivalent command line. The flags work as before, and non-interactive use
+  never prompts.
+- **Phase names instead of space groups:** `chem-llm TiO2 rutile` (or
+  `run(..., spacegroup_name="rutile")`). `generate_cif` called without a space group now lists
+  Materials Project's structures for the formula and writes nothing. The task tells the agent
+  to pick the named phase from that list, note why, and fetch it.
+- **`--start-vllm`:** starts a vLLM server for the model if none answers, on any machine
+  with NVIDIA GPUs, using the GPUs not reserved for QE. New setting `model.vllm_executable`.
+- The `qwen` backend is now `huggingface` (in-process transformers). `qwen` still works,
+  so old configs and run records read as before.
+
 ## Week of 2026-10-12
 
 **Speed: the model, not Quantum ESPRESSO, was the bottleneck.** Measured on the test34 runs,

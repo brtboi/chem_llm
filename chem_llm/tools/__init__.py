@@ -400,11 +400,14 @@ def _run_qe_steps(work_dir: Path, qe, settings, steps, timings: dict, extra_env:
         "If multiple structures match the space group, the most stable one is "
         "selected (lowest energy above the convex hull); the result lists the "
         "other candidates. "
-        "Space group must be specified using spacegroup_symbol and/or "
-        "spacegroup_number. If both are provided, they must refer to the same "
-        "space group. Space group symbols must use Materials Project Hermann-Mauguin "
-        "format with underscores for subscripts and dashes for inversion bars (e.g. P4_2/mnm, Fd-3m). "
-        "Do NOT use tool without specifying space group with either number or symbol"
+        "Give the space group as spacegroup_symbol and/or spacegroup_number. If both "
+        "are provided, they must refer to the same space group. Space group symbols "
+        "must use Materials Project Hermann-Mauguin format with underscores for "
+        "subscripts and dashes for inversion bars (e.g. P4_2/mnm, Fd-3m). "
+        "Called with NO space group, it writes nothing and lists the formula's "
+        "structures, one per space group (observed in experiment first, then by "
+        "energy above hull) -- use that only when the task gives a phase name "
+        "instead of a space group, then call again with the chosen space group. "
         "Note: the CIF file metadata may sometimes report an incorrect or lower "
         "symmetry space group (for example P1 or P4) even when the atomic structure "
         "itself corresponds to the requested space group. Do not reject or modify "
@@ -440,13 +443,29 @@ def generate_cif(
             docs = mpr.materials.summary.search(
                 formula=composition,
                 fields=["material_id", "structure", "symmetry", "energy_above_hull", "band_gap",
-                        "is_magnetic", "ordering", "total_magnetization_normalized_formula_units"],
+                        "is_magnetic", "ordering", "total_magnetization_normalized_formula_units",
+                        "nsites", "theoretical"],
             )
 
         if not docs:
             return {
                 "success": False,
                 "stderr": f"No Materials Project entries found for {composition}.",
+            }
+
+        if spacegroup_symbol in (None, "") and spacegroup_number is None:
+            from ..polymorphs import group_by_spacegroup
+
+            found = group_by_spacegroup(docs)
+            return {
+                "success": True,
+                "structure_written": False,
+                "note": ("No space group given, so no structure was written. These are Materials Project's "
+                         f"structures for {composition}, one per space group (observed = matches an experimental "
+                         "structure). Choose the one that is the phase the task names, say which and why, then "
+                         "call generate_cif again with its spacegroup_symbol and spacegroup_number."),
+                "candidates": found[:15],
+                "n_space_groups": len(found),
             }
 
         # Filter candidates by supplied space group information

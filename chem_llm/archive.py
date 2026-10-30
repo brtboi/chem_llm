@@ -274,7 +274,9 @@ def describe_changes(previous: dict | None, current: dict, archive: Path | None 
 
     old_cfg, new_cfg = previous.get("config") or {}, current.get("config") or {}
     changed = [k for k in sorted(set(old_cfg) | set(new_cfg)) if old_cfg.get(k) != new_cfg.get(k)]
-    if previous.get("backend") != current.get("backend"):
+    from .settings import normalize_backend
+
+    if normalize_backend(previous.get("backend")) != normalize_backend(current.get("backend")):
         changed.insert(0, "backend")
     lines.append("")
     if changed:

@@ -16,7 +16,7 @@ Apply the INVARIANTS and DECISION RULES from the system prompt throughout -- the
 
 WORKFLOW (checkpoint after each step: state in 1-2 sentences what you verified before moving to the next step; do not batch verification to the end):
 
-STEP 1: Fetch the base {compound} structure with generate_cif (space group {spacegroup}{spacegroup_number_clause}) into structures/. Record the Materials Project ID and the space group generate_cif reports. Then reduce it to its primitive cell per the unit-cell-choice DECISION RULE before anything downstream uses it -- `kp_atoms(standard_kpath(atoms))` from chem_llm.kpath IS that primitive cell (and the one the k-path refers to), so use it rather than calling seekpath yourself -- and note the atom count before and after.
+STEP 1: Fetch the base {compound} structure with generate_cif ({spacegroup_clause}) into structures/. Record the Materials Project ID and the space group generate_cif reports. Then reduce it to its primitive cell per the unit-cell-choice DECISION RULE before anything downstream uses it -- `kp_atoms(standard_kpath(atoms))` from chem_llm.kpath IS that primitive cell (and the one the k-path refers to), so use it rather than calling seekpath yourself -- and note the atom count before and after.
 
 STEP 2: Write and run generate_structures.py: read the base CIF with ase.io.read, then write {n_structures} structures, structures/structure_000.cif through structure_{last_index:03d}.cif, where 000 is the unperturbed base and the rest are perturbed copies: random atomic displacements representative of thermal motion, plus a small random lattice strain. Choose the temperature yourself: one at which THIS phase is actually stable (some phases exist only well above room temperature -- say which, and why). Give each species its own amplitude (lighter or more weakly bound atoms move more). Be explicit about units: crystallographic displacement parameters U are mean-square displacements in A^2, and the per-axis RMS displacement is sqrt(U) in A -- write which one each number is. Put the temperature, every species' amplitude and the justification in code comments. Assert the nat/ntyp INVARIANT per structure.
 
@@ -44,7 +44,7 @@ DONE CRITERIA:
 
 def build_task(
     compound: str,
-    spacegroup: str,
+    spacegroup: str | None = None,
     spacegroup_number: int | None = None,
     spacegroup_name: str = "",
     n_structures: int = 51,
@@ -61,9 +61,20 @@ def build_task(
     if spacegroup_name and not spacegroup_name.endswith(" "):
         spacegroup_name += " "
     number_clause = f", #{spacegroup_number}" if spacegroup_number else ""
+    if spacegroup:
+        clause = f"space group {spacegroup}{number_clause}"
+    elif spacegroup_number:
+        clause = f"space group #{spacegroup_number}"
+    else:
+        name = spacegroup_name.strip()
+        clause = (f"no space group was given: the phase is {name}. First call generate_cif with only "
+                  f"composition and output_path -- it then writes nothing and lists Materials Project's "
+                  f"structures for {compound} by space group. Choose the {name} phase from that list, write in a "
+                  f"note which entry and why, then call generate_cif again with its space group symbol and number")
     return template.format(
         compound=compound,
         spacegroup=spacegroup,
+        spacegroup_clause=clause,
         spacegroup_number_clause=number_clause,
         spacegroup_name=spacegroup_name,
         n_structures=n_structures,

@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import Callable
 
 from .pipeline import RunResult, _hide_tools, _inspect_outputs
-from .settings import Settings, activated
+from .settings import Settings, activated, normalize_backend
 from .tasks import build_task
 
 
@@ -134,7 +134,8 @@ class DFTAgent:
     cases where writing a Settings would be overkill:
 
     model:      HuggingFace id of the local model (settings.model.qwen_model).
-    backend:    "qwen" (local, in-process), "vllm" (local model on a vLLM
+    backend:    "huggingface" (local, in-process transformers; "qwen" is the
+                old name), "vllm" (local model on a vLLM
                 server, settings.model.vllm_url) or "claude" (API, paid, opt-in).
     llm:        any LangChain chat model to drive the agent instead of a
                 backend, e.g. a fake one in tests (chem_llm.testing).
@@ -219,7 +220,7 @@ class DFTAgent:
         """What DFTAgent() runs with when given no settings: the setup this
         project was developed with on NERSC Perlmutter.
 
-            model           Qwen/Qwen3.8-27B, local ("qwen" backend)
+            model           Qwen/Qwen3.8-27B, local ("huggingface" backend)
             generation      max_new_tokens=5000, sampled at temperature 0.3
             agent loop      max_steps=80, max_history=32, trim_history=True, read_max_chars=10000
             QE              pw.x / bands.x, OMP_NUM_THREADS=1, 2 h timeout; on Perlmutter
@@ -241,7 +242,7 @@ class DFTAgent:
     def backend(self) -> str:
         if self._loaded:
             return self._loaded.backend
-        return "custom" if self._llm is not None else self.settings.model.backend.lower()
+        return "custom" if self._llm is not None else normalize_backend(self.settings.model.backend)
 
     @property
     def model_name(self) -> str:
@@ -276,7 +277,7 @@ class DFTAgent:
         from .agent_core import make_chat_step_source, retry_on_error
 
         s = self.settings
-        backend = s.model.backend.lower()
+        backend = normalize_backend(s.model.backend)
 
         if self._llm is not None:
             llm = self._llm
@@ -305,7 +306,7 @@ class DFTAgent:
 
             self._loaded = _LoadedModel(factory, name, backend)
 
-        elif backend == "qwen":
+        elif backend == "huggingface":
             import torch
             from transformers import AutoModelForCausalLM, AutoTokenizer
 
@@ -361,13 +362,13 @@ class DFTAgent:
             self._loaded = _LoadedModel(factory, claude.model, backend)
 
         else:
-            raise ValueError(f"Unknown backend {s.model.backend!r}; expected 'qwen', 'vllm' or 'claude'")
+            raise ValueError(f"Unknown backend {s.model.backend!r}; expected 'huggingface', 'vllm' or 'claude'")
 
     # ------------------------------------------------------------------
     def run(
         self,
         compound: str,
-        spacegroup: str,
+        spacegroup: str | None = None,
         *,
         spacegroup_number: int | None = None,
         spacegroup_name: str = "",
@@ -391,7 +392,9 @@ class DFTAgent:
 
         `compound` and `spacegroup` are the only required arguments;
         `spacegroup` uses Materials Project formatting ('P4_2/mnm',
-        'Fd-3m'). Output goes to `work_dir`, defaulting to
+        'Fd-3m'). Instead of a space group, `spacegroup_number` or just a
+        phase name (`spacegroup_name="rutile"`) works too: the agent then
+        picks that phase from Materials Project's structures for the formula. Output goes to `work_dir`, defaulting to
         settings.work_root/<compound>.
 
         verbose prints the raw stream (each step's model output, tool call
@@ -411,6 +414,8 @@ class DFTAgent:
         # Removes the tools from the registry for the rest of the process --
         # agent_core serialises the tool list into the system prompt once, at
         # import time, so a later run cannot put them back.
+        if not (spacegroup or spacegroup_number or spacegroup_name.strip() or task):
+            raise ValueError("give a space group (symbol or number) or a phase name (spacegroup_name)")
         _hide_tools(hide_tools)
         load_s = self.load()
 
@@ -473,9 +478,15 @@ class DFTAgent:
         record = _last_record(log_path or work_dir / "log.jsonl")
         runtime = record.get("runtime", 0.0)
 
+        if not spacegroup:
+            # given by number or phase name: report the space group fetched
+            for h in state.history:
+                got = h.get("result") if h.get("tool") == "generate_cif" else None
+                if isinstance(got, dict) and got.get("space_group"):
+                    spacegroup = got["space_group"]["symbol"]
         result = RunResult(
             compound=compound,
-            spacegroup=spacegroup,
+            spacegroup=spacegroup or "",
             work_dir=work_dir,
             completed=state.done,
             num_steps=len(state.history),

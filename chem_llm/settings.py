@@ -19,7 +19,7 @@ Resolution order for each field, first hit wins:
 The defaults are the configuration this project was developed with on NERSC
 Perlmutter, so `DFTAgent()` with no arguments reproduces it:
 
-    model           Qwen/Qwen3.8-27B (local; backend "qwen")
+    model           Qwen/Qwen3.8-27B (local; backend "huggingface")
     generation      max_new_tokens=5000, sampled at temperature 0.3
     agent loop      max_steps=80, max_history=32, trim_history=True, read_max_chars=10000
     Quantum ESPRESSO pw.x / bands.x, OMP_NUM_THREADS=1, 2 h timeout; on Perlmutter
@@ -197,15 +197,25 @@ class QESettings:
         return command
 
 
+BACKEND_ALIASES = {"qwen": "huggingface", "transformers": "huggingface", "hf": "huggingface"}
+
+
+def normalize_backend(name: str) -> str:
+    """'qwen' (the old name), 'transformers', 'hf' -> 'huggingface'."""
+    name = (name or "").lower()
+    return BACKEND_ALIASES.get(name, name)
+
+
 @dataclass
 class ModelSettings:
     """Which LLM drives the agent loop, and how it generates."""
 
     # Local Qwen by default: it runs on the machine you already have and
-    # costs nothing per run. "vllm" is the same local model served by vLLM
-    # (scripts/serve_vllm.sh) -- several times faster per step. "claude"
-    # hits the Anthropic API and bills.
-    backend: str = "qwen"  # "qwen" (in-process transformers), "vllm" (local server) or "claude" (API)
+    # costs nothing per run. "huggingface" loads it in-process with
+    # transformers; "vllm" is the same local model served by vLLM -- several
+    # times faster per step. "claude" hits the Anthropic API and bills.
+    # "qwen" is the old name of "huggingface" and still accepted.
+    backend: str = "huggingface"  # "huggingface" (in-process transformers), "vllm" (local server) or "claude" (API)
 
     # Local Qwen
     qwen_model: str = "Qwen/Qwen3.8-27B"
@@ -220,6 +230,10 @@ class ModelSettings:
     # vLLM backend: the server's OpenAI-compatible endpoint. It serves
     # qwen_model, and decodes with max_new_tokens / temperature / do_sample.
     vllm_url: str = "http://localhost:8000/v1"
+    # The `vllm` executable `chem-llm --start-vllm` (and the guided setup)
+    # launches. None -> $VLLM_VENV/bin/vllm, `vllm` on PATH, then
+    # $PSCRATCH/venvs/vllm/bin/vllm (chem_llm.vllm_server).
+    vllm_executable: str | None = None
 
     # Claude API
     claude_model: str = "claude-opus-4-8"

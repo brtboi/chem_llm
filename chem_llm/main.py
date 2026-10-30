@@ -8,6 +8,7 @@
     chem-llm --summarize-log runs/tio2                  # summary of a past run (no GPU)
     chem-llm --diff-runs runs/tio2@0 runs/tio2          # compare two recorded runs
     chem-llm --build-docs
+    chem-llm                                            # guided setup (also: chem-llm -i)
 
 --pretty-progress: stream one readable line per action and the agent's notes
 instead of raw model output and JSON.
@@ -34,7 +35,8 @@ def build_parser() -> argparse.ArgumentParser:
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("compound", nargs="?", help="Chemical formula, e.g. TiO2.")
     parser.add_argument("spacegroup", nargs="?",
-                        help="Space group in Materials Project format, e.g. P4_2/mnm, Fd-3m.")
+                        help="Space group symbol in Materials Project format (P4_2/mnm, Fd-3m), its number "
+                             "(136), or a phase name (rutile) for the agent to look up.")
     parser.add_argument("--spacegroup-number", type=int, default=None)
     parser.add_argument("--name", default="", help="Common name for the structure, e.g. rutile.")
 
@@ -44,10 +46,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--keep", action="store_true", help="Keep existing files in the work dir.")
 
     parser.add_argument("--model", default=None, help="Local model id (default: from config, else Qwen3).")
-    parser.add_argument("--backend", default=None, choices=["qwen", "vllm", "claude"],
-                        help="qwen loads the local model in-process; vllm uses the same model on a vLLM server "
-                             "(much faster); both cost nothing. claude bills per step.")
+    parser.add_argument("--backend", default=None, choices=["huggingface", "vllm", "claude", "qwen"],
+                        help="huggingface loads the local model in-process with transformers (qwen is its old "
+                             "name); vllm uses the same model on a vLLM server (much faster); both cost nothing. "
+                             "claude bills per step.")
     parser.add_argument("--vllm-url", default=None, help="vLLM server endpoint (default http://localhost:8000/v1).")
+    parser.add_argument("--start-vllm", action="store_true",
+                        help="With --backend vllm: if no server answers at the endpoint, start one for the model "
+                             "(detached; it keeps running for later runs) and wait until it is ready.")
     parser.add_argument("--pw-x", default=None)
     parser.add_argument("--bands-x", default=None)
     parser.add_argument("--qe-module", default=None, help="Lmod module to load before running QE.")
@@ -70,6 +76,10 @@ def build_parser() -> argparse.ArgumentParser:
                              "outcome, timing, tool use, settings and a diff of the prompts. Then exit.")
     parser.add_argument("--build-docs", action="store_true",
                         help="Build the documentation index and exit.")
+    parser.add_argument("-i", "--interactive", action="store_true",
+                        help="Guided setup: pick the structure from Materials Project, the backend and the "
+                             "output. The default when chem-llm runs in a terminal without a compound and "
+                             "space group.")
     return parser
 
 
@@ -97,6 +107,29 @@ def main(argv=None) -> int:
 
     settings = Settings.from_yaml(args.config) if args.config else Settings.discover()
 
+    if args.spacegroup:
+        from .polymorphs import classify_spacegroup
+
+        try:
+            symbol, number, name = classify_spacegroup(args.spacegroup)
+        except ValueError as e:
+            build_parser().error(str(e))
+        args.spacegroup = symbol
+        args.spacegroup_number = args.spacegroup_number or number
+        args.name = args.name or name
+    structure_given = args.compound and (args.spacegroup or args.spacegroup_number or args.name)
+
+    tty = sys.stdin.isatty() and sys.stdout.isatty()
+    if args.interactive or (tty and not args.build_docs and not structure_given):
+        from .interactive import wizard
+
+        args = wizard(args, settings)
+        if args is None:
+            return 1
+    if args.name and not args.spacegroup and not args.spacegroup_number and any(c.isdigit() for c in args.name):
+        print(f"note: {args.name!r} is not a space group symbol pymatgen knows; passing it to the agent as a "
+              "phase name", file=sys.stderr)
+
     agent = DFTAgent(
         settings,
         model=args.model,
@@ -107,12 +140,21 @@ def main(argv=None) -> int:
         qe_module=args.qe_module,
         max_steps=args.max_steps,
     )
+    if args.start_vllm and agent.backend == "vllm":
+        from .local_models import model_config
+        from .vllm_server import VLLMError, ensure_server
+
+        try:
+            ensure_server(agent.settings, agent.model_name, model_config(agent.settings, agent.model_name))
+        except VLLMError as e:
+            print(f"chem-llm: {e}", file=sys.stderr)
+            return 2
     docs = agent.docs
     if args.build_docs:
         print(docs.build())
         return 0
 
-    if not (args.compound and args.spacegroup):
+    if not (args.compound and (args.spacegroup or args.spacegroup_number or args.name)):
         build_parser().error("compound and spacegroup are required (or pass --build-docs)")
 
     if not docs.available:
