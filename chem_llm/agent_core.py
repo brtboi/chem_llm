@@ -339,13 +339,15 @@ SYSTEM_PROMPT_TEMPLATE = (
 )
 
 
-def build_messages(state: AgentState, max_history: int = MAX_HISTORY, trim_history: bool = False) -> list:
-    """The two-message prompt every step sends: the fixed system prompt, and
-    the agent's working memory (AgentState.context_summary) as the user turn."""
+def build_messages(state: AgentState, max_history: int = MAX_HISTORY, trim_history: bool = False,
+                   system_prompt: str | None = None) -> list:
+    """The two-message prompt every step sends: the fixed system prompt (the
+    DFT agent's unless another agent passes its own), and the agent's
+    working memory (AgentState.context_summary) as the user turn."""
     from langchain_core.messages import HumanMessage, SystemMessage
 
     return [
-        SystemMessage(SYSTEM_PROMPT_TEMPLATE),
+        SystemMessage(system_prompt or SYSTEM_PROMPT_TEMPLATE),
         HumanMessage(state.context_summary(max_history=max_history, trim=trim_history)),
     ]
 
@@ -456,8 +458,8 @@ def execute_tool(call: dict, state: AgentState):
         state.done = True
         state.final_result = args.get("summary", "")
         result = state.final_result
-    elif tool in TOOL_DISPATCH:
-        result = TOOL_DISPATCH[tool](**args)
+    elif tool in (dispatch := state.dispatch if state.dispatch is not None else TOOL_DISPATCH):
+        result = dispatch[tool](**args)
     else:
         raise ValueError(f"Unknown tool: {tool}")
 
@@ -499,6 +501,7 @@ def make_chat_step_source(
     max_history: int = MAX_HISTORY,
     trim_history: bool = False,
     on_error=None,
+    system_prompt: str | None = None,
 ):
     """Build a `next_tool_call(state, step)` source for `run_step_loop` from
     any LangChain chat model (see chem_llm.llm).
@@ -514,7 +517,8 @@ def make_chat_step_source(
     Without it the exception propagates.
     """
     def next_tool_call(state: AgentState, step: int):
-        messages = build_messages(state, max_history=max_history, trim_history=trim_history)
+        messages = build_messages(state, max_history=max_history, trim_history=trim_history,
+                                  system_prompt=system_prompt)
         try:
             reply = llm.invoke(messages, config={"run_name": f"step {step}", "metadata": {"step": step}})
         except Exception as e:
@@ -721,7 +725,8 @@ def prepare_work_dir(work_dir: Path, clear_dir: bool = False, load_path=None, lo
         copy_to_cwd(DPP_EXAMPLE_SUBDIR)
 
 
-def build_log_entry(state: AgentState, start_time: float, work_dir: Path, clear_dir: bool, load_path, model_name: str, extra: dict | None = None) -> dict:
+def build_log_entry(state: AgentState, start_time: float, work_dir: Path, clear_dir: bool, load_path, model_name: str, extra: dict | None = None,
+                    system_prompt: str | None = None) -> dict:
     """The run's log.jsonl record, format 2 (chem_llm.runlog). `extra` may
     carry config, compound / spacegroup / spacegroup_number, model_load_s,
     and replayed_from."""
@@ -730,7 +735,7 @@ def build_log_entry(state: AgentState, start_time: float, work_dir: Path, clear_
     extra = dict(extra or {})
     record = build_record(
         run_id=state.run_id, timestamp=datetime.now().isoformat(),
-        history=state.history, timing=state.steps, task=state.task, system_prompt=SYSTEM_PROMPT_TEMPLATE,
+        history=state.history, timing=state.steps, task=state.task, system_prompt=system_prompt or SYSTEM_PROMPT_TEMPLATE,
         completed=state.done, runtime=time.perf_counter() - start_time, model=model_name, work_dir=work_dir,
         config=extra.pop("config", None), compound=extra.pop("compound", None),
         spacegroup=extra.pop("spacegroup", None), spacegroup_number=extra.pop("spacegroup_number", None),
@@ -767,6 +772,8 @@ def run_agent(
     observer=None,
     trace: bool = True,
     outcome=None,
+    system_prompt: str | None = None,
+    dispatch: dict | None = None,
 ) -> AgentState:
     """Run the agent live: the model generates each tool call. Executes in
     `work_dir` (defaults to config.WORK_DIR) and logs to `log_file`
@@ -784,6 +791,9 @@ def run_agent(
     so a run killed mid-way still leaves its trajectory and timings.
     outcome: optional callable(work_dir) -> dict, recorded as the log's
     "outcome" (e.g. the band gap read back from disk).
+    system_prompt, dispatch: another agent's system prompt (recorded in the
+    log) and tool table {name: function}; default: the DFT agent's. The
+    step source must have been built with the same system_prompt.
     """
     if log_file is _UNSET:
         log_file = work_dir / "log.jsonl"
@@ -798,6 +808,7 @@ def run_agent(
 
     start_time = time.perf_counter()
     state = AgentState(task)
+    state.dispatch = dispatch
     trace_file = None
     if log_file and trace:
         trace_file = log_file.with_name("trace.jsonl") if log_file.name == "log.jsonl" else log_file.with_suffix(".trace.jsonl")
@@ -808,7 +819,8 @@ def run_agent(
 
     if log_file:
         print("logging to...", log_file)
-        entry = build_log_entry(state, start_time, work_dir, clear_dir, load_path, model_name, extra=log_extra)
+        entry = build_log_entry(state, start_time, work_dir, clear_dir, load_path, model_name, extra=log_extra,
+                                system_prompt=system_prompt)
         if outcome is not None:
             try:
                 entry["outcome"] = outcome(work_dir)

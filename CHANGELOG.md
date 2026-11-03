@@ -24,6 +24,27 @@ and `bench/runs/`.
   to pick the named phase from that list, note why, and fetch it.
 - **`--start-vllm`:** starts a vLLM server for the model if none answers, on any machine
   with NVIDIA GPUs, using the GPUs not reserved for QE. New setting `model.vllm_executable`.
+- **DeePseudopot agent** (`chem_llm.dpp_agent`, `chem-llm-dpp`): a second, fresh agent, with
+  its own prompt, task and five tools, that turns one finished QE run into a trained
+  DeePseudopot neural-network pseudopotential. Deterministic bookkeeping is in
+  `chem_llm.dpp_io` (`read_qe_run`, `pseudo_orbitals`, `write_bundle` with consistency checks,
+  `read_fit`). The prompt's key invariant: DeePseudopot fits its lowest eigenvalues to the
+  reference in order, so the semicore DFT bands must be dropped. The September one-shot TiO2
+  attempt (`sandbox/test_claude`) fed it all 48 bands from band 0. Example input:
+  `deepseudopot_example/tio2_rutile/` (sweep 8's TiO2 run and an NN_config template).
+  - *First test, rutile TiO2* (`sandbox/dpp_tio2/run1`, Qwen3.8-27B on vLLM, 26 steps,
+    15 min, 9 of them training):
+    - The agent derived first_band = 8 itself (Ti 3s+3p, with a 14.7 eV gap to O 2s, asserted
+      in its script) after its own assert-guarded script corrected a first rule that also
+      counted Ti 3d.
+    - Its other choices: 24 bands (16 valence + 8 conduction), the 6 high-symmetry points,
+      maxKE 2.9 Ha (~100 plane waves), and gap bands weighted 4x.
+    - Starting from all-zero parameters (none exist for Ti/O), the RMS error went 7.6 eV
+      after 100 epochs → 1.59 eV after 600. But the fitted gap is −2.64 eV against 1.85 eV
+      DFT: the pipeline works and the fit is not usable yet. The agent reported this as
+      such.
+    - Next: a better starting point than zero, e.g. Zunger parameters fitted to the DFT
+      pseudopotentials' local part, or the CsPbBr3 bundle's approach.
 - The `qwen` backend is now `huggingface` (in-process transformers). `qwen` still works,
   so old configs and run records read as before.
 

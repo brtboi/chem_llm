@@ -34,6 +34,11 @@ TOOL_DISPATCH: dict[str, callable] = {}
 # since.
 REMEMBER_FIELDS: dict[str, tuple[str, ...]] = {}
 
+# Every tool ever registered, {name: (schema, function or None)}. TOOLS and
+# TOOL_DISPATCH are what the DFT agent offers and get pruned by
+# pipeline._hide_tools; other agents (chem_llm.dpp_agent) pick from this.
+REGISTRY: dict[str, tuple[dict, object]] = {}
+
 
 def register_tool(name: str, description: str, parameters: dict, remember_on: tuple[str, ...] | None = None):
     """Register a tool.
@@ -47,6 +52,7 @@ def register_tool(name: str, description: str, parameters: dict, remember_on: tu
     def decorator(func):
         TOOLS.append({"name": name, "description": description, "parameters": parameters})
         TOOL_DISPATCH[name] = func
+        REGISTRY[name] = (TOOLS[-1], func)
         if remember_on is not None:
             REMEMBER_FIELDS[name] = remember_on
         return func
@@ -662,6 +668,7 @@ TOOLS.append({
     "description": "Call this when the task is fully complete. Provide a summary.",
     "parameters": {"summary": "string"},
 })
+REGISTRY["note"], REGISTRY["done"] = (TOOLS[-2], None), (TOOLS[-1], None)
 
 # tools/docs.py, tools/qe_validate.py, and tools/deepseudopot.py register
 # themselves against TOOLS/TOOL_DISPATCH above via `from tools import

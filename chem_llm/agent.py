@@ -114,7 +114,7 @@ class _LoadedModel:
     # generation parameters are read when a run starts, so editing
     # agent.settings.model.max_new_tokens between runs takes effect without
     # reloading the weights.
-    step_source_factory: Callable[[Settings, bool], Callable]
+    step_source_factory: Callable[..., Callable]  # (settings, verbose, system_prompt=None)
     name: str
     backend: str
 
@@ -282,9 +282,10 @@ class DFTAgent:
         if self._llm is not None:
             llm = self._llm
 
-            def factory(settings: Settings, verbose: bool):
+            def factory(settings: Settings, verbose: bool, system_prompt: str | None = None):
                 return make_chat_step_source(llm, verbose, max_history=settings.agent.max_history,
-                                             trim_history=settings.agent.trim_history, on_error=retry_on_error())
+                                             trim_history=settings.agent.trim_history, on_error=retry_on_error(),
+                                             system_prompt=system_prompt)
 
             self._loaded = _LoadedModel(factory, _llm_name(llm), "custom")
 
@@ -297,12 +298,13 @@ class DFTAgent:
                 raise ValueError(f"the vLLM server at {s.model.vllm_url} serves {served}, not {name!r}; "
                                  "set model.qwen_model to one of those, or restart the server with MODEL=" + name)
 
-            def factory(settings: Settings, verbose: bool):
+            def factory(settings: Settings, verbose: bool, system_prompt: str | None = None):
                 m = settings.model
                 llm = vllm_chat_model(m.vllm_url, name, max_tokens=m.max_new_tokens,
                                       temperature=m.temperature, do_sample=m.do_sample)
                 return make_chat_step_source(llm, verbose, max_history=settings.agent.max_history,
-                                             trim_history=settings.agent.trim_history, on_error=retry_on_error())
+                                             trim_history=settings.agent.trim_history, on_error=retry_on_error(),
+                                             system_prompt=system_prompt)
 
             self._loaded = _LoadedModel(factory, name, backend)
 
@@ -321,7 +323,7 @@ class DFTAgent:
             tokenizer = AutoTokenizer.from_pretrained(name, **hub)
             model = AutoModelForCausalLM.from_pretrained(name, device_map="auto", dtype=torch.bfloat16, **hub)
 
-            def factory(settings: Settings, verbose: bool):
+            def factory(settings: Settings, verbose: bool, system_prompt: str | None = None):
                 llm = TransformersChatModel(
                     hf_model=model, tokenizer=tokenizer, model_name=name,
                     max_new_tokens=settings.model.max_new_tokens,
@@ -329,7 +331,7 @@ class DFTAgent:
                     do_sample=settings.model.do_sample,
                 )
                 return make_chat_step_source(llm, verbose, max_history=settings.agent.max_history,
-                                             trim_history=settings.agent.trim_history)
+                                             trim_history=settings.agent.trim_history, system_prompt=system_prompt)
 
             self._loaded = _LoadedModel(factory, name, backend)
 
@@ -351,12 +353,13 @@ class DFTAgent:
                 api_key=s.anthropic_api_key,
             )
 
-            def factory(settings: Settings, verbose: bool):
+            def factory(settings: Settings, verbose: bool, system_prompt: str | None = None):
                 claude.max_tokens = settings.model.claude_max_tokens
                 claude.effort = settings.model.claude_effort
                 return make_claude_step_source(
                     claude, verbose=verbose,
                     max_history=settings.agent.max_history, trim_history=settings.agent.trim_history,
+                    system_prompt=system_prompt,
                 )
 
             self._loaded = _LoadedModel(factory, claude.model, backend)

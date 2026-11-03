@@ -19,6 +19,7 @@ class AgentState:
         self.consecutive_notes = 0
         self.done = False
         self.final_result = None
+        self.dispatch: dict | None = None       # tool table if not the DFT agent's (agent_core.execute_tool)
         self.steps: list[dict] = []             # per-step timing/token records (chem_llm.telemetry)
         self.llm_usage: dict | None = None      # token counts of the latest model call
 

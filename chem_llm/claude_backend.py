@@ -104,7 +104,8 @@ class ClaudeModel:
         return "".join(block.text for block in response.content if block.type == "text").strip()
 
 
-def make_claude_step_source(claude: ClaudeModel, verbose: bool = True, max_history: int = MAX_HISTORY, trim_history: bool = False):
+def make_claude_step_source(claude: ClaudeModel, verbose: bool = True, max_history: int = MAX_HISTORY, trim_history: bool = False,
+                            system_prompt: str | None = None):
     """Build a `next_tool_call(state, step)` source for `run_step_loop`:
     agent_core.make_chat_step_source over ClaudeChatModel, with the
     Claude-specific error policy below. A malformed reply is handled as for
@@ -131,4 +132,4 @@ def make_claude_step_source(claude: ClaudeModel, verbose: bool = True, max_histo
         raise e
 
     return make_chat_step_source(ClaudeChatModel(claude=claude), verbose, max_history=max_history,
-                                 trim_history=trim_history, on_error=on_error)
+                                 trim_history=trim_history, on_error=on_error, system_prompt=system_prompt)

@@ -466,6 +466,41 @@ compared side by side in its UI. Add `LANGSMITH_TRACING=true` to trace every age
 inside each run, which shows where a failing run went wrong. The local index and
 `RESULTS.md` work without it.
 
+## DeePseudopot: from the DFT bands to a neural-network pseudopotential
+
+A second agent, `chem_llm.dpp_agent.DeePseudopotAgent`, takes one finished QE run and trains a
+[DeePseudopot](https://github.com/TommyLinkl/DeePseudopot) neural-network empirical
+pseudopotential that reproduces its bands. It is a fresh agent with its own system prompt,
+task and tools (`read_file`, `write_file`, `run_python`, `make_dir`, `train_deepseudopot`).
+The DFT agent doesn't carry on for it: the DFT run's context doesn't help here, and a clean
+start keeps the prompt small and the rules specific.
+
+```python
+dft = DFTAgent(backend="vllm")
+result = dft.run("TiO2", "P4_2/mnm")
+fit = DeePseudopotAgent(dft).run(result.work_dir / "calculations/000", work_dir="runs/tio2_dpp")
+print(fit)   # RMS error, fitted vs DFT gap, steps, results folder
+```
+
+```bash
+chem-llm-dpp deepseudopot_example/tio2_rutile/qe_run --work-dir runs/tio2_dpp --backend vllm --pretty-progress
+```
+
+The bookkeeping is deterministic, in `chem_llm.dpp_io`:
+- `read_qe_run` reads the cell, bands, k-path, electron count and spin-orbit from the run's files;
+- `pseudo_orbitals` lists a UPF file's valence orbitals;
+- `write_bundle` writes and cross-checks every input file;
+- `read_fit` scores the trained model against the DFT bands.
+
+The agent makes the physics choices:
+- which DFT bands to fit, dropping the semicore bands an empirical pseudopotential can't
+  describe (DeePseudopot fits its lowest eigenvalues to the reference in order);
+- the conduction bands, k-points, band weights and basis cutoff;
+- the training length.
+
+It reports the fit from the output files. Example input, and what was measured on it:
+[`deepseudopot_example/tio2_rutile/`](deepseudopot_example/tio2_rutile/README.md).
+
 ## Repository layout
 
 The [source repository](https://github.com/brtboi/chem_llm) holds more than the package:
@@ -499,6 +534,8 @@ chem_llm/            the package
   polymorphs.py      Materials Project's structures for a formula; space group parsing
   local_models.py    chat models in the Hugging Face cache; downloading one
   vllm_server.py     find, start and wait for a vLLM server
+  dpp_agent.py       the DeePseudopot agent (chem-llm-dpp): its prompt, task and tools
+  dpp_io.py          QE run -> DeePseudopot input bundle; scoring the fit
   config.py          legacy module constants, used by the sandbox run scripts
 main.ipynb           walkthrough: settings, docs index, one run, a sweep
 config.example.yaml  every setting, documented
@@ -509,8 +546,9 @@ scripts/             serve_vllm.sh, build_doc_index.py, build_qe_namelists.py (r
                      plot_bench.py (bench/visualizations/)
 sandbox/             past experiment runs and their run_test*.py drivers
 logs/                historical run logs
+deepseudopot_example/tio2_rutile/  input for the DeePseudopot agent: a TiO2 QE run, NN_config template
 example/, deepseudopot_example/, deepseudopot_agent.ipynb, DEEPSEUDOPOT_HANDOFF.md
-                     reference workflow + the paused DeePseudopot (neural pseudopotential) work
+                     reference workflow + the earlier CsPbBr3 DeePseudopot work
 ```
 
 ## Development
@@ -528,7 +566,7 @@ python scripts/build_qe_namelists.py  # after a QE version bump: refresh the nam
 [`main.ipynb`](https://github.com/brtboi/chem_llm/blob/master/main.ipynb) walks through settings, the documentation index, one run
 and a sweep.
 
-The (currently hidden) `train_deepseudopot` tool runs
+The `train_deepseudopot` tool (hidden from the DFT agent, used by the DeePseudopot agent) runs
 [DeePseudopot](https://github.com/TommyLinkl/DeePseudopot), which has its own license and
 is not shipped in the package. The repository vendors a checkout at
 `chem_llm/DeePseudopot/`; with an installed package, set `DEEPSEUDOPOT_DIR` to a checkout.
