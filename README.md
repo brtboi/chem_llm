@@ -547,8 +547,8 @@ scripts/             serve_vllm.sh, build_doc_index.py, build_qe_namelists.py (r
 sandbox/             past experiment runs and their run_test*.py drivers
 logs/                historical run logs
 deepseudopot_example/tio2_rutile/  input for the DeePseudopot agent: a TiO2 QE run, NN_config template
-example/, deepseudopot_example/, deepseudopot_agent.ipynb, DEEPSEUDOPOT_HANDOFF.md
-                     reference workflow + the earlier CsPbBr3 DeePseudopot work
+example/, deepseudopot_example/
+                     reference workflow + the earlier CsPbBr3 DeePseudopot data
 ```
 
 ## Development

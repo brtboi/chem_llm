@@ -58,11 +58,6 @@ WORK_DIR = (REPO_ROOT / os.environ.get("MATAGENT_WORK_DIR", "sandbox/test22")).r
 
 EXAMPLE_DIR = (REPO_ROOT / os.environ.get("EXAMPLE_DIR", "example")).resolve()
 
-# Reference scripts + real, validated DFT output for a single (unperturbed
-# cubic) CsPbBr3 structure -- the load_path for the DeePseudopot tool-use
-# notebook (deepseudopot_agent.ipynb). See deepseudopot_example/README.md.
-DPP_EXAMPLE_DIR = (REPO_ROOT / os.environ.get("DPP_EXAMPLE_DIR", "deepseudopot_example")).resolve()
-
 # Reference scripts (qe_bands_to_ref.py, setup_nn_inputs.py, nn_template/)
 # for adapting this pipeline's own QE DFT output into a DeePseudopot input
 # bundle -- lives under EXAMPLE_DIR so it travels with the main example/
