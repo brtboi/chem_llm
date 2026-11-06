@@ -419,6 +419,12 @@ class DFTAgent:
         # import time, so a later run cannot put them back.
         if not (spacegroup or spacegroup_number or spacegroup_name.strip() or task):
             raise ValueError("give a space group (symbol or number) or a phase name (spacegroup_name)")
+        if not (spacegroup or spacegroup_number or task):
+            from .polymorphs import phase_spacegroup
+
+            known = phase_spacegroup(spacegroup_name)
+            if known:
+                spacegroup, spacegroup_number = known
         _hide_tools(hide_tools)
         load_s = self.load()
 

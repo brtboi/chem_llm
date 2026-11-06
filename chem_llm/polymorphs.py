@@ -7,6 +7,37 @@ from __future__ import annotations
 
 MP_FIELDS = ["material_id", "symmetry", "energy_above_hull", "band_gap", "nsites", "theoretical"]
 
+# Structure-type and phase names -> space group number. Materials Project's
+# structures carry no names, and the agent asked to "choose rutile" from them
+# picked anatase (I4_1/amd, the PBE ground state) from memory. Names resolve
+# here instead; only names not listed are left to the agent. Ambiguous names
+# ("perovskite", "quartz") are deliberately absent.
+PHASE_SPACEGROUPS = {
+    "rutile": 136, "anatase": 141, "brookite": 61,
+    "diamond": 227, "spinel": 227,
+    "zinc blende": 216, "zincblende": 216, "sphalerite": 216,
+    "wurtzite": 186,
+    "rock salt": 225, "rocksalt": 225, "halite": 225, "fluorite": 225, "antifluorite": 225, "fcc": 225,
+    "cesium chloride": 221, "caesium chloride": 221, "cscl": 221, "cubic perovskite": 221,
+    "bcc": 229,
+    "hcp": 194, "graphite": 194, "nickel arsenide": 194, "nias": 194,
+    "corundum": 167, "calcite": 167,
+    "pyrite": 205, "marcasite": 58, "cuprite": 224, "chalcopyrite": 122, "kesterite": 82,
+}
+
+
+def _normalize_name(name: str) -> str:
+    name = " ".join(name.lower().replace("-", " ").replace("_", " ").split())
+    for suffix in (" structure", " type", " phase"):
+        name = name.removesuffix(suffix)
+    return name
+
+
+def phase_spacegroup(name: str) -> tuple[str, int] | None:
+    """'rutile' -> ('P4_2/mnm', 136); None for a name not in PHASE_SPACEGROUPS."""
+    number = PHASE_SPACEGROUPS.get(_normalize_name(name))
+    return parse_spacegroup(str(number)) if number else None
+
 
 def group_by_spacegroup(docs) -> list[dict]:
     """Materials Project summary docs -> one entry per space group: its most
@@ -72,8 +103,9 @@ def parse_spacegroup(text: str) -> tuple[str, int]:
 def classify_spacegroup(text: str) -> tuple[str | None, int | None, str]:
     """What the user typed for the structure -> (symbol, number, phase name).
 
-    '136' and 'P4_2/mnm' are space groups; anything else that is not a valid
-    symbol ('rutile', 'zinc blende') is a phase name, which the agent
+    '136' and 'P4_2/mnm' are space groups. A phase name in
+    PHASE_SPACEGROUPS ('rutile') comes back with its space group; any other
+    text that is not a valid symbol is a phase name only, which the agent
     resolves against Materials Project's structures for the formula. A typo
     in a symbol ('P4_2/mmn') therefore becomes a name -- callers say so."""
     text = text.strip()
@@ -83,4 +115,5 @@ def classify_spacegroup(text: str) -> tuple[str | None, int | None, str]:
     except ValueError:
         if text.isdigit():
             raise
-        return None, None, text
+        known = phase_spacegroup(text)
+        return (*known, text) if known else (None, None, text)

@@ -56,10 +56,15 @@ def test_typed_symbol_number_and_name(settings, tmp_path):
     args, _ = run_wizard(settings, ["136", ""] + tail(tmp_path / "w"), compound="TiO2")
     assert (args.spacegroup, args.spacegroup_number, args.name) == ("P4_2/mnm", 136, "")
 
-    # a phase name: no space group, and no second "common name" question
+    # a known phase name resolves to its space group here, not by the agent
     args, out = run_wizard(settings, ["rutile"] + tail(tmp_path / "w"), compound="TiO2")
-    assert (args.spacegroup, args.spacegroup_number, args.name) == (None, None, "rutile")
-    assert "pick the rutile phase" in out and "chem-llm TiO2 rutile --backend vllm" in out
+    assert (args.spacegroup, args.spacegroup_number, args.name) == ("P4_2/mnm", 136, "rutile")
+    assert "rutile: P4_2/mnm (#136)" in out
+
+    # an unknown one: no space group, and no second "common name" question
+    args, out = run_wizard(settings, ["ramsdellite"] + tail(tmp_path / "w"), compound="TiO2")
+    assert (args.spacegroup, args.spacegroup_number, args.name) == (None, None, "ramsdellite")
+    assert "pick the ramsdellite phase" in out and "chem-llm TiO2 ramsdellite --backend vllm" in out
 
 
 def test_search_materials_project(settings, tmp_path):
@@ -128,7 +133,10 @@ def test_existing_work_dir_advanced_and_cancel(settings, tmp_path):
 def test_classify_and_parse_spacegroup():
     assert parse_spacegroup("227") == ("Fd-3m", 227)
     assert classify_spacegroup("P42/mnm") == ("P4_2/mnm", 136, "")  # MP spelling
-    assert classify_spacegroup("zinc blende") == (None, None, "zinc blende")
+    assert classify_spacegroup("zinc blende") == ("F-43m", 216, "zinc blende")  # a known name: resolved here
+    assert classify_spacegroup("Rutile-type") == ("P4_2/mnm", 136, "Rutile-type")
+    assert classify_spacegroup("anatase") == ("I4_1/amd", 141, "anatase")
+    assert classify_spacegroup("ramsdellite") == (None, None, "ramsdellite")  # unknown: the agent picks
     for bad in ("0", "231"):
         with pytest.raises(ValueError):
             classify_spacegroup(bad)
@@ -146,8 +154,9 @@ def test_group_by_spacegroup_puts_observed_first():
 
 
 def test_task_for_a_phase_name_only():
-    task = build_task("TiO2", spacegroup_name="rutile")
-    assert "no space group was given: the phase is rutile" in task and "space group None" not in task
+    task = build_task("TiO2", spacegroup_name="ramsdellite")
+    assert "no space group was given: the phase is ramsdellite" in task and "space group None" not in task
+    assert "does not say which entry is ramsdellite" in task
     # unchanged for a space group
     assert "generate_cif (space group P4_2/mnm, #136)" in build_task("TiO2", "P4_2/mnm", 136)
 
@@ -172,7 +181,7 @@ def fake_agent(settings, monkeypatch):
 
 def test_cli_positional_is_symbol_number_or_name(fake_agent):
     for given, expected in (("P4_2/mnm", ("P4_2/mnm", 136, "")), ("136", ("P4_2/mnm", 136, "")),
-                            ("rutile", (None, None, "rutile"))):
+                            ("rutile", ("P4_2/mnm", 136, "rutile")), ("ramsdellite", (None, None, "ramsdellite"))):
         cli.main(["TiO2", given, "--quiet"])
         assert fake_agent[-1] == ("TiO2", *expected)
 

@@ -69,8 +69,11 @@ def build_task(
         name = spacegroup_name.strip()
         clause = (f"no space group was given: the phase is {name}. First call generate_cif with only "
                   f"composition and output_path -- it then writes nothing and lists Materials Project's "
-                  f"structures for {compound} by space group. Choose the {name} phase from that list, write in a "
-                  f"note which entry and why, then call generate_cif again with its space group symbol and number")
+                  f"structures for {compound} by space group. The list carries no phase names, and its order (by PBE "
+                  f"energy) does not say which entry is {name}: the most stable entry is often not the common phase. "
+                  f"Before choosing, write in a note which space group the {name} structure has and how you know, then "
+                  f"the entry with that space group; if none matches, or you are not sure, say so in the note and in the "
+                  f"done summary. Then call generate_cif again with its space group symbol and number")
     return template.format(
         compound=compound,
         spacegroup=spacegroup,

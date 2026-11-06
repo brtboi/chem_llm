@@ -143,6 +143,10 @@ class Wizard:
             except ValueError as e:
                 self.console.print(f"[red]{e}[/red]")
                 continue
+            if name and symbol:
+                self.console.print(f"{name}: {symbol} (#{number})")
+                a.spacegroup, a.spacegroup_number, a.name = symbol, number, name
+                return
             if name:
                 if any(c.isdigit() for c in name) or "/" in name:
                     if not self.confirm(f"{name!r} is not a space group symbol pymatgen recognizes (Materials "
