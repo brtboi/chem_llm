@@ -12,6 +12,8 @@ ESPRESSO, and plot a band structure. See README.md for the package API.
   (AGENT PROTOCOL / INVARIANTS / DECISION RULES) plus the task text in `chem_llm/core/tasks.py`.
   Most physics fixes are prompt fixes: an invariant that says "derive X from the actual
   structure/output in code, never from memory".
+- DeePseudopot (the second agent, QE run -> neural-network pseudopotential): read
+  `chem_llm/dpp/AGENTS.md` first -- options, gotchas, and what was measured.
 - `chem_llm/core/config.py` is legacy module constants, still used by the `sandbox/run_test*.py`
   drivers and as defaults for `agent_core` functions called directly.
 
