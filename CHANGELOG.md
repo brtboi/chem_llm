@@ -13,6 +13,9 @@ and `bench/runs/`.
   top. The prompts name the new paths (`chem_llm.dft.kpath`, ...), so the prompt version
   changes. The old paths still import (`chem_llm.MOVED_MODULES`), because the scripts in
   `bench/runs/` and `sandbox/` use them and `chem-llm-replay` re-runs them.
+  - *TiO2 benchmark after the split* (prompt a6b30648): pass, 33 steps, 6.3 min, gap 1.848 eV,
+    every high-symmetry point within 0.009 eV of the reference; the plot script imports
+    `chem_llm.dft.kpath`.
 
 ## Week of 2026-11-02
 

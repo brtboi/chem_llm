@@ -1,6 +1,6 @@
 # Benchmark results
 
-Generated 2026-10-16 11:37 by `chem-llm-bench report` from `bench/index.jsonl`; do not edit by hand. Each run's folder under `bench/runs/` has its live progress, summary, the checks and what changed since the previous run of that compound.
+Generated 2026-11-12 20:21 by `chem-llm-bench report` from `bench/index.jsonl`; do not edit by hand. Each run's folder under `bench/runs/` has its live progress, summary, the checks and what changed since the previous run of that compound.
 
 ## Suite `core`
 
@@ -8,7 +8,7 @@ The compounds developed against: rutile TiO2 (the reference benchmark) and the t
 
 | case | what it tests | last run | result | failed checks | gap eV (expected) | steps | wall min | prompt | commit | records |
 |---|---|---|---|---|---|---|---|---|---|---|
-| tio2 | reference benchmark; direct gap at Gamma, checked at every high-symmetry point | 2026-10-14T04:28 | pass | - | 1.848 (1.7-2.0) | 43 | 11.47 | f2899fb4 | 57e18000 | [summary](runs/2026-10-14_041639_tio2/summary.txt), [progress](runs/2026-10-14_041639_tio2/progress.txt), [changes](runs/2026-10-14_041639_tio2/changes.txt) |
+| tio2 | reference benchmark; direct gap at Gamma, checked at every high-symmetry point | 2026-11-12T20:21 | pass | - | 1.848 (1.7-2.0) | 33 | 6.35 | a6b30648 | a2607cef | [summary](runs/2026-11-12_201522_tio2/summary.txt), [progress](runs/2026-11-12_201522_tio2/progress.txt), [changes](runs/2026-11-12_201522_tio2/changes.txt) |
 | zno | polar hexagonal cell, no inversion centre; Zn 3d semicore | 2026-10-14T04:27 | pass | - | 0.755 (0.4-1.1) | 38 | 11.2 | aa0a973a | 57e18000 | [summary](runs/2026-10-14_041639_zno/summary.txt), [progress](runs/2026-10-14_041639_zno/progress.txt), [changes](runs/2026-10-14_041639_zno/changes.txt) |
 | gaas | III-V with a small direct gap (PBE nearly closes it) | 2026-10-14T04:28 | pass | - | 0.076 (0.02-0.6) | 39 | 11.45 | 10551960 | 57e18000 | [summary](runs/2026-10-14_041639_gaas/summary.txt), [progress](runs/2026-10-14_041639_gaas/progress.txt), [changes](runs/2026-10-14_041639_gaas/changes.txt) |
 | graphite | semimetal, needs smearing; layered hexagonal | 2026-10-14T04:23 | pass | - | -0.005 (metal) | 30 | 7.03 | 246b50e0 | 57e18000 | [summary](runs/2026-10-14_041639_graphite/summary.txt), [progress](runs/2026-10-14_041639_graphite/progress.txt), [changes](runs/2026-10-14_041639_graphite/changes.txt) |
@@ -50,7 +50,7 @@ core + extended.
 
 | case | what it tests | last run | result | failed checks | gap eV (expected) | steps | wall min | prompt | commit | records |
 |---|---|---|---|---|---|---|---|---|---|---|
-| tio2 | reference benchmark; direct gap at Gamma, checked at every high-symmetry point | 2026-10-14T04:28 | pass | - | 1.848 (1.7-2.0) | 43 | 11.47 | f2899fb4 | 57e18000 | [summary](runs/2026-10-14_041639_tio2/summary.txt), [progress](runs/2026-10-14_041639_tio2/progress.txt), [changes](runs/2026-10-14_041639_tio2/changes.txt) |
+| tio2 | reference benchmark; direct gap at Gamma, checked at every high-symmetry point | 2026-11-12T20:21 | pass | - | 1.848 (1.7-2.0) | 33 | 6.35 | a6b30648 | a2607cef | [summary](runs/2026-11-12_201522_tio2/summary.txt), [progress](runs/2026-11-12_201522_tio2/progress.txt), [changes](runs/2026-11-12_201522_tio2/changes.txt) |
 | zno | polar hexagonal cell, no inversion centre; Zn 3d semicore | 2026-10-14T04:27 | pass | - | 0.755 (0.4-1.1) | 38 | 11.2 | aa0a973a | 57e18000 | [summary](runs/2026-10-14_041639_zno/summary.txt), [progress](runs/2026-10-14_041639_zno/progress.txt), [changes](runs/2026-10-14_041639_zno/changes.txt) |
 | gaas | III-V with a small direct gap (PBE nearly closes it) | 2026-10-14T04:28 | pass | - | 0.076 (0.02-0.6) | 39 | 11.45 | 10551960 | 57e18000 | [summary](runs/2026-10-14_041639_gaas/summary.txt), [progress](runs/2026-10-14_041639_gaas/progress.txt), [changes](runs/2026-10-14_041639_gaas/changes.txt) |
 | graphite | semimetal, needs smearing; layered hexagonal | 2026-10-14T04:23 | pass | - | -0.005 (metal) | 30 | 7.03 | 246b50e0 | 57e18000 | [summary](runs/2026-10-14_041639_graphite/summary.txt), [progress](runs/2026-10-14_041639_graphite/progress.txt), [changes](runs/2026-10-14_041639_graphite/changes.txt) |
@@ -71,7 +71,7 @@ core + extended + stretch.
 
 | case | what it tests | last run | result | failed checks | gap eV (expected) | steps | wall min | prompt | commit | records |
 |---|---|---|---|---|---|---|---|---|---|---|
-| tio2 | reference benchmark; direct gap at Gamma, checked at every high-symmetry point | 2026-10-14T04:28 | pass | - | 1.848 (1.7-2.0) | 43 | 11.47 | f2899fb4 | 57e18000 | [summary](runs/2026-10-14_041639_tio2/summary.txt), [progress](runs/2026-10-14_041639_tio2/progress.txt), [changes](runs/2026-10-14_041639_tio2/changes.txt) |
+| tio2 | reference benchmark; direct gap at Gamma, checked at every high-symmetry point | 2026-11-12T20:21 | pass | - | 1.848 (1.7-2.0) | 33 | 6.35 | a6b30648 | a2607cef | [summary](runs/2026-11-12_201522_tio2/summary.txt), [progress](runs/2026-11-12_201522_tio2/progress.txt), [changes](runs/2026-11-12_201522_tio2/changes.txt) |
 | zno | polar hexagonal cell, no inversion centre; Zn 3d semicore | 2026-10-14T04:27 | pass | - | 0.755 (0.4-1.1) | 38 | 11.2 | aa0a973a | 57e18000 | [summary](runs/2026-10-14_041639_zno/summary.txt), [progress](runs/2026-10-14_041639_zno/progress.txt), [changes](runs/2026-10-14_041639_zno/changes.txt) |
 | gaas | III-V with a small direct gap (PBE nearly closes it) | 2026-10-14T04:28 | pass | - | 0.076 (0.02-0.6) | 39 | 11.45 | 10551960 | 57e18000 | [summary](runs/2026-10-14_041639_gaas/summary.txt), [progress](runs/2026-10-14_041639_gaas/progress.txt), [changes](runs/2026-10-14_041639_gaas/changes.txt) |
 | graphite | semimetal, needs smearing; layered hexagonal | 2026-10-14T04:23 | pass | - | -0.005 (metal) | 30 | 7.03 | 246b50e0 | 57e18000 | [summary](runs/2026-10-14_041639_graphite/summary.txt), [progress](runs/2026-10-14_041639_graphite/progress.txt), [changes](runs/2026-10-14_041639_graphite/changes.txt) |
@@ -163,6 +163,7 @@ core + extended + stretch.
 
 | date | label | backend | result | failed checks | gap eV | steps | wall min | model min | prompt | commit |
 |---|---|---|---|---|---|---|---|---|---|---|
+| 2026-11-12T20:21 | after the subpackage split (a2607ce): prompts name chem_llm.dft.* | vllm | pass | - | 1.848 | 33 | 6.35 | 4.66 | a6b30648 | a2607cef |
 | 2026-10-14T04:28 | sweep 8: repeatability, no changes since sweep 7 | vllm | pass | - | 1.848 | 43 | 11.47 | 9.38 | f2899fb4 | 57e18000 |
 | 2026-10-14T03:34 | sweep 7: Ni moment rule, validator fix, hBN range; repeatability | vllm | pass | - | 1.848 | 38 | 10.34 | 8.69 | f2899fb4 | 5f94842f |
 | 2026-10-14T02:44 | sweep 6: repeatability of all 14 + stretch suite (never tuned) | vllm | pass | - | 1.848 | 35 | 10.78 | 9.17 | 3861f7c7 | 0e1f853c |
