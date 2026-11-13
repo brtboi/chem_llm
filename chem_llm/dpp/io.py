@@ -276,6 +276,11 @@ def write_bundle(out_dir: str | Path, run: dict, *, first_band: int, n_bands: in
     recip = 2 * np.pi * np.linalg.inv(np.asarray(run["cell_angstrom"])).T
     x = np.concatenate([[0.0], np.cumsum(np.linalg.norm(np.diff(sel @ recip, axis=0), axis=1))])
     bands = E[kidx][:, first_band:first_band + n_bands] + energy_shift
+    # main_mc_Zunger.py's cost skips reference energies that are exactly 0 as missing data
+    # (fit_mc.calcIndivMSE: abs(E) > 1e-15) -- with the VBM shifted to 0 that would be the VBM.
+    # As written to 6 decimals, 1e-6 eV keeps the point in the fit and changes nothing else.
+    zeros = np.abs(bands) < 1e-6
+    bands = np.where(zeros, 1e-6, bands)
     (out / "expBandStruct_0.par").write_text(
         "".join(f"{xi:.6f} " + " ".join(f"{e:.6f}" for e in row) + "\n" for xi, row in zip(x, bands)))
     (out / "bandWeights_0.par").write_text("".join(f"{float(w)}\n" for w in band_weights))
@@ -300,6 +305,7 @@ def write_bundle(out_dir: str | Path, run: dict, *, first_band: int, n_bands: in
         "dft_bands_fitted": [first_band, first_band + n_bands - 1],
         "dft_bands_dropped_below": first_band,
         "energy_range_eV": [float(bands.min()), float(bands.max())],
+        "zero_energies_moved_to_1e-6": int(zeros.sum()),
     }
     (out / "bundle_summary.json").write_text(json.dumps(summary, indent=1))
     return summary

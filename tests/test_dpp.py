@@ -49,6 +49,9 @@ def test_write_bundle_files_and_alignment(tmp_path):
     # column 1 is DFT band 8 (O 2s) at Gamma, shifted so the VBM is 0
     assert ref[0, 1] == pytest.approx(run["energies"][0, 8] - run["vbm"], abs=1e-5)
     assert "nBands = 26" in (tmp_path / "b" / "input_0.par").read_text()
+    # the VBM (band 15 at Gamma) is not written as exactly 0: Monte Carlo would skip it as missing
+    assert ref[0, 16] == pytest.approx(1e-6) and summary["zero_energies_moved_to_1e-6"] >= 1
+    assert not np.any(ref[:, 1:] == 0.0)
     assert summary["kpoint_labels"] == ["GAMMA", "X", "M"]
     cell = (tmp_path / "b" / "system_0.par").read_text().splitlines()[3]
     assert float(cell.split()[0]) == pytest.approx(run["cell_angstrom"][0][0] / 0.529177210903, rel=1e-6)
