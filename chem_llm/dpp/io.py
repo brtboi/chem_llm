@@ -104,6 +104,115 @@ def pseudo_orbitals(upf_path: str | Path) -> list[dict]:
     return out
 
 
+def _upf_radial(upf_path: str | Path) -> dict:
+    """The radial mesh, local potential (Hartree) and pseudo-orbitals of a UPF v2 file."""
+    text = Path(upf_path).read_text(errors="replace")
+
+    def array(tag):
+        m = re.search(rf"<{tag}[^>]*>(.*?)</{tag}>", text, re.S)
+        if not m:
+            raise ValueError(f"{upf_path}: no <{tag}> (only UPF v2 files are supported)")
+        return np.array(m.group(1).split(), float)
+
+    z = float(re.search(r'z_valence\s*=\s*"\s*([-+\d.EeDd]+)', text).group(1).replace("D", "E"))
+    orbitals = []
+    for m in re.finditer(r"<PP_CHI\.\d+([^>]*)>(.*?)</PP_CHI\.\d+>", text, re.S):
+        a = dict(re.findall(r'(\w+)\s*=\s*"([^"]*)"', m.group(1)))
+        orbitals.append((a.get("label", "?").upper(), float(a.get("occupation", "0")), np.array(m.group(2).split(), float)))
+    return {"z": z, "r": array("PP_R"), "rab": array("PP_RAB"), "vloc": array("PP_LOCAL") / 2.0, "orbitals": orbitals}
+
+
+def _radial_ft(q, r, rab, f_r2):
+    """4 pi * integral f(r) r^2 sin(qr)/(qr) dr, given f(r) r^2 on the UPF mesh."""
+    return np.array([4 * np.pi * np.sum(f_r2 * np.sinc(qi * r / np.pi) * rab) for qi in q])
+
+
+def screened_form_factors(run: dict, semicore: dict, q_max: float = 30.0, n_q: int = 4097) -> dict:
+    """Screened atomic form factors v(q) (Hartree * Bohr^3, DeePseudopot's
+    convention: V(G) = sum_atoms e^{iG.tau} v(|G|) / cell volume) from the
+    run's own UPF files -- a physical starting point for the fit.
+
+    semicore    {element: [orbital labels]} dropped from the fit, e.g.
+                {"Ti": ["3S", "3P"]}: their charge (the UPF pseudo-orbitals)
+                is added to the ion, so Ti becomes an effective +4 ion.
+    The ions are then screened by the remaining valence electrons, the ones
+    in the fitted bands, as a uniform electron gas (Lindhard dielectric
+    function at the cell's valence density).
+    """
+    from scipy.special import erf
+
+    q = np.linspace(0.0, q_max, n_q)
+    volume = abs(np.linalg.det(np.asarray(run["cell_angstrom"]))) * ANGSTROM_TO_BOHR ** 3
+    species = list(dict.fromkeys(run["symbols"]))
+    _check(set(semicore) <= set(species), f"semicore names elements not in the cell: {sorted(set(semicore) - set(species))}")
+    numerators, z_eff, n_semicore = {}, {}, 0.0
+    for el in species:
+        u = _upf_radial(run["pseudopotentials"][el])
+        r, rab, z = u["r"], u["rab"], u["z"]
+        labels = {o["label"] for o in pseudo_orbitals(run["pseudopotentials"][el])}
+        wanted = {s.upper() for s in semicore.get(el, [])}
+        _check(wanted <= labels, f"{el}: semicore {sorted(wanted - labels)} not among the UPF orbitals {sorted(labels)}")
+        # local potential with its -z/r tail removed (transformed numerically) and added back analytically
+        safe_r = np.where(r > 0, r, 1.0)
+        short = np.where(r > 0, u["vloc"] + z * erf(r) / safe_r, u["vloc"] + 2 * z / np.sqrt(np.pi))
+        rho_r2 = sum((occ * chi ** 2 / (4 * np.pi) for label, occ, chi in u["orbitals"] if label in wanted),
+                     np.zeros_like(r))
+        n_sc = sum(occ for label, occ, _ in u["orbitals"] if label in wanted)
+        # q^2 * v_ion(q): finite at q = 0, where it is -4 pi (z - n_sc)
+        numerators[el] = (q ** 2 * _radial_ft(q, r, rab, short * r ** 2) - 4 * np.pi * z * np.exp(-q ** 2 / 4)
+                          + 4 * np.pi * _radial_ft(q, r, rab, rho_r2))
+        z_eff[el] = z - n_sc
+        n_semicore += n_sc * run["symbols"].count(el)
+    n_screen = run["n_electrons"] - n_semicore
+    kf = (3 * np.pi ** 2 * n_screen / volume) ** (1 / 3)
+    x = q / (2 * kf)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        lindhard = 0.5 + (1 - x ** 2) / (4 * x) * np.log(np.abs((1 + x) / (1 - x)))
+    lindhard[x == 0] = 1.0
+    lindhard[np.isclose(x, 1.0)] = 0.5
+    denominator = q ** 2 + 4 * kf / np.pi * lindhard
+    return {"q": q, "v": {el: numerators[el] / denominator for el in species}, "z_eff": z_eff,
+            "n_screening_electrons": n_screen, "cell_volume_bohr3": volume}
+
+
+def zunger_form(params, q):
+    """DeePseudopot's local form: a0 (q^2 - a1) / (a2 exp(a3 q^2) - 1)."""
+    a0, a1, a2, a3 = params[:4]
+    return a0 * (np.asarray(q) ** 2 - a1) / (a2 * np.exp(a3 * np.asarray(q) ** 2) - 1)
+
+
+def initial_zunger_params(run: dict, semicore: dict, q_fit_max: float = 8.0) -> dict:
+    """Zunger-form starting parameters for every element, least-squares fitted
+    to screened_form_factors over 0 <= q <= q_fit_max (1/Bohr). Returns
+    {element: {"params": [9 floats] (non-local and SOC terms 0),
+    "fit_rms": ..., "v0": v(0) of the screened potential, "z_eff": ...}};
+    pass {el: d["params"]} to write_bundle's init_params."""
+    from scipy.optimize import least_squares
+
+    ff = screened_form_factors(run, semicore)
+    q = ff["q"]
+    m = q <= q_fit_max
+    out = {}
+    for el, v in ff["v"].items():
+        fit = least_squares(lambda p: zunger_form(p, q[m]) - v[m], x0=[abs(v[0]) / 100, 5.0, 1.5, 0.3],
+                            bounds=([-np.inf, 0.0, 1.0001, 1e-3], [np.inf, 200.0, 50.0, 5.0]))
+        out[el] = {"params": [float(p) for p in fit.x] + [0.0] * 5,
+                   "fit_rms": float(np.sqrt(np.mean(fit.fun ** 2))), "v0": float(v[0]), "z_eff": ff["z_eff"][el]}
+    return out
+
+
+def best_zunger_params(results_dir: str | Path) -> dict:
+    """The lowest-cost Zunger parameters a Monte Carlo stage
+    (train_deepseudopot mode='zunger_mc') found: {element: [9 floats]},
+    from its best_<element>Params.dat files -- the init_params of the next stage."""
+    res = Path(results_dir)
+    files = sorted(res.glob("best_*Params.dat"))
+    if not files:
+        raise FileNotFoundError(f"no best_<element>Params.dat in {res}: the Monte Carlo stage found no improvement "
+                                "or did not run")
+    return {p.name[len("best_"):-len("Params.dat")]: [float(v) for v in p.read_text().split()] for p in files}
+
+
 def _check(cond, msg):
     if not cond:
         raise ValueError(msg)
@@ -111,7 +220,7 @@ def _check(cond, msg):
 
 def write_bundle(out_dir: str | Path, run: dict, *, first_band: int, n_bands: int, kpoint_indices,
                  band_weights, input_params: dict, nn_config: dict, init_params: dict,
-                 energy_shift: float = 0.0) -> dict:
+                 energy_shift: float = 0.0, mc_opts: dict | None = None) -> dict:
     """Write a complete DeePseudopot input bundle for one system (index 0).
 
     first_band      the DFT band (0-based) that becomes the empirical model's
@@ -124,6 +233,10 @@ def write_bundle(out_dir: str | Path, run: dict, *, first_band: int, n_bands: in
     nn_config       NN_config.par keys (num_cores must be 0; SObool must match run)
     init_params     {element: 9 Zunger-form floats} for init_<element>Params.par
     energy_shift    added to every energy (eV), e.g. -run["vbm"] to put the VBM at 0
+    mc_opts         for a Monte Carlo stage over the Zunger parameters
+                    (train_deepseudopot mode='zunger_mc'): mcOpts1.par keys,
+                    betas [cold, hot], stepsAtTemp [cold, hot], tempStepSizeMod
+                    [cold, hot], totalIter
 
     Validates the bundle against itself before writing and returns a summary.
     """
@@ -169,6 +282,14 @@ def write_bundle(out_dir: str | Path, run: dict, *, first_band: int, n_bands: in
     (out / "NN_config.par").write_text("".join(f"{k} = {v}\n" for k, v in cfg.items()))
     for el, p in init_params.items():
         (out / f"init_{el}Params.par").write_text("".join(f"{float(v)}\n" for v in p))
+    if mc_opts is not None:
+        opts = {"betas": [20, 2], "stepsAtTemp": [100, 30], "tempStepSizeMod": [1.0, 4.0], "totalIter": 3000,
+                **mc_opts, "fitDefPot": False, "fitCoupling": False, "optGaps": False}
+        for key in ("betas", "stepsAtTemp", "tempStepSizeMod"):
+            _check(len(opts[key]) == 2, f"mc_opts[{key!r}] needs two values, [cold, hot]")
+        # read_mc_opts wants 'key = a b', spaces only, no commas
+        (out / "mcOpts1.par").write_text("".join(
+            f"{k} = {' '.join(str(x) for x in v) if isinstance(v, (list, tuple)) else v}\n" for k, v in opts.items()))
     labels = dict(run["high_symmetry"])
     summary = {
         "out_dir": str(out.resolve()),
@@ -194,15 +315,21 @@ def _par(path: Path) -> dict:
 
 
 def read_fit(results_dir: str | Path, inputs_dir: str | Path) -> dict:
-    """How well the trained pseudopotential reproduces the DFT bands: the
-    last epoch_<N>_BS_sys0.dat in results_dir against inputs_dir's
-    expBandStruct_0.par. RMS error (eV) over all bands and per band, the
-    reference and fitted gap (idxVB/idxCB from input_0.par), and the files a
-    reader should look at."""
+    """How well the trained pseudopotential reproduces the DFT bands, against
+    inputs_dir's expBandStruct_0.par: for gradient training the last
+    epoch_<N>_BS_sys0.dat in results_dir, for a Monte Carlo stage over the
+    Zunger parameters its best band structure (bestBandStruct_<N>_0.dat).
+    RMS error (eV) over all bands and per band, the reference and fitted gap
+    (idxVB/idxCB from input_0.par), and the files a reader should look at."""
     res, inp = Path(results_dir), Path(inputs_dir)
     files = sorted(res.glob("epoch_*_BS_sys0.dat"), key=lambda p: int(p.name.split("_")[1]))
+    stage = "gradient"
     if not files:
-        raise FileNotFoundError(f"no epoch_*_BS_sys0.dat in {res}: training did not reach a band-structure evaluation")
+        files = sorted(res.glob("bestBandStruct_*_0.dat"), key=lambda p: int(p.name.split("_")[1]))
+        stage = "zunger_mc"
+    if not files:
+        raise FileNotFoundError(f"no epoch_*_BS_sys0.dat or bestBandStruct_*_0.dat in {res}: training did not "
+                                "reach a band-structure evaluation")
     fit = np.loadtxt(files[-1])
     ref = np.loadtxt(inp / "expBandStruct_0.par")
     _check(fit.shape == ref.shape, f"{files[-1].name} is {fit.shape}, the reference {ref.shape}")
@@ -210,6 +337,7 @@ def read_fit(results_dir: str | Path, inputs_dir: str | Path) -> dict:
     err = fit[:, 1:] - ref[:, 1:]
     params = _par(inp / "input_0.par")
     out = {
+        "stage": stage,
         "epoch_file": str(files[-1]),
         "epochs_evaluated": [int(p.name.split("_")[1]) for p in files],
         "rms_error_eV": float(np.sqrt(np.mean(err ** 2))),
@@ -221,11 +349,20 @@ def read_fit(results_dir: str | Path, inputs_dir: str | Path) -> dict:
         vb, cb = int(params["idxVB"]) + 1, int(params["idxCB"]) + 1  # +1: column 0 is the path coordinate
         out["gap_reference_eV"] = float(ref[:, cb].min() - ref[:, vb].max())
         out["gap_fit_eV"] = float(fit[:, cb].min() - fit[:, vb].max())
-    cost = res / "training_cost.dat"
-    if cost.exists():
-        c = np.loadtxt(cost)
-        c = c[:, -1] if c.ndim > 1 else c
-        out["training_cost_first_last"] = [float(c[0]), float(c[-1])]
+    for name in ("final_training_cost.dat", "training_cost.dat"):
+        if (res / name).exists():
+            c = np.loadtxt(res / name)
+            c = c[:, -1] if c.ndim > 1 else c
+            out["training_cost_first_last"] = [float(c[0]), float(c[-1])]
+            break
+    if (res / "iterations.dat").exists():
+        # header 'newMSE curMSE bstMSE %Accpt ...'; the first row lacks the leading
+        # iteration number the others have, so the best cost is its 3rd column, their 4th
+        rows = [line.split() for line in (res / "iterations.dat").read_text().splitlines()[1:] if line.strip()]
+        best = [float(r[2]) for r in rows[:1]] + [float(r[3]) for r in rows[1:]]
+        marks = sorted({0, *(len(best) * i // 4 for i in range(1, 4)), len(best) - 1})
+        out["mc_iterations"] = len(best) - 1
+        out["mc_best_cost_by_quarter"] = [round(float(best[i]), 3) for i in marks]
     out["plots"] = sorted(str(p) for p in res.glob("*plotBS.png"))[-2:] + sorted(str(p) for p in res.glob("final_plotBS.pdf"))
     out["final_pot_files"] = sorted(str(p) for p in res.glob("final_pot*.dat"))
     return out

@@ -1,5 +1,6 @@
 """Agent tool exposing the DeePseudopot package (chem_llm/DeePseudopot/) as a
-single training action: run its main.py end-to-end (Zunger-form pre-fit of
+training stage: Monte Carlo over the Zunger-form parameters (main_mc_Zunger.py),
+or its main.py end-to-end (Zunger-form pre-fit of
 the neural-network pseudopotential, then gradient-descent training against
 the reference band structure(s) in `inputs_folder`, then convergence and
 writing of the final real/reciprocal-space pseudopotentials) and report
@@ -28,76 +29,34 @@ DEEPSEUDOPOT_DIR = Path(os.environ.get("DEEPSEUDOPOT_DIR") or Path(__file__).res
 @register_tool(
     "train_deepseudopot",
     (
-        "Train a DeepPseudopot neural-network pseudopotential by running the "
-        "DeePseudopot package's main.py on an already-assembled input bundle. "
-        "This is the actual physics training step -- it: (1) pre-fits the NN "
-        "to the Zunger-form initial pseudopotentials in `inputs_folder` "
-        "(init_<Atom><N>Params.par), (2) trains the NN against the reference "
-        "band structure(s) in `inputs_folder` for the number of epochs set by "
-        "`max_num_epochs` in that folder's NN_config.par, (3) converges and "
-        "writes the final pseudopotentials to `results_folder`. It always runs "
-        "on CPU (no GPU needed) and can take anywhere from a couple minutes to "
-        "well over an hour depending on the number of k-points and bands in "
-        "the input bundle -- Hamiltonian caching (spin-orbit + nonlocal "
-        "projector matrices) happens once per k-point BEFORE any training "
-        "starts and is NOT parallelized across k-points for a single system, "
-        "so it dominates runtime for a bundle with many k-points. Prefer a "
-        "bundle with as few k-points as will still make a sensible fit "
-        "(e.g. the '_g' reduced-k-point convention used elsewhere in this "
-        "pipeline) to keep this tool call fast. `inputs_folder`'s "
-        "NN_config.par must set `num_cores = 0`: any value >= 1 routes "
-        "training through a multiprocessing pool that both uses far more "
-        "memory (observed: OOM-killed around ~200GB RSS on this package's "
-        "own reference bundle) and unconditionally calls .zero_grad() on "
-        "LSDoptimizers[key], which is None (crashing every epoch) whenever "
-        "local_env_corr = 0. Since nSystem is normally 1 for a single-job "
-        "bundle, there is nothing for multiprocessing to parallelize "
-        "across anyway, so num_cores = 0 is strictly better here, not just "
-        "a workaround.\n"
-        "`inputs_folder` must already contain a complete DeePseudopot input "
-        "bundle: NN_config.par, system_0.par, kpoints_0.par, "
-        "expBandStruct_0.par, bandWeights_0.par, input_0.par, and one "
-        "init_<Atom><N>Params.par per atom in system_0.par's atom list "
-        "(e.g. init_Cs0Params.par, init_Pb2Params.par, init_Br11Params.par). "
-        "You MUST check the returned `success` boolean before treating this "
-        "as having produced a trained model -- do not infer success from "
-        "stdout being non-empty or from `results_folder` existing: this tool "
-        "always creates `results_folder` and lets main.py write into it even "
-        "when main.py errors out partway through, so a failed run can still "
-        "leave partial files (e.g. only `initZunger_PPmodel.pth`) behind. "
-        "`success` is only true when main.py exited with code 0 AND the "
-        "final `final_pot_<Atom><N>.dat` file for every atom was written -- "
-        "those files are only written once, at the very end of main.py, "
-        "after training has fully converged and finished, so their presence "
-        "is the one reliable 'the whole pipeline actually finished' signal. "
-        "`final_pot_files` lists them; `trained_model_path` (if present) is "
-        "the final epoch's NN weights, `epoch_<max_num_epochs>_PPmodel.pth` -- "
-        "that .pth file, together with the final_pot_* files, IS the trained "
-        "neural-network pseudopotential this whole pipeline exists to "
-        "produce. When `success` is false, read `stderr_tail` (and "
-        "`stdout_tail`) to see exactly what failed -- treat it like a "
-        "run_python error under rule 3 of the system prompt: diagnose and "
-        "fix the input bundle (e.g. a malformed .par file, a band count "
-        "mismatch between bandWeights_0.par and expBandStruct_0.par), then "
-        "call this tool again. Do not call 'done' while `success` is false."
+        "Run one DeePseudopot training stage on an input bundle written by "
+        "chem_llm.dpp.io.write_bundle. CPU only; minutes to an hour.\n"
+        "mode='zunger_mc' (the first stage): Monte Carlo over the Zunger-form "
+        "parameters in init_<element>Params.par (main_mc_Zunger.py), with the "
+        "options in the bundle's mcOpts1.par (write_bundle(..., mc_opts=...)). "
+        "Writes best_<element>Params.dat (the lowest-cost parameters, the next "
+        "stage's init_params via chem_llm.dpp.io.best_zunger_params), "
+        "bestBandStruct_<N>_0.dat and iterations.dat. Success = every element's "
+        "best_<element>Params.dat was written.\n"
+        "mode='gradient': main.py. Pre-fits the neural network to the Zunger "
+        "form in init_<element>Params.par for init_Zunger_num_epochs, then "
+        "trains it by gradient descent for max_num_epochs (NN_config.par), and "
+        "writes final_pot_<element>.dat and epoch_<N>_PPmodel.pth (the trained "
+        "model). Success = main.py exited 0 and wrote final_pot_* for every "
+        "element.\n"
+        "Check `success` before going on; when false, read stderr_tail, fix "
+        "the bundle and call again. Score every stage with "
+        "chem_llm.dpp.io.read_fit(results_folder, inputs_folder)."
     ),
     {
-        "inputs_folder": (
-            "string. Path to a directory containing a complete DeePseudopot "
-            "input bundle (see description)."
-        ),
-        "results_folder": (
-            "string. Directory to write training outputs to; created if it "
-            "does not already exist."
-        ),
-        "timeout_seconds": (
-            "int (optional, default 5400). Kill the training run and report "
-            "failure if it has not finished within this many seconds."
-        ),
+        "inputs_folder": "string. The input bundle directory.",
+        "results_folder": "string. Where the stage writes its output; created if missing. Use a new one per stage.",
+        "mode": "string (optional, default 'gradient'). 'zunger_mc' or 'gradient'.",
+        "timeout_seconds": "int (optional, default 5400). Stop the stage and report failure after this long.",
     },
     remember_on=("inputs_folder", "results_folder"),
 )
-def train_deepseudopot(inputs_folder: str, results_folder: str, timeout_seconds: int = 5400):
+def train_deepseudopot(inputs_folder: str, results_folder: str, mode: str = "gradient", timeout_seconds: int = 5400):
     if not (DEEPSEUDOPOT_DIR / "main.py").exists():
         return {
             "success": False,
@@ -111,7 +70,11 @@ def train_deepseudopot(inputs_folder: str, results_folder: str, timeout_seconds:
     if not inputs_path.is_dir():
         return {"success": False, "stderr_tail": f"{inputs_path} is not a directory"}
 
+    if mode not in ("gradient", "zunger_mc"):
+        return {"success": False, "stderr_tail": f"mode must be 'gradient' or 'zunger_mc', got {mode!r}"}
     required = ["NN_config.par", "system_0.par", "kpoints_0.par", "expBandStruct_0.par", "bandWeights_0.par", "input_0.par"]
+    if mode == "zunger_mc":
+        required.append("mcOpts1.par")
     missing = [f for f in required if not (inputs_path / f).exists()]
     if missing:
         return {
@@ -129,7 +92,7 @@ def train_deepseudopot(inputs_folder: str, results_folder: str, timeout_seconds:
 
     try:
         result = subprocess.run(
-            [sys.executable, "main.py", inputs_arg, results_arg],
+            [sys.executable, "main_mc_Zunger.py" if mode == "zunger_mc" else "main.py", inputs_arg, results_arg],
             cwd=DEEPSEUDOPOT_DIR,
             capture_output=True,
             text=True,
@@ -143,6 +106,24 @@ def train_deepseudopot(inputs_folder: str, results_folder: str, timeout_seconds:
             "results_folder": str(results_path),
         }
 
+    elements = _elements(inputs_path / "system_0.par")
+    # which inputs each results folder came from, for read_fit and the agent's own bookkeeping
+    (results_path / "inputs_folder.txt").write_text(str(inputs_path) + "\n")
+    if mode == "zunger_mc":
+        best = {el: str(results_path / f"best_{el}Params.dat") for el in elements}
+        success = all(Path(f).exists() for f in best.values())
+        out = {"success": success, "mode": mode, "returncode": result.returncode,
+               "inputs_folder": str(inputs_path), "results_folder": str(results_path),
+               "best_params_files": best if success else {}}
+        if success and result.returncode != 0 and "realSpacePot" in result.stderr:
+            # main_mc_Zunger.py writes best_*Params.dat, then crashes in its last step
+            # (a tensor-shape bug in realSpacePot writing final_pot_*); the fit is complete.
+            out["note"] = ("the Monte Carlo fit finished and wrote best_*Params.dat; DeePseudopot's optional "
+                           "real-space write-out after it crashed (a known bug), which does not affect the result")
+        out["stdout_tail"] = result.stdout[-3000:]
+        out["stderr_tail"] = "" if out.get("note") else result.stderr[-3000:]
+        return out
+
     final_pot_files = sorted(str(p) for p in results_path.glob("final_pot_*.dat"))
 
     # NNConfig.max_num_epochs isn't known to this tool without re-parsing
@@ -154,10 +135,12 @@ def train_deepseudopot(inputs_folder: str, results_folder: str, timeout_seconds:
     )
     trained_model_path = str(epoch_checkpoints[-1]) if epoch_checkpoints else None
 
-    success = result.returncode == 0 and len(final_pot_files) > 0
+    success = result.returncode == 0 and all(
+        any(Path(f).name == f"final_pot_{el}.dat" for f in final_pot_files) for el in elements)
 
     return {
         "success": success,
+        "mode": mode,
         "returncode": result.returncode,
         "inputs_folder": str(inputs_path),
         "results_folder": str(results_path),
@@ -166,3 +149,10 @@ def train_deepseudopot(inputs_folder: str, results_folder: str, timeout_seconds:
         "stdout_tail": result.stdout[-3000:],
         "stderr_tail": result.stderr[-3000:],
     }
+
+
+def _elements(system_par: Path) -> list[str]:
+    """The element symbols of system_0.par's atoms block, in order of first appearance."""
+    lines = system_par.read_text().splitlines()
+    start = next(i for i, line in enumerate(lines) if line.strip().lower() == "atoms") + 1
+    return list(dict.fromkeys(line.split()[0] for line in lines[start:] if line.split()))

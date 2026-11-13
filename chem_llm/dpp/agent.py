@@ -112,25 +112,43 @@ SYSTEM_PROMPT_BASE = (
     "  Plane waves ~ V * (2 * maxKE)**1.5 / (6 * pi**2), V the cell volume in Bohr**3. Choose maxKE so that "
     "is at least 4x n_bands, compute and print it; cost grows steeply with maxKE, so do not go far beyond.\n\n"
     "RULE: initial pseudopotential\n"
-    "  IF   the task gives Zunger-form init parameters for every element THEN use them\n"
-    "  ELSE start from all-zero 9-parameter vectors and set init_Zunger_num_epochs = 0. Never invent "
-    "Zunger parameters from memory.\n\n"
-    "RULE: training\n"
-    "  First a short run (the task gives the epoch budget) to confirm the loss falls; check read_fit. "
-    "If it is falling and time remains, train once more, longer, into a new results folder. Use "
-    "plotEvery so that the last epoch is a multiple of it (read_fit needs an epoch_<N>_BS_sys0.dat).\n\n"
+    "  init_params = {el: d['params'] for el, d in initial_zunger_params(run, semicore).items()}, with "
+    "semicore the orbitals INVARIANT 2 dropped, per element (e.g. {'Ti': ['3S', '3P']}; elements with "
+    "none may be left out). It fits the Zunger form to each element's local potential from the run's own "
+    "UPF file, with the semicore shells counted as core and screened by the remaining valence electrons. "
+    "Print each element's fit_rms, v0 and z_eff. Never type Zunger parameters in from memory, and never "
+    "start from all zeros: a zero potential is a free-electron gas, far from any solid.\n\n"
+    "RULE: training -- Monte Carlo first, then gradient descent\n"
+    "  Stage 1, Monte Carlo over the Zunger parameters: a bundle written with mc_opts (betas [20, 2], "
+    "stepsAtTemp [100, 30], tempStepSizeMod [1.0, 4.0]: the hot phase takes 4x larger steps to escape "
+    "local minima; totalIter from the task), trained with train_deepseudopot(..., mode='zunger_mc'). "
+    "Read the fit with read_fit: rms_error_eV, gap_fit_eV and mc_best_cost_by_quarter.\n"
+    "  IF   rms_error_eV > 2.0 AND the best cost fell by more than 10% over the last quarter of the run\n"
+    "  THEN another Monte Carlo round, starting from init_params = best_zunger_params(<that results "
+    "folder>), into a new inputs and results folder\n"
+    "  ELSE switch to Stage 2 (Monte Carlo has either fit well enough or stopped improving).\n"
+    "  Stage 2, gradient descent on the neural network: a bundle with init_params = "
+    "best_zunger_params(<the best Monte Carlo results folder>), init_Zunger_num_epochs = 2000 (the "
+    "network is first fitted to that Zunger form), mc_bool = 0, optimizer_lr = 0.01, max_num_epochs from "
+    "the task and plotEvery dividing it (read_fit needs an epoch_<N>_BS_sys0.dat), trained with "
+    "mode='gradient'. Report the stage whose read_fit is best.\n\n"
     "=== HELPERS (chem_llm.dpp.io; use them, do not re-parse QE files by hand) ===\n"
-    "    from chem_llm.dpp.io import read_qe_run, pseudo_orbitals, write_bundle, read_fit\n"
+    "    from chem_llm.dpp.io import (read_qe_run, pseudo_orbitals, initial_zunger_params, write_bundle,\n"
+    "                                 best_zunger_params, read_fit)\n"
     "    run = read_qe_run('qe_run')     # dict: symbols, cell_angstrom, energies (nk, nbnd) eV, n_occupied,\n"
     "                                    # spin_orbit, kpoints, high_symmetry [(idx, label)], vbm, cbm, gap,\n"
     "                                    # pseudopotentials {element: upf path}\n"
     "    pseudo_orbitals(run['pseudopotentials']['Ti'])  # [{'label': '3S', 'l': 0, 'occupation': 2.0}, ...]\n"
-    "    write_bundle('nn_inputs', run, first_band=..., n_bands=..., kpoint_indices=[...],\n"
+    "    initial_zunger_params(run, {'Ti': ['3S', '3P']})  # {el: {'params': [9], 'fit_rms', 'v0', 'z_eff'}}\n"
+    "    write_bundle('mc_inputs', run, first_band=..., n_bands=..., kpoint_indices=[...],\n"
     "                 band_weights=[...], input_params={'maxKE': ..., 'idxVB': ..., 'idxCB': ...,\n"
     "                 'systemName': ..., 'BS_plot_center': 0.0, 'BS_plot_CBVB_range': 8.0,\n"
     "                 'BS_plot_CBVB_range_zoom': 4.0}, nn_config={...}, init_params={el: [9 floats]},\n"
-    "                 energy_shift=-run['vbm'])   # validates, writes every bundle file, returns a summary\n"
-    "    read_fit('dpp_results', 'nn_inputs')    # rms_error_eV, gap_reference_eV, gap_fit_eV, per-band errors\n\n"
+    "                 energy_shift=-run['vbm'],    # validates, writes every bundle file, returns a summary\n"
+    "                 mc_opts={...})               # Stage 1 only: writes mcOpts1.par\n"
+    "    best_zunger_params('mc_results')         # {el: [9 floats]}: the best a Monte Carlo stage found\n"
+    "    read_fit('mc_results', 'mc_inputs')      # stage, rms_error_eV, gap_reference_eV, gap_fit_eV, per-band\n"
+    "                                             # errors; for Monte Carlo also mc_best_cost_by_quarter\n\n"
 )
 
 
@@ -154,18 +172,18 @@ WORKFLOW (checkpoint after each step: state in 1-2 sentences what you verified):
 
 STEP 1: Write and run inspect_run.py: read_qe_run('qe_run'); print the atoms, the electron count and occupied bands, spin-orbit, the number of DFT bands and k-points, the high-symmetry points, VBM/CBM/gap, and for every element its pseudo_orbitals. Print each DFT band's minimum and maximum energy so the semicore, valence and conduction groups are visible.
 
-STEP 2: Write a note deciding first_band (INVARIANT 2), n_bands (RULE: conduction bands), idxVB/idxCB (INVARIANT 3), the k-points (RULE: k-points), the band weights, maxKE (RULE: basis) and the initial pseudopotential (RULE: initial pseudopotential), each with the numbers from STEP 1 behind it.
+STEP 2: Write a note deciding first_band and the semicore orbitals (INVARIANT 2), n_bands (RULE: conduction bands), idxVB/idxCB (INVARIANT 3), the k-points (RULE: k-points), the band weights and maxKE (RULE: basis), each with the numbers from STEP 1 behind it.
 
-STEP 3: Write and run build_nn_inputs.py: compute those choices in code from read_qe_run's result, with the INVARIANT asserts, and call write_bundle('nn_inputs', ...) with NN_config.par read from the template and adjusted for the first training run: max_num_epochs = {first_epochs}, plotEvery dividing it. Read back nn_inputs/input_0.par and nn_inputs/bundle_summary.json.
+STEP 3: Write and run build_mc_inputs.py: compute those choices in code from read_qe_run's result, with the INVARIANT asserts; compute init_params (RULE: initial pseudopotential); and call write_bundle('mc_inputs', ..., mc_opts={{'totalIter': {mc_iter}}}) with NN_config.par read from the template. Read back mc_inputs/input_0.par, mc_inputs/mcOpts1.par and mc_inputs/bundle_summary.json.
 
-STEP 4: train_deepseudopot(inputs_folder='nn_inputs', results_folder='dpp_results'). Check `success`. Then write and run check_fit.py printing read_fit('dpp_results', 'nn_inputs').
+STEP 4: train_deepseudopot(inputs_folder='mc_inputs', results_folder='mc_results', mode='zunger_mc'). Check `success`. Write and run check_fit.py printing read_fit for it. Apply RULE: training -- another Monte Carlo round (mc_inputs_2 / mc_results_2, ...) or Stage 2.
 
-STEP 5: If the training cost fell and the fit is not yet good (RMS error above ~0.5 eV or a gap off by more than ~0.3 eV), copy the bundle to nn_inputs_long/ with max_num_epochs = {long_epochs} (and plotEvery dividing it), train into dpp_results_long/, and check it the same way. Otherwise skip this step.
+STEP 5: Write and run build_gd_inputs.py: the same bundle choices, init_params = best_zunger_params(<best Monte Carlo results>), max_num_epochs = {gd_epochs}, written to gd_inputs (no mc_opts). train_deepseudopot(inputs_folder='gd_inputs', results_folder='gd_results', mode='gradient'), check `success`, and print read_fit for it.
 
 DONE CRITERIA:
-- inspect_run.py, build_nn_inputs.py and check_fit.py ran with returncode 0, with the INVARIANT asserts in build_nn_inputs.py.
-- train_deepseudopot returned success: true.
-- The done summary gives: first_band and why (which orbitals are semicore, electron count), n_bands, idxVB/idxCB, the k-points, maxKE and the plane-wave count, the epochs trained, and read_fit's RMS error, max error, and DFT vs fitted gap for the final model; the paths of the trained model (the final epoch's .pth and final_pot_*.dat) and the band-structure plot; and an honest statement of fit quality and what would improve it.
+- inspect_run.py, build_mc_inputs.py, build_gd_inputs.py and check_fit.py ran with returncode 0, with the INVARIANT asserts in the build scripts.
+- train_deepseudopot returned success: true for the Monte Carlo stage and for the gradient stage.
+- The done summary gives: first_band and why (which orbitals are semicore, electron count), n_bands, idxVB/idxCB, the k-points, maxKE and the plane-wave count, the initial Zunger parameters' fit_rms per element, the Monte Carlo rounds and iterations and the gradient epochs, and for every stage read_fit's RMS error, max error, and DFT vs fitted gap; the paths of the trained model (the final epoch's .pth and final_pot_*.dat) and the band-structure plot; and an honest statement of fit quality and what would improve it.
 """
 
 
@@ -199,16 +217,16 @@ class FitResult:
 
 
 def _latest_fit(work_dir: Path) -> tuple[Path | None, dict | None]:
-    """The best-scoring results folder the run trained (read_fit), if any."""
+    """The best-scoring stage the run trained (read_fit), if any: every
+    results folder train_deepseudopot wrote (it records its inputs folder in
+    inputs_folder.txt)."""
     from .io import read_fit
 
     best = (None, None)
-    for res in sorted(work_dir.glob("dpp_results*")):
-        inputs = work_dir / res.name.replace("dpp_results", "nn_inputs")
-        if not list(res.glob("final_pot*.dat")):
-            continue
+    for marker in sorted(work_dir.glob("*/inputs_folder.txt")):
+        res = marker.parent
         try:
-            fit = read_fit(res, inputs)
+            fit = read_fit(res, Path(marker.read_text().strip()))
         except Exception:
             continue
         if best[1] is None or fit["rms_error_eV"] < best[1]["rms_error_eV"]:
@@ -230,7 +248,7 @@ class DeePseudopotAgent:
         return self.agent.settings
 
     def run(self, qe_run: str | Path, work_dir: str | Path | None = None, *, name: str | None = None,
-            max_steps: int = 40, first_epochs: int = 100, long_epochs: int = 600, clear_dir: bool = True,
+            max_steps: int = 40, mc_iter: int = 3000, gd_epochs: int = 600, clear_dir: bool = True,
             template: str | Path | None = None, verbose: bool = True, on_step=None) -> FitResult:
         from ..core.agent_core import run_agent
         from .io import read_qe_run
@@ -253,8 +271,7 @@ class DeePseudopotAgent:
         template = Path(template or EXAMPLE_DIR / "NN_config_template.par").resolve()
 
         load_s = self.agent.load()
-        task = TASK.format(name=name, docs=DOCS_DIR, template=template, first_epochs=first_epochs,
-                           long_epochs=long_epochs)
+        task = TASK.format(name=name, docs=DOCS_DIR, template=template, mc_iter=mc_iter, gd_epochs=gd_epochs)
         prompt = system_prompt()
         _, dispatch = _tools()
         loaded = self.agent._loaded
@@ -301,14 +318,14 @@ def main(argv=None) -> int:
     p.add_argument("--model", default=None)
     p.add_argument("--vllm-url", default=None)
     p.add_argument("--max-steps", type=int, default=40)
-    p.add_argument("--first-epochs", type=int, default=100)
-    p.add_argument("--long-epochs", type=int, default=600)
+    p.add_argument("--mc-iter", type=int, default=3000, help="Monte Carlo steps per round (stage 1)")
+    p.add_argument("--gd-epochs", type=int, default=600, help="gradient-descent epochs (stage 2)")
     p.add_argument("--pretty-progress", action="store_true")
     args = p.parse_args(argv)
     settings = Settings.from_yaml(args.config) if args.config else Settings.discover()
     agent = DeePseudopotAgent(settings=settings, backend=args.backend, model=args.model, vllm_url=args.vllm_url)
     result = agent.run(args.qe_run, args.work_dir, name=args.name, max_steps=args.max_steps,
-                       first_epochs=args.first_epochs, long_epochs=args.long_epochs,
+                       mc_iter=args.mc_iter, gd_epochs=args.gd_epochs,
                        verbose=not args.pretty_progress,
                        on_step=ProgressPrinter() if args.pretty_progress else None)
     print(result)
