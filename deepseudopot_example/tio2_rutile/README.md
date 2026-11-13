@@ -40,19 +40,31 @@ The earlier one-shot attempt in `sandbox/test_claude` fed it all 48 bands from b
 ## NN_config_template.par
 
 The `NN_config.par` the agent starts from: single system, no spin-orbit, `num_cores = 0`
-(>= 1 crashes every epoch and runs out of memory). It also sets
-`init_Zunger_num_epochs = 0`, because no fitted Zunger parameters exist for Ti or O, so
-training starts from zero.
+(>= 1 crashes every epoch and runs out of memory), `init_Zunger_num_epochs = 2000` (the
+gradient stage first fits the network to the Zunger form it starts from), `optimizer_lr = 0.01`.
 
-Measured by hand on this run before the agent's test: a bundle of bands 8–33 at the six
-unique high-symmetry points, `maxKE = 4` Ha, starting from zero. Training takes about 1 s per
-epoch on the CPU:
+## Training: a physical start, Monte Carlo, then gradient descent
 
-| `optimizer_lr` | epochs | RMS error | gap (fit vs DFT 1.85 eV) |
+Measured by hand on this run (bands 8–31, the six unique high-symmetry points, `maxKE = 2.9` Ha,
+about 100 plane waves; gap bands weighted 4x). RMS error over all fitted bands, against DFT:
+
+| stage | time | RMS error | gap (DFT 1.85 eV) |
 |---|---|---|---|
-| 0.001 | 4 | 15.2 eV | −5.7 eV |
-| 0.01 | 100 | 7.2 eV | −0.9 eV |
-| 0.01 | 200 | 3.8 eV | −2.3 eV |
+| all-zero start, 600 gradient epochs (the agent's first run) | 9 min | 1.59 eV | −2.64 eV |
+| random network, 40 Monte Carlo steps on its weights | 1 min | ~14 eV, loss down 3% | — |
+| start from the UPF files (`initial_zunger_params`), no training | — | 16.7 eV | — |
+| + Monte Carlo over the Zunger parameters, 300 + 3000 steps | 4.5 min | 1.84 eV | −1.84 eV |
+| + gradient descent from that, 600 epochs | 10 min | 1.08 eV (flat after 400) | −1.33 eV |
 
-So 0.01 is the template's rate. From zero, a usable fit needs many hundreds of epochs, or a
-better starting point than zero.
+- **Start:** each element's local potential from its UPF file, with Ti's 3s/3p shells counted as
+  core (Ti becomes a +4 ion, O is +6), Lindhard-screened by the 32 electrons in the fitted bands.
+  As screened local potentials they bind 8 spurious Ti s/p-like states below O 2s: 12 deep bands
+  where DFT has 4.
+- **Monte Carlo over the 4 Zunger parameters per element** (`main_mc_Zunger.py`, about 0.07 s
+  per step) fixes the band groups: 4 O 2s, 12 O 2p, then the conduction bands. Monte Carlo over
+  the network's weights (`mc_bool = 1`) is about 1.5 s per step and barely moves from a random
+  network.
+- **The gap stays inverted.** Evaluating the Monte Carlo potential at `maxKE` 2.9, 4.5 and 6 Ha
+  gives −1.84, −1.67 and −1.65 eV, so the basis is not the limit. A purely local potential does not
+  place the Ti 3d conduction bands; the non-local terms of the DeePseudopot checkout chem_llm
+  vendors (parameters 6–7, l = 1, added only in the spin-orbit Hamiltonian) cannot either.

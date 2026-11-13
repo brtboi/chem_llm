@@ -17,6 +17,25 @@ and `bench/runs/`.
     every high-symmetry point within 0.009 eV of the reference; the plot script imports
     `chem_llm.dft.kpath`.
 
+- **DeePseudopot: Monte Carlo first, then gradient descent, from a start derived from the UPF
+  files** (a10cdcc). The all-zero start is gone: `dpp.io.initial_zunger_params` fits the Zunger
+  form to each element's UPF local potential, semicore shells counted as core (Ti +4, O +6),
+  Lindhard-screened by the fitted bands' electrons. Stage 1 is Monte Carlo over the Zunger
+  parameters (`train_deepseudopot(mode='zunger_mc')`, `main_mc_Zunger.py`); stage 2 is gradient
+  descent on the network from the best Monte Carlo parameters. A collaborator's graphene runs
+  are in `deepseudopot_example/graphene_mc_gradient/` as reference configurations.
+  - *By hand, rutile TiO2:* UPF start 16.7 eV RMS → Monte Carlo 1.84 eV (4.5 min) → gradient
+    1.08 eV (flat after epoch 400). Monte Carlo on the network's weights instead barely moves
+    from a random network (~1.5 s/step vs 0.07 s/step over the 8 Zunger parameters).
+  - *Agent, rutile TiO2* (`sandbox/dpp_tio2/run2`, Qwen3.8-27B on vLLM, 21 steps, 19 min):
+    same choices (first_band 8, 24 bands, 6 points, maxKE 2.9 Ha); Monte Carlo 3000 steps →
+    1.90 eV, switched to gradient per the rule → **RMS 1.07 eV, gap −1.20 eV vs 1.85 eV DFT**
+    (last week: 1.59 eV, −2.64 eV).
+  - *The gap stays inverted, and it is not the basis:* the Monte Carlo potential at maxKE 2.9,
+    4.5, 6 Ha gives −1.84, −1.67, −1.65 eV. A local potential does not place the Ti 3d
+    conduction bands; the vendored checkout's non-local terms (l = 1, spin-orbit path only)
+    cannot either.
+
 ## Week of 2026-11-02
 
 - **Phase names resolve in code** (e250f25). Given only "rutile", the agent picked I4_1/amd

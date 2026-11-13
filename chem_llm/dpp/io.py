@@ -185,7 +185,8 @@ def initial_zunger_params(run: dict, semicore: dict, q_fit_max: float = 8.0) -> 
     """Zunger-form starting parameters for every element, least-squares fitted
     to screened_form_factors over 0 <= q <= q_fit_max (1/Bohr). Returns
     {element: {"params": [9 floats] (non-local and SOC terms 0),
-    "fit_rms": ..., "v0": v(0) of the screened potential, "z_eff": ...}};
+    "fit_rms": ..., "v0": v(0) of the screened potential, "z_eff": ...}}
+    (fit_rms and v0 in Hartree * Bohr^3, the form factor's unit -- not eV);
     pass {el: d["params"]} to write_bundle's init_params."""
     from scipy.optimize import least_squares
 
