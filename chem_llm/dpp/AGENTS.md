@@ -167,11 +167,15 @@ bands weighted 4x. DFT gap 1.85 eV. RMS over all fitted bands.
 | UPF start, no training | 16.7 eV | - |
 | + Zunger MC, 3000 steps | 1.8-1.9 eV | about -1.8 eV |
 | + gradient descent, 600 epochs (agent, 21 steps, 19 min) | 1.07 eV | -1.20 eV |
+| best of 6 Monte Carlo runs (x25 steps then x1; gap -0.41 eV) + gradient 400 epochs | 1.12 eV | **-0.16 eV** |
 
 - **Monte Carlo step size** (`tempStepSizeMod`, x1 to x25 of the 1% default, same start): big steps
   get down faster early (cost < 10 at step 426 at x25 vs 1073 at x1) but acceptance falls from 32%
   to 1% and all ended at cost 6.7-7.1. **Runs are noisy**: identical settings ended between 5.5 and
   15. Several short big-step runs in parallel, keeping the best, then small steps, beats one run.
+  Which Monte Carlo minimum gradient descent starts from matters more than step size or epochs:
+  from the one run whose gap was -0.41 eV, gradient descent reached -0.16 eV; from a typical
+  one (about -1.8 eV), -1.2 eV. Pick the run with the best gap among those with similar RMS.
 - **The gap stays inverted, and it is not the basis or the training**: the Monte Carlo potential at
   maxKE 2.9 / 4.5 / 6 Ha gives -1.84 / -1.67 / -1.65 eV; gradient descent is flat after ~400 epochs;
   counting the VBM (rule 4.2) did not change it. A local potential does not place the Ti 3d

@@ -36,6 +36,13 @@ and `bench/runs/`.
     conduction bands; the vendored checkout's non-local terms (l = 1, spin-orbit path only)
     cannot either.
 
+- **DeePseudopot Monte Carlo step size and noise** (c28fe02, 7f5c612). Steps x1 to x25 of the
+  1% default (`tempStepSizeMod`): big steps descend faster early, but acceptance falls from 32% to
+  1% and all end near the same cost; identical settings vary from 5.5 to 15 between runs. The one
+  run that ended with gap −0.41 eV gave, after 400 gradient epochs, **RMS 1.12 eV, gap −0.16 eV**
+  (vs −1.20 eV from a typical run). Found and fixed: Monte Carlo skipped the VBM, written as exactly
+  0 eV. Guide for coding agents: `chem_llm/dpp/AGENTS.md`.
+
 ## Week of 2026-11-02
 
 - **Phase names resolve in code** (e250f25). Given only "rutile", the agent picked I4_1/amd
