@@ -25,9 +25,9 @@ import argparse
 import contextlib
 import sys
 
-from .agent import DFTAgent
+from ..agent import DFTAgent
 from .progress import ProgressPrinter
-from .settings import Settings
+from ..settings import Settings
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -86,7 +86,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
     if args.summarize_log:
-        from .report import summarize_log
+        from ..records.report import summarize_log
 
         try:
             print(summarize_log(args.summarize_log, index=args.index), end="")
@@ -96,7 +96,7 @@ def main(argv=None) -> int:
         return 0
 
     if args.diff_runs:
-        from .rundiff import diff_runs
+        from ..records.rundiff import diff_runs
 
         try:
             print(diff_runs(*args.diff_runs), end="")
@@ -108,7 +108,7 @@ def main(argv=None) -> int:
     settings = Settings.from_yaml(args.config) if args.config else Settings.discover()
 
     if args.spacegroup:
-        from .polymorphs import classify_spacegroup
+        from ..dft.polymorphs import classify_spacegroup
 
         try:
             symbol, number, name = classify_spacegroup(args.spacegroup)
@@ -141,8 +141,8 @@ def main(argv=None) -> int:
         max_steps=args.max_steps,
     )
     if args.start_vllm and agent.backend == "vllm":
-        from .local_models import model_config
-        from .vllm_server import VLLMError, ensure_server
+        from ..llm.local_models import model_config
+        from ..llm.vllm_server import VLLMError, ensure_server
 
         try:
             ensure_server(agent.settings, agent.model_name, model_config(agent.settings, agent.model_name))

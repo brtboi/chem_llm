@@ -1,7 +1,7 @@
 """The agent loop end to end: scripted model, real tools (QE mocked)."""
 import io
 
-from chem_llm.progress import ProgressPrinter
+from chem_llm.cli.progress import ProgressPrinter
 from conftest import HELLO, records
 
 
@@ -16,7 +16,7 @@ def test_run_completes_and_executes_tools(run_scripted, tmp_path):
 
 
 def test_prompt_is_system_prompt_plus_working_memory(run_scripted):
-    from chem_llm.agent_core import SYSTEM_PROMPT_TEMPLATE
+    from chem_llm.core.agent_core import SYSTEM_PROMPT_TEMPLATE
 
     result, llm = run_scripted(HELLO)
     system, user = llm.seen[2]

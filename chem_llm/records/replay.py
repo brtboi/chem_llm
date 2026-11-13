@@ -2,7 +2,7 @@
 order, without asking an LLM to generate them.
 
 Every run_agent() call appends one line to a log.jsonl -- a run record
-(chem_llm.runlog, any format version) whose `steps` hold the ordered tool
+(chem_llm.records.runlog, any format version) whose `steps` hold the ordered tool
 calls that run made. `replay_run` reads that list out of a chosen
 run and drives it back through `run_step_loop` (the same loop `run_agent`
 uses), pulling `{tool, args}` from the recording instead of the model. Tools
@@ -11,19 +11,20 @@ write_file/... calls with the same arguments -- it does not merely print
 back the old results.
 
 CLI usage:
-    python -m chem_llm.replay sandbox/test17                # replay latest run in that dir's log.jsonl
-    python -m chem_llm.replay sandbox/test17 --index 0       # replay the first recorded run
-    python -m chem_llm.replay sandbox/test17/log.jsonl -i -2 # a log.jsonl path works too
-    python -m chem_llm.replay sandbox/test17 --use-config-work-dir  # execute in config.WORK_DIR instead
+    python -m chem_llm.records.replay sandbox/test17                # replay latest run in that dir's log.jsonl
+    python -m chem_llm.records.replay sandbox/test17 --index 0       # replay the first recorded run
+    python -m chem_llm.records.replay sandbox/test17/log.jsonl -i -2 # a log.jsonl path works too
+    python -m chem_llm.records.replay sandbox/test17 --use-config-work-dir  # execute in config.WORK_DIR instead
 """
 import argparse
 import json
 import time
 from pathlib import Path
 
-from . import REPO_ROOT, config
-from .agent_core import append_log, build_log_entry, prepare_work_dir, run_step_loop
-from .state import AgentState
+from .. import REPO_ROOT
+from ..core import config
+from ..core.agent_core import append_log, build_log_entry, prepare_work_dir, run_step_loop
+from ..core.state import AgentState
 
 
 def resolve_log_file(path: Path) -> Path:
@@ -57,7 +58,7 @@ def load_run(log_file: Path, index: int) -> dict:
 def make_replay_step_source(recorded_history: list[dict], verbose: bool = True):
     """Build a `next_tool_call(state, step)` source for `run_step_loop` that
     replays `recorded_history` (a [{step, tool, args, result}] list, from
-    chem_llm.runlog.history_of) instead of generating calls."""
+    chem_llm.records.runlog.history_of) instead of generating calls."""
 
     def next_tool_call(state: AgentState, step: int):
         if step > len(recorded_history):
@@ -222,7 +223,7 @@ def parse_args(argv=None) -> argparse.Namespace:
     parser.add_argument(
         "--use-config-work-dir",
         action="store_true",
-        help="Execute the replay in chem_llm.config.WORK_DIR instead of the directory "
+        help="Execute the replay in chem_llm.core.config.WORK_DIR instead of the directory "
              "that owns log_path (the default: replay in place).",
     )
     parser.add_argument(

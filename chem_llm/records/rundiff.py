@@ -71,7 +71,7 @@ def _flatten(d: dict, prefix: str = "") -> dict:
 
 def _numbers(entry: dict) -> dict:
     """Comparable figures for one run; None where the run did not record them."""
-    from .history import run_succeeded
+    from ..core.history import run_succeeded
 
     from .runlog import history_of
 

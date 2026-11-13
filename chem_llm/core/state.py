@@ -3,7 +3,7 @@ import json
 import uuid
 
 from .history import progress_ledger, run_succeeded, trimmed_view
-from .tools import REMEMBER_FIELDS
+from ..tools import REMEMBER_FIELDS
 
 class AgentState:
     def __init__(self, task: str):
@@ -20,7 +20,7 @@ class AgentState:
         self.done = False
         self.final_result = None
         self.dispatch: dict | None = None       # tool table if not the DFT agent's (agent_core.execute_tool)
-        self.steps: list[dict] = []             # per-step timing/token records (chem_llm.telemetry)
+        self.steps: list[dict] = []             # per-step timing/token records (chem_llm.records.telemetry)
         self.llm_usage: dict | None = None      # token counts of the latest model call
 
     @staticmethod
@@ -75,7 +75,7 @@ class AgentState:
         """Compact summary fed back into the prompt each turn.
 
         trim: show a trimmed view of the recent calls plus a Progress ledger
-        (see chem_llm/history.py). self.history itself is never modified.
+        (see chem_llm/core/history.py). self.history itself is never modified.
         """
         recent = trimmed_view(self.history, max_history) if trim else self.history[-max_history:]
         lines = [f"Task: {self.task}"]

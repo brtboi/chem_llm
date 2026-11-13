@@ -5,9 +5,9 @@ Model loading lives in main.py (the entry point) and is passed in here so
 this module has no import-time side effects and can be reused/tested with a
 different model or a mock.
 
-The step loop (`run_step_loop`, a LangGraph graph -- see chem_llm.graph) is
+The step loop (`run_step_loop`, a LangGraph graph -- see chem_llm.core.graph) is
 decoupled from *where* each tool call comes from: `run_agent` below drives
-it with an LLM-backed source, while `chem_llm.replay` drives the exact same loop with a source that reads
+it with an LLM-backed source, while `chem_llm.records.replay` drives the exact same loop with a source that reads
 recorded calls out of a past run's log.jsonl instead. Both share the same
 tool execution/logging code path, so a replay is a real re-run of the
 recorded tools (not a replay of their recorded results).
@@ -20,10 +20,10 @@ import shutil
 import sys
 import time
 
-from . import REPO_ROOT
+from .. import REPO_ROOT
 from .config import MAX_AGENT_STEPS, MAX_HISTORY, MAX_NEW_TOKENS, TEMPERATURE, DO_SAMPLE, WORK_DIR, MODEL_NAME, DPP_EXAMPLE_SUBDIR
 from .state import AgentState
-from .tools import TOOLS, TOOL_DISPATCH
+from ..tools import TOOLS, TOOL_DISPATCH
 
 SYSTEM_PROMPT_TEMPLATE = (
     "You are a tool-using coding agent that solves tasks step by step.\n"
@@ -164,20 +164,20 @@ SYSTEM_PROMPT_TEMPLATE = (
     "run) -- 'number of Kohn-Sham states' in the same pw.out is that "
     "occupied-band count already computed for you. Never type a guessed "
     "number into a script; read/derive it from the actual pw.out in code. "
-    "In a script, read pw.out ONLY through chem_llm.qe_output -- do not "
+    "In a script, read pw.out ONLY through chem_llm.dft.qe_output -- do not "
     "write your own regex for it (hand-written ones have repeatedly missed "
     "QE's actual line formats):\n"
-    "    from chem_llm.qe_output import read_pw_out, band_edges\n"
+    "    from chem_llm.dft.qe_output import read_pw_out, band_edges\n"
     "    pw = read_pw_out('calculations/000/pw.out')\n"
     "    # pw['n_electrons'], pw['n_occupied'] (already 1 electron/band with spin-orbit),\n"
     "    # pw['fermi_energy_eV'] (smearing runs), pw['spin_orbit'], pw['total_magnetization']\n"
     "    edges = band_edges(E, pw['n_occupied'])   # -> edges['vbm'], edges['cbm'], edges['gap'] in eV\n\n"
     "INVARIANT 3: the k-path of a bands calculation, the cell it runs on, "
     "and the band plot's x-axis all come from ONE k-path, produced by "
-    "chem_llm.kpath (the same code as the get_kpath tool) for THIS structure "
+    "chem_llm.dft.kpath (the same code as the get_kpath tool) for THIS structure "
     "-- never typed from memory, a textbook table, or another structure. In "
     "setup_jobs.py, for each structure:\n"
-    "    from chem_llm.kpath import standard_kpath, kp_atoms, kp_kpts, kp_save\n"
+    "    from chem_llm.dft.kpath import standard_kpath, kp_atoms, kp_kpts, kp_save\n"
     "    kp = standard_kpath(atoms)          # seekpath's standard path, evenly spaced\n"
     "    prim = kp_atoms(kp)                 # THE cell for pw.in AND bands.in\n"
     "    # bands.in: write_espresso_in(..., prim, ..., kpts=kp_kpts(kp))\n"
@@ -193,7 +193,7 @@ SYSTEM_PROMPT_TEMPLATE = (
     "see the path, and validate_qe_input on bands.in afterwards (it checks "
     "the k-points against kpath.json).\n\n"
     "INVARIANT 4: the band plot's x-axis, ticks and line segments come from "
-    "chem_llm.kpath.plot_axis(kpath.json, NNN.bands.dat), which also refuses "
+    "chem_llm.dft.kpath.plot_axis(kpath.json, NNN.bands.dat), which also refuses "
     "to run if bands.x computed a different k-point list than kpath.json "
     "(so a plot can never silently mismatch the calculation). Use its x (path "
     "length) for the band curves, draw each of its segments as a separate "
@@ -246,7 +246,7 @@ SYSTEM_PROMPT_TEMPLATE = (
     "What MP returns is frequently a conventional or doubled cell -- rutile "
     "TiO2 comes back as 12 atoms where the primitive cell has 6 -- and cost "
     "scales steeply with atom count (that 2x cell cost ~9x the SCF time "
-    "here for identical physics). The cell chem_llm.kpath.kp_atoms returns "
+    "here for identical physics). The cell chem_llm.dft.kpath.kp_atoms returns "
     "IS this primitive cell (seekpath's), and it is the one the k-path refers "
     "to -- use it.\n"
     "  CHECK IN CODE: assert the space group is unchanged by the reduction, "
@@ -261,13 +261,13 @@ SYSTEM_PROMPT_TEMPLATE = (
     "non-primitive setting, keep it and say why in a note.\n\n"
     "RULE: k-path source\n"
     "  IF   doing a bandstructure calculation\n"
-    "  THEN use chem_llm.kpath / get_kpath per INVARIANT 3 -- never a "
+    "  THEN use chem_llm.dft.kpath / get_kpath per INVARIANT 3 -- never a "
     "hand-built path\n"
     "  ELSE (SCF/relax/NSCF-only) no explicit k-path needed -- use a "
     "Monkhorst-Pack mesh consistent with the cell (state the density and why)\n"
     "  The SCF mesh (pw.in) is NEVER typed by hand: compute it in setup_jobs.py "
     "for the cell the SCF runs on, `kpts = scf_kmesh(prim, metal=...)` from "
-    "chem_llm.kpath (even spacing along every reciprocal vector; metal=True "
+    "chem_llm.dft.kpath (even spacing along every reciprocal vector; metal=True "
     "for a metal or semimetal, which needs about twice the density), and pass "
     "it as write_espresso_in(..., kpts=kpts). A hand-picked mesh has silently "
     "under-sampled the short axis (rutile 4x4x2 instead of 6x6x9) and shifted "
@@ -326,7 +326,7 @@ SYSTEM_PROMPT_TEMPLATE = (
     "non-spin-polarized unless the task asks for the supercell.\n"
     "  ELSE (moment below 0.1 muB per formula unit) run nspin=1.\n\n"
     "RULE: bands plot construction\n"
-    "  Use chem_llm.kpath.plot_axis per INVARIANT 4 and chem_llm.qe_output per "
+    "  Use chem_llm.dft.kpath.plot_axis per INVARIANT 4 and chem_llm.dft.qe_output per "
     "INVARIANT 2 with plain matplotlib:\n"
     "    ax = plot_axis(kpath_json, bands_dat); x, E = ax['x'], ax['energies']\n"
     "    pw = read_pw_out(pw_out)\n"
@@ -504,7 +504,7 @@ def make_chat_step_source(
     system_prompt: str | None = None,
 ):
     """Build a `next_tool_call(state, step)` source for `run_step_loop` from
-    any LangChain chat model (see chem_llm.llm).
+    any LangChain chat model (see chem_llm.llm.models).
 
     Each step sends build_messages(state) and parses one tool call out of
     the reply. A reply that is not a tool call is logged as a 'parse_error'
@@ -574,9 +574,9 @@ def make_llm_step_source(
     trim_history: bool = False,
 ):
     """make_chat_step_source for a transformers model/tokenizer pair loaded
-    in this process. The keyword defaults are the legacy chem_llm.config
+    in this process. The keyword defaults are the legacy chem_llm.core.config
     values; DFTAgent passes its own settings."""
-    from .llm import TransformersChatModel
+    from ..llm.models import TransformersChatModel
 
     llm = TransformersChatModel(hf_model=model, tokenizer=tokenizer, max_new_tokens=max_new_tokens,
                                 temperature=temperature, do_sample=do_sample,
@@ -589,7 +589,7 @@ def run_step_loop(state: AgentState, next_tool_call, max_steps: int, verbose: bo
     """Drive `state` through up to `max_steps` tool calls, one per step,
     obtained from `next_tool_call(state, step)`. Mutates `state` in place
     and returns why the loop stopped ("done", "max_steps",
-    "source_exhausted"). The loop is a LangGraph graph: chem_llm.graph.
+    "source_exhausted"). The loop is a LangGraph graph: chem_llm.core.graph.
 
     `next_tool_call` should return a `{"tool": ..., "args": ...}` dict for
     the step, `None` if it already handled the step itself (e.g. logged a
@@ -600,13 +600,13 @@ def run_step_loop(state: AgentState, next_tool_call, max_steps: int, verbose: bo
     `observer`, if given, is told about each step as it happens: its
     `start(step, tool_call)` before a tool runs, and its
     `finish(step, entry)` for every history entry the step logged (tool
-    results, refusals, parse or API errors). See chem_llm.progress.
+    results, refusals, parse or API errors). See chem_llm.cli.progress.
 
     `recorder`, a telemetry.StepRecorder, times each step (one is made if
     not given, so state.steps is always filled).
     """
     from .graph import run_graph
-    from .telemetry import StepRecorder
+    from ..records.telemetry import StepRecorder
 
     stop = run_graph(state, next_tool_call, max_steps, verbose=verbose, observer=observer,
                      recorder=recorder or StepRecorder(state))
@@ -727,10 +727,10 @@ def prepare_work_dir(work_dir: Path, clear_dir: bool = False, load_path=None, lo
 
 def build_log_entry(state: AgentState, start_time: float, work_dir: Path, clear_dir: bool, load_path, model_name: str, extra: dict | None = None,
                     system_prompt: str | None = None) -> dict:
-    """The run's log.jsonl record, format 2 (chem_llm.runlog). `extra` may
+    """The run's log.jsonl record, format 2 (chem_llm.records.runlog). `extra` may
     carry config, compound / spacegroup / spacegroup_number, model_load_s,
     and replayed_from."""
-    from .runlog import build_record
+    from ..records.runlog import build_record
 
     extra = dict(extra or {})
     record = build_record(
@@ -784,7 +784,7 @@ def run_agent(
 
     By default the tool calls come from the local model/tokenizer pair. Pass
     `step_source` (with `model_name` for the log) to drive the same loop
-    from something else -- see chem_llm.claude_backend for the Claude API
+    from something else -- see chem_llm.llm.claude_backend for the Claude API
     backend, which differs only in how the text is generated.
 
     trace: append each step to trace.jsonl (next to the log) as it finishes,
@@ -804,7 +804,7 @@ def run_agent(
         log_file.parent.mkdir(parents=True, exist_ok=True)
         log_file.touch(exist_ok=True)
 
-    from .telemetry import StepRecorder
+    from ..records.telemetry import StepRecorder
 
     start_time = time.perf_counter()
     state = AgentState(task)

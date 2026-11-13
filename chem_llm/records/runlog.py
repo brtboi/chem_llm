@@ -15,12 +15,12 @@ Format version 2 (2026-10-16), field by field:
     steps              [{step, phase, tool, args, result, llm_time, tool_time,
                          tokens}] -- every tool call in order, with its full
                        arguments and result; "phase" is the workflow STEP it
-                       belongs to (chem_llm.telemetry.assign_phases)
+                       belongs to (chem_llm.records.telemetry.assign_phases)
     config             the run's settings: backend, model, temperature,
                        do_sample, max_new_tokens, step/history limits, QE
                        launch, tools, code_commit, uncommitted_changes
     metrics            {operations, phases, n_tools, qe_stages}
-                       (chem_llm.telemetry.run_metrics)
+                       (chem_llm.records.telemetry.run_metrics)
 
 log.jsonl keeps tool results whole; record.json cuts strings longer than
 RESULT_CAP characters (saying so). Format 1 records -- everything logged

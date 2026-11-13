@@ -1,8 +1,8 @@
 from pathlib import Path
 
-import chem_llm.agent_core as agent_core
-from chem_llm.main import main
-from chem_llm.rundiff import diff_runs, parse_run_spec, prompt_snapshot
+import chem_llm.core.agent_core as agent_core
+from chem_llm.cli.main import main
+from chem_llm.records.rundiff import diff_runs, parse_run_spec, prompt_snapshot
 from conftest import HELLO
 
 

@@ -203,7 +203,7 @@ def path_string(input_path: str | Path) -> str | None:
 
 
 def _check_against_kpath_json(atoms, pts: np.ndarray, kpath_json: Path) -> list[str]:
-    """bands.in written from chem_llm.kpath: the cell and every k-point must
+    """bands.in written from chem_llm.dft.kpath: the cell and every k-point must
     be exactly the ones in kpath.json (which also carries the labels)."""
     import json
 

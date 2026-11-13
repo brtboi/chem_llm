@@ -3,9 +3,9 @@ import pytest
 import torch
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from chem_llm.agent_core import build_prompt, make_chat_step_source
-from chem_llm.llm import ClaudeChatModel, TransformersChatModel, check_server, vllm_chat_model
-from chem_llm.state import AgentState
+from chem_llm.core.agent_core import build_prompt, make_chat_step_source
+from chem_llm.llm.models import ClaudeChatModel, TransformersChatModel, check_server, vllm_chat_model
+from chem_llm.core.state import AgentState
 
 
 class Enc(dict):
@@ -40,7 +40,7 @@ def test_transformers_model_matches_the_original_prompt_and_counts_tokens():
     tok, model = FakeTokenizer(), FakeModel()
     llm = TransformersChatModel(hf_model=model, tokenizer=tok, max_new_tokens=99, temperature=0.3)
     state = AgentState("task text")
-    from chem_llm.agent_core import build_messages
+    from chem_llm.core.agent_core import build_messages
 
     assert llm.prompt_text(build_messages(state, 32, True)) == build_prompt(state, tok, 32, True)
     reply = llm.invoke([SystemMessage("s"), HumanMessage("u")])
@@ -78,7 +78,7 @@ def test_claude_wrapper_sends_system_and_user_separately():
 
 def test_claude_refusal_is_logged_and_skipped():
     pytest.importorskip("anthropic")
-    from chem_llm.claude_backend import make_claude_step_source
+    from chem_llm.llm.claude_backend import make_claude_step_source
 
     state = AgentState("t")
     source = make_claude_step_source(StubClaude(fail=RuntimeError("Claude refused this step")), verbose=False)
@@ -109,7 +109,7 @@ def test_missing_vllm_server_explains_how_to_start_one():
 
 
 def test_vllm_backend_refuses_a_server_with_another_model(settings, monkeypatch):
-    import chem_llm.llm as llm_module
+    import chem_llm.llm.models as llm_module
     from chem_llm import DFTAgent
 
     monkeypatch.setattr(llm_module, "check_server", lambda url: ["some/other-model"])

@@ -2,9 +2,9 @@
 
 Agent scripts kept failing on hand-written regexes over pw.out (the Fermi
 energy line, 'number of electrons', spin-orbit band counting). Same idea as
-chem_llm.kpath: one tested reader instead of a new parser per run.
+chem_llm.dft.kpath: one tested reader instead of a new parser per run.
 
-    from chem_llm.qe_output import read_pw_out, band_edges
+    from chem_llm.dft.qe_output import read_pw_out, band_edges
     pw = read_pw_out("calculations/000/pw.out")
     pw["n_electrons"], pw["n_occupied"], pw["fermi_energy_eV"]
     edges = band_edges(E, pw["n_occupied"])     # E: (n_kpoints, n_bands) in eV

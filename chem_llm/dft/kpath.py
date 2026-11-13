@@ -6,7 +6,7 @@ start point after a discontinuity, labels missing or on the wrong point, plot
 ticks that did not match the k-points QE computed, and many steps spent
 fixing them. Here the whole path comes from one call, and both ends use it:
 
-    from chem_llm.kpath import standard_kpath, plot_axis
+    from chem_llm.dft.kpath import standard_kpath, plot_axis
 
     # setup_jobs.py -- per structure
     kp = standard_kpath(atoms)            # dict, also saved with kp_save()

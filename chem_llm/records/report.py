@@ -6,7 +6,7 @@ summary -- plus the QE inputs and outputs left in the work directory. No
 model is involved, so nothing in the summary can be invented: a value is
 either read from a file or a tool result, or it is reported as missing.
 
-    from chem_llm.report import summarize_log
+    from chem_llm.records.report import summarize_log
     print(summarize_log("sandbox/test29"))          # latest run logged there
 
 Sections:
@@ -22,7 +22,7 @@ Sections:
      refusals, notes that flag doubt, the agent's own caveats.
   5. Where the time went -- wall time split into model generation, Quantum
      ESPRESSO, the agent's scripts and the other tools; tokens per call;
-     QE time per stage; time per workflow STEP (chem_llm.telemetry).
+     QE time per stage; time per workflow STEP (chem_llm.records.telemetry).
 """
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ import textwrap
 from dataclasses import dataclass
 from pathlib import Path
 
-from .history import run_succeeded
+from ..core.history import run_succeeded
 from .telemetry import format_timing
 
 __all__ = ["summarize_run", "summarize_log", "load_log_entry"]
@@ -89,7 +89,7 @@ def _read(path: Path) -> str | None:
 
 def _upf_facts(path) -> dict:
     """Header facts of a pseudopotential file still on disk, else {}."""
-    from .tools.upf import read_upf_header
+    from ..tools.upf import read_upf_header
     try:
         return read_upf_header(path) if path else {}
     except (OSError, ValueError):
@@ -190,7 +190,7 @@ def _measured_perturbations(structures: Path, finished_at: float | None) -> str 
 def _kpath(bands_in: str | None, labels_txt: str | None) -> dict:
     """The bands k-path: type, points, labels, discontinuities and segment
     endpoints (the same reading validate_qe_input's k-path check uses)."""
-    from .kpath_check import _labels, read_kpoints, segment_endpoints
+    from ..dft.kpath_check import _labels, read_kpoints, segment_endpoints
 
     info: dict = {}
     if bands_in:
@@ -421,7 +421,7 @@ def _section_setup(history, work_dir, calc, stale, found, scripts, by_tool, fina
 
     kp = _kpath(bands_in, None) if bands_in else {}
     if bands_in:
-        from .kpath_check import path_string
+        from ..dft.kpath_check import path_string
         lines.append("    Band structure")
         path = path_string(calc / "bands.in")
         _bullet(lines, f"k-path: {path or '?'} ({kp.get('n', '?')} k-points, K_POINTS {kp.get('kind', '?')}; "
@@ -568,7 +568,7 @@ def _section_difficulties(history, work_dir, scripts, by_tool, final_result, com
             queries = "; ".join(dict.fromkeys(str(g["args"].get("query", ""))[:70] for g in group))
             lines += _wrap(f"{target}: {len(group)} lookup(s) (step{'s' if len(group) > 1 else ''} "
                            f"{group[0]['step']}{'-' + str(group[-1]['step']) if len(group) > 1 else ''}): {queries}", 8)
-    from .kpath_check import unlabelled_endpoints
+    from ..dft.kpath_check import unlabelled_endpoints
 
     corners, labelled = kpath_info.get("corners"), {i for i, _ in kpath_info.get("labels", [])}
     missing = (unlabelled_endpoints(kpath_info["points"], corners, labelled)
@@ -636,9 +636,9 @@ def summarize_run(
     finished_at: the run's end time (epoch seconds). When given, files in
     the work dir modified after it belong to a later run and are ignored.
     config: DFTAgent.run_config() for the run, if recorded.
-    metrics: chem_llm.telemetry.run_metrics() for the run, if recorded.
+    metrics: chem_llm.records.telemetry.run_metrics() for the run, if recorded.
     """
-    from .pipeline import _inspect_outputs
+    from ..core.pipeline import _inspect_outputs
 
     work_dir = Path(work_dir)
     scripts = _scripts(history)

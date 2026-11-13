@@ -185,7 +185,7 @@ A different index: `DFTAgent(docs="path/to/index")` or `DocumentationIndex("path
 ## Backends
 
 Every backend is a LangChain chat model, and the agent loop is a LangGraph graph
-(`chem_llm/graph.py`: `think` asks the model for one tool call, `act` runs it). Only the
+(`chem_llm/core/graph.py`: `think` asks the model for one tool call, `act` runs it). Only the
 text generation differs between backends:
 
 | backend | what generates | cost |
@@ -337,7 +337,7 @@ notes:
 ```
 
 It is formatted from the tool calls and their results, so the model does nothing differently.
-In Python: `agent.run(..., verbose=False, on_step=chem_llm.progress.ProgressPrinter())`.
+In Python: `agent.run(..., verbose=False, on_step=chem_llm.cli.progress.ProgressPrinter())`.
 
 ### Run summary
 
@@ -380,7 +380,7 @@ is read from a tool result or a file, never generated. In Python, the same summa
 
 Each run appends one JSON record to `<work_dir>/log.jsonl`, and the same record (with very
 long tool results cut) is kept as `record.json` in the run's archive folder. The format is
-versioned (`format_version`, now 2; see `chem_llm/runlog.py`). Older records are upgraded when
+versioned (`format_version`, now 2; see `chem_llm/records/runlog.py`). Older records are upgraded when
 read, so replay, `--summarize-log` and `--diff-runs` accept every log.
 
 | field | contents |
@@ -468,7 +468,7 @@ inside each run, which shows where a failing run went wrong. The local index and
 
 ## DeePseudopot: from the DFT bands to a neural-network pseudopotential
 
-A second agent, `chem_llm.dpp_agent.DeePseudopotAgent`, takes one finished QE run and trains a
+A second agent, `chem_llm.dpp.agent.DeePseudopotAgent`, takes one finished QE run and trains a
 [DeePseudopot](https://github.com/TommyLinkl/DeePseudopot) neural-network empirical
 pseudopotential that reproduces its bands. It is a fresh agent with its own system prompt,
 task and tools (`read_file`, `write_file`, `run_python`, `make_dir`, `train_deepseudopot`).
@@ -486,7 +486,7 @@ print(fit)   # RMS error, fitted vs DFT gap, steps, results folder
 chem-llm-dpp deepseudopot_example/tio2_rutile/qe_run --work-dir runs/tio2_dpp --backend vllm --pretty-progress
 ```
 
-The bookkeeping is deterministic, in `chem_llm.dpp_io`:
+The bookkeeping is deterministic, in `chem_llm.dpp.io`:
 - `read_qe_run` reads the cell, bands, k-path, electron count and spin-orbit from the run's files;
 - `pseudo_orbitals` lists a UPF file's valence orbitals;
 - `write_bundle` writes and cross-checks every input file;
@@ -506,37 +506,46 @@ It reports the fit from the output files. Example input, and what was measured o
 The [source repository](https://github.com/brtboi/chem_llm) holds more than the package:
 
 ```
-chem_llm/            the package
-  agent.py           DFTAgent, DocumentationIndex         (public API)
-  settings.py        Settings and its sections             (public API)
-  pipeline.py        RunResult, run_dft_agent, output inspection
-  tasks.py           the task prompt (build_task)
-  agent_core.py      system prompt, step sources, tool execution and refusals, run logging
-  graph.py           the agent loop as a LangGraph graph
-  llm.py             the backends as LangChain chat models (transformers, vLLM, Claude)
-  claude_backend.py  Claude API client and its error policy
-  telemetry.py       per-step timing, trace.jsonl, run metrics
-  rundiff.py         prompt versions, --diff-runs
-  testing.py         scripted model and tool mocks for running the loop without a GPU
-  archive.py         the permanent per-run record and "what changed since last time"
-  bench.py           chem-llm-bench: suites, checks, parallel runner, RESULTS.md, LangSmith
-  state.py, history.py  agent state, the prompt's history and trim_history
-  runlog.py          run record format (versioned; upgrades older logs)
-  progress.py, report.py  --pretty-progress stream, run summary
-  kpath.py           standard k-path, scf_kmesh, plot_axis (k-path shared by QE input and plot)
-  kpath_check.py     checks a bands k-path: endpoints are high-symmetry points, all labelled
-  qe_output.py       read_pw_out, band_edges: pw.out parsing for the agent's scripts
-  tools/             the agent's tools: files, Python, QE, Materials Project, pseudopotentials,
-                     k-path, docs search, QE input validation
-  retrieval/         documentation scraping, chunking, BM25 + embedding search, reranking
-  main.py, replay.py command-line entry points
-  interactive.py     chem-llm's guided setup
-  polymorphs.py      Materials Project's structures for a formula; space group parsing
-  local_models.py    chat models in the Hugging Face cache; downloading one
-  vllm_server.py     find, start and wait for a vLLM server
-  dpp_agent.py       the DeePseudopot agent (chem-llm-dpp): its prompt, task and tools
-  dpp_io.py          QE run -> DeePseudopot input bundle; scoring the fit
-  config.py          legacy module constants, used by the sandbox run scripts
+chem_llm/              the package
+  agent.py             DFTAgent, DocumentationIndex          (public API)
+  settings.py          Settings and its sections              (public API)
+  bench.py             chem-llm-bench: suites, checks, parallel runner, RESULTS.md, LangSmith
+  testing.py           scripted model and tool mocks for running the loop without a GPU
+  core/                the agent loop
+    agent_core.py      system prompt, step sources, tool execution and refusals, run logging
+    graph.py           the loop as a LangGraph graph
+    state.py, history.py  agent state, the prompt's history and trim_history
+    tasks.py           the task prompt (build_task)
+    pipeline.py        RunResult, run_dft_agent, output inspection
+    config.py          legacy module constants, used by the sandbox run scripts
+  llm/                 model backends
+    models.py          the backends as LangChain chat models (transformers, vLLM, Claude)
+    claude_backend.py  Claude API client and its error policy
+    vllm_server.py     find, start and wait for a vLLM server
+    local_models.py    chat models in the Hugging Face cache; downloading one
+  dft/                 deterministic DFT helpers the agent's scripts import
+    kpath.py           standard k-path, scf_kmesh, plot_axis (k-path shared by QE input and plot)
+    kpath_check.py     checks a bands k-path: endpoints are high-symmetry points, all labelled
+    qe_output.py       read_pw_out, band_edges: pw.out parsing
+    polymorphs.py      Materials Project's structures for a formula; phase names; space group parsing
+  dpp/                 the DeePseudopot agent (chem-llm-dpp)
+    agent.py           its prompt, task and tools
+    io.py              QE run -> DeePseudopot input bundle; scoring the fit
+  records/             what a run leaves behind
+    runlog.py          run record format (versioned; upgrades older logs)
+    telemetry.py       per-step timing, trace.jsonl, run metrics
+    archive.py         the permanent per-run record and "what changed since last time"
+    report.py          run summary
+    rundiff.py         prompt versions, --diff-runs
+    replay.py          chem-llm-replay: re-run a recorded run's tool calls
+  cli/                 chem-llm on the command line
+    main.py            argument parsing, entry point
+    interactive.py     the guided setup
+    progress.py        the --pretty-progress stream
+  tools/               the agent's tools: files, Python, QE, Materials Project, pseudopotentials,
+                       k-path, docs search, QE input validation, DeePseudopot training
+  retrieval/           documentation scraping, chunking, BM25 + embedding search, reranking
+  DeePseudopot/        vendored checkout of github.com/TommyLinkl/DeePseudopot (not packaged)
 main.ipynb           walkthrough: settings, docs index, one run, a sweep
 config.example.yaml  every setting, documented
 bench/               suites.yaml, golden references, run archive, index.jsonl, RESULTS.md

@@ -12,7 +12,7 @@ sees every call:
              (scripts/serve_vllm.sh). Same weights, much faster: paged
              attention, and the system prompt, identical on every step, is
              computed once (prefix caching).
-    claude   chem_llm.claude_backend (the Anthropic API; bills per step).
+    claude   chem_llm.llm.claude_backend (the Anthropic API; bills per step).
 
 Any other LangChain chat model can be passed to DFTAgent(llm=...) as well,
 e.g. a langchain_core fake model in tests (see chem_llm.testing).
@@ -90,7 +90,7 @@ class TransformersChatModel(BaseChatModel):
 
 
 class ClaudeChatModel(BaseChatModel):
-    """chem_llm.claude_backend.ClaudeModel as a chat model: the system
+    """chem_llm.llm.claude_backend.ClaudeModel as a chat model: the system
     message becomes the API's system prompt, the rest the user turn.
     Errors (billing, refusals, rate limits) propagate unchanged; the
     Claude step source in claude_backend decides which ones end a run."""

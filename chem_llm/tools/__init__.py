@@ -36,7 +36,7 @@ REMEMBER_FIELDS: dict[str, tuple[str, ...]] = {}
 
 # Every tool ever registered, {name: (schema, function or None)}. TOOLS and
 # TOOL_DISPATCH are what the DFT agent offers and get pruned by
-# pipeline._hide_tools; other agents (chem_llm.dpp_agent) pick from this.
+# pipeline._hide_tools; other agents (chem_llm.dpp.agent) pick from this.
 REGISTRY: dict[str, tuple[dict, object]] = {}
 
 
@@ -190,7 +190,7 @@ def _release_cached_gpu_memory() -> None:
         "'GAMMA-X-M-GAMMA-Z-R-A-Z | X-R | M-A'), the space group, the primitive "
         "cell the path refers to, the number of k-points and the plot ticks. "
         "Use it to inspect structure_000; inside setup_jobs.py call the same "
-        "code per structure (chem_llm.kpath.standard_kpath) as INVARIANT 3 shows."
+        "code per structure (chem_llm.dft.kpath.standard_kpath) as INVARIANT 3 shows."
     ),
     {
         "structure_path": "string. Structure file ASE can read (e.g. structures/structure_000.cif).",
@@ -200,7 +200,7 @@ def _release_cached_gpu_memory() -> None:
 def get_kpath(structure_path: str, output_path: str):
     from ase.io import read
 
-    from ..kpath import kp_atoms, kp_save, standard_kpath
+    from ..dft.kpath import kp_atoms, kp_save, standard_kpath
 
     try:
         atoms = read(structure_path)
@@ -223,7 +223,7 @@ def get_kpath(structure_path: str, output_path: str):
         "input_cell_is_this_cell": bool(same),
         "note": ("Run pw.x and bands.x on kp_atoms(kp), not on the input file's cell"
                  + ("" if same else " (they differ here)") + "; write bands.in with kpts=kp_kpts(kp); "
-                 "plot with chem_llm.kpath.plot_axis."),
+                 "plot with chem_llm.dft.kpath.plot_axis."),
     }
 
 
@@ -460,7 +460,7 @@ def generate_cif(
             }
 
         if spacegroup_symbol in (None, "") and spacegroup_number is None:
-            from ..polymorphs import group_by_spacegroup
+            from ..dft.polymorphs import group_by_spacegroup
 
             found = group_by_spacegroup(docs)
             return {

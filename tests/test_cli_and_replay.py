@@ -2,9 +2,9 @@ import functools
 
 import pytest
 
-import chem_llm.main as cli
+import chem_llm.cli.main as cli
 from chem_llm import DFTAgent
-from chem_llm.replay import replay_run
+from chem_llm.records.replay import replay_run
 from chem_llm.testing import ScriptedChatModel, fake_qe_workflow, mock_tools
 from conftest import HELLO, records
 
@@ -56,8 +56,8 @@ def test_format_1_records_still_replay_and_summarize(tmp_path):
     """Logs written before format 2 (with a final_state) go through upgrade()."""
     import json
 
-    from chem_llm.main import main
-    from chem_llm.runlog import history_of, upgrade
+    from chem_llm.cli.main import main
+    from chem_llm.records.runlog import history_of, upgrade
 
     v1 = {"run_id": "old", "timestamp": "2026-10-07T00:00:00", "model": "Qwen", "work_dir": str(tmp_path / "old"),
           "runtime": 60.0, "num_steps": 2, "completed": True,
@@ -78,3 +78,19 @@ def test_format_1_records_still_replay_and_summarize(tmp_path):
     with mock_tools(run_espresso_workflow=fake_qe_workflow()):
         state = replay_run(v1, tmp_path / "again", verbose=False)
     assert (tmp_path / "again" / "a.py").read_text() == "print(1)" and state.done
+
+
+def test_old_module_paths_still_import():
+    """Scripts in archived runs import the pre-subpackage paths, and replay re-runs them."""
+    import importlib
+
+    from chem_llm import MOVED_MODULES
+
+    for old, new in MOVED_MODULES.items():
+        moved = importlib.import_module(f"chem_llm.{new}")
+        if old == "llm":   # now a package; its names resolve lazily
+            assert importlib.import_module("chem_llm.llm").TransformersChatModel is moved.TransformersChatModel
+            continue
+        assert importlib.import_module(f"chem_llm.{old}") is moved
+        assert moved.__spec__.name == f"chem_llm.{new}"
+    from chem_llm.kpath import plot_axis  # noqa: F401  -- the form agent scripts use

@@ -1,6 +1,6 @@
 # Rutile TiO2: DFT output for the DeePseudopot agent
 
-Input for `chem_llm.dpp_agent` (`chem-llm-dpp`): a finished chem_llm band-structure run, and
+Input for `chem_llm.dpp.agent` (`chem-llm-dpp`): a finished chem_llm band-structure run, and
 a working `NN_config.par` to start from.
 
 ```bash

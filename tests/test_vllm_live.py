@@ -6,7 +6,7 @@ import os
 
 import pytest
 
-from chem_llm.llm import check_server, vllm_chat_model
+from chem_llm.llm.models import check_server, vllm_chat_model
 
 URL = os.environ.get("CHEM_LLM_VLLM_URL", "http://localhost:8000/v1")
 MODEL = os.environ.get("CHEM_LLM_VLLM_MODEL", "Qwen/Qwen3.8-27B")
@@ -20,9 +20,9 @@ pytestmark = [pytest.mark.vllm, pytest.mark.skipif(MODEL not in SERVED, reason=f
 
 
 def test_one_agent_step_is_a_valid_tool_call():
-    from chem_llm.agent_core import make_chat_step_source
-    from chem_llm.state import AgentState
-    from chem_llm.tasks import build_task
+    from chem_llm.core.agent_core import make_chat_step_source
+    from chem_llm.core.state import AgentState
+    from chem_llm.core.tasks import build_task
 
     state = AgentState(build_task(compound="Si", spacegroup="Fd-3m"))
     llm = vllm_chat_model(URL, MODEL, max_tokens=2000, temperature=0.3, do_sample=True)

@@ -8,20 +8,20 @@ log.jsonl records. Only the "prompt in, text out" step differs -- instead of
 a chat template plus HF generate(), the prompt goes to the Messages API as
 (system, user) and the text blocks of the reply come back.
 
-    from chem_llm.claude_backend import ClaudeModel, make_claude_step_source
-    from chem_llm.agent_core import run_agent
+    from chem_llm.llm.claude_backend import ClaudeModel, make_claude_step_source
+    from chem_llm.core.agent_core import run_agent
 
     claude = ClaudeModel()
     run_agent(TASK, step_source=make_claude_step_source(claude),
               model_name=claude.model, clear_dir=True)
 
 Requires an Anthropic credential: ANTHROPIC_API_KEY (via .env, which
-chem_llm.config already loads) or any other source the SDK resolves.
+chem_llm.core.config already loads) or any other source the SDK resolves.
 """
 import anthropic
 
-from .config import ANTHROPIC_API_KEY, CLAUDE_EFFORT, CLAUDE_MAX_TOKENS, CLAUDE_MODEL, MAX_HISTORY
-from .state import AgentState
+from ..core.config import ANTHROPIC_API_KEY, CLAUDE_EFFORT, CLAUDE_MAX_TOKENS, CLAUDE_MODEL, MAX_HISTORY
+from ..core.state import AgentState
 
 # Failures that repeat identically on every later step: billing,
 # authentication and permission problems, plus malformed requests.
@@ -111,8 +111,8 @@ def make_claude_step_source(claude: ClaudeModel, verbose: bool = True, max_histo
     Claude-specific error policy below. A malformed reply is handled as for
     every backend: logged as a 'parse_error' step and fed back as a note.
     """
-    from .agent_core import make_chat_step_source
-    from .llm import ClaudeChatModel
+    from ..core.agent_core import make_chat_step_source
+    from .models import ClaudeChatModel
 
     def on_error(state: AgentState, step: int, e: Exception):
         if isinstance(e, _TERMINAL_ERRORS):

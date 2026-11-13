@@ -1,12 +1,12 @@
 """Reading a finished chem_llm QE run and writing a DeePseudopot input bundle.
 
 The bookkeeping between the two formats is deterministic, so it lives here
-rather than in agent-written code (the same split as chem_llm.kpath /
+rather than in agent-written code (the same split as chem_llm.dft.kpath /
 qe_output for the DFT agent). The physics decisions -- which DFT bands the
 empirical pseudopotential should reproduce, which k-points, weights, basis
 cutoff, training length -- stay with the agent.
 
-    from chem_llm.dpp_io import read_qe_run, pseudo_orbitals, write_bundle, read_fit
+    from chem_llm.dpp.io import read_qe_run, pseudo_orbitals, write_bundle, read_fit
 
     run = read_qe_run("qe_run")            # structure, bands, k-path, electron count, SOC
     pseudo_orbitals("qe_run/Ti.upf")       # [{"label": "3S", "l": 0, "occupation": 2.0}, ...]
@@ -42,8 +42,8 @@ def read_qe_run(calc_dir: str | Path) -> dict:
     """
     from ase.io import read
 
-    from .kpath import _read_filband, load_kpath
-    from .qe_output import band_edges, read_pw_out
+    from ..dft.kpath import _read_filband, load_kpath
+    from ..dft.qe_output import band_edges, read_pw_out
 
     d = Path(calc_dir)
     atoms = read(d / "pw.in", format="espresso-in")

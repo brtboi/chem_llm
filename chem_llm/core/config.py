@@ -2,7 +2,7 @@ import os
 from dotenv import load_dotenv
 from pathlib import Path
 
-from . import REPO_ROOT
+from .. import REPO_ROOT
 
 load_dotenv()
 
@@ -19,7 +19,7 @@ HF_HOME = (
 # MODEL_NAME = "Qwen/Qwen3-30B-A3B-Instruct-2507"
 MODEL_NAME = "Qwen/Qwen3.8-27B"
 
-# --- Claude API backend (chem_llm/claude_backend.py) ---
+# --- Claude API backend (chem_llm/llm/claude_backend.py) ---
 # An alternative to the local Qwen model: same prompt, same JSON tool-call
 # protocol, same agent loop -- only the text generation differs.
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")

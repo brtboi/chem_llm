@@ -232,7 +232,7 @@ class ModelSettings:
     vllm_url: str = "http://localhost:8000/v1"
     # The `vllm` executable `chem-llm --start-vllm` (and the guided setup)
     # launches. None -> $VLLM_VENV/bin/vllm, `vllm` on PATH, then
-    # $PSCRATCH/venvs/vllm/bin/vllm (chem_llm.vllm_server).
+    # $PSCRATCH/venvs/vllm/bin/vllm (chem_llm.llm.vllm_server).
     vllm_executable: str | None = None
 
     # Claude API
@@ -250,7 +250,7 @@ class AgentSettings:
     # the Notes section), superseded file versions and reads, and the failed
     # attempts / doc searches of a fix that has since run successfully -- and
     # add a Progress ledger. Only the prompt view changes; the full history is
-    # still logged. See chem_llm/history.py.
+    # still logged. See chem_llm/core/history.py.
     trim_history: bool = True
     # Hard cap on the characters a single read_file returns.
     read_max_chars: int = 10000
@@ -273,7 +273,7 @@ class Settings:
     # Documentation retrieval index (DocumentationIndex.build()).
     doc_index_dir: Path = field(default_factory=lambda: Path.cwd() / "retrieval_index" / "ase")
     # Permanent per-run records (progress, summary, what changed since the
-    # last run, metrics) -- see chem_llm.archive. None -> work_root/_archive.
+    # last run, metrics) -- see chem_llm.records.archive. None -> work_root/_archive.
     archive_dir: Path | None = None
 
     qe: QESettings = field(default_factory=QESettings)

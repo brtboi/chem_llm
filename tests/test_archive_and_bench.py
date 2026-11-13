@@ -1,8 +1,8 @@
 import json
 
-import chem_llm.agent_core as agent_core
+import chem_llm.core.agent_core as agent_core
 from chem_llm import bench
-from chem_llm.archive import read_index
+from chem_llm.records.archive import read_index
 from conftest import HELLO
 
 
@@ -95,7 +95,7 @@ def test_report_lists_every_case(tmp_path, monkeypatch):
 
 
 def test_qe_output_reader(tmp_path):
-    from chem_llm.qe_output import band_edges, read_pw_out
+    from chem_llm.dft.qe_output import band_edges, read_pw_out
 
     soc = tmp_path / "soc.out"
     soc.write_text("     number of atoms/cell      =            5\n     number of electrons       =        82.00\n"
@@ -117,7 +117,7 @@ def test_plot_axis_gives_plain_tick_lists(tmp_path):
     import numpy as np
     from ase.build import bulk
 
-    from chem_llm.kpath import kp_save, plot_axis, standard_kpath
+    from chem_llm.dft.kpath import kp_save, plot_axis, standard_kpath
 
     kp = standard_kpath(bulk("Si"))
     kp_save(kp, tmp_path / "kpath.json")
@@ -158,7 +158,7 @@ def test_qe_slots_limit_concurrency(monkeypatch, tmp_path):
 def test_scf_kmesh_follows_the_reciprocal_lattice():
     from ase import Atoms
 
-    from chem_llm.kpath import scf_kmesh
+    from chem_llm.dft.kpath import scf_kmesh
 
     rutile_like = Atoms("Ti", cell=[4.6, 4.6, 2.96], pbc=True)
     assert scf_kmesh(rutile_like) == [6, 6, 9]          # short c axis -> more points

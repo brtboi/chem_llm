@@ -13,7 +13,7 @@ with the cards in the same file.
 import re
 from pathlib import Path
 
-from ..kpath_check import check_bands_kpath
+from ..dft.kpath_check import check_bands_kpath
 from . import register_tool
 from .qe_namelists import VARIABLE_NAMELIST
 
@@ -168,7 +168,7 @@ def _check_magnetization(text: str) -> list[str]:
         "(calculation='bands'): every segment endpoint of the k-path is a real "
         "high-symmetry point (a missing segment start after a discontinuity "
         "shows up as an endpoint that is not one); if a kpath.json from "
-        "chem_llm.kpath sits next to it, that the cell and every k-point are "
+        "chem_llm.dft.kpath sits next to it, that the cell and every k-point are "
         "exactly the ones in it. Call this on every pw.in-style file (SCF and "
         "bands inputs) right after writing it, "
         "and again after any edit to it, before run_espresso_workflow or done."

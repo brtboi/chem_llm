@@ -7,11 +7,11 @@ anything meant to last lives in the archive instead (settings.archive_dir):
     <archive>/runs/<date>_<time>_<case>/
         progress.txt                     the readable live stream (--pretty-progress),
                                          written as the run goes
-        summary.txt                      the run summary (chem_llm.report)
+        summary.txt                      the run summary (chem_llm.records.report)
         changes.txt                      what changed since the previous run of the
                                          same case: code commits, prompt, settings,
                                          and the result
-        record.json                      the run record, format 2 (chem_llm.runlog): the
+        record.json                      the run record, format 2 (chem_llm.records.runlog): the
                                          same fields as the work dir's log.jsonl, with
                                          very long tool results cut
         scripts/                         the final version of every script the agent
@@ -31,7 +31,7 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
-from . import REPO_ROOT
+from .. import REPO_ROOT
 
 
 # ----------------------------------------------------------------------
@@ -186,7 +186,7 @@ def _slug(text: str) -> str:
 
 def _index_entry(run: RunArchive, record: dict, extra: dict | None) -> dict:
     """One index.jsonl line for a format-2 record."""
-    from .history import run_succeeded
+    from ..core.history import run_succeeded
     from .rundiff import prompt_snapshot
     from .telemetry import operation_times
 
@@ -274,7 +274,7 @@ def describe_changes(previous: dict | None, current: dict, archive: Path | None 
 
     old_cfg, new_cfg = previous.get("config") or {}, current.get("config") or {}
     changed = [k for k in sorted(set(old_cfg) | set(new_cfg)) if old_cfg.get(k) != new_cfg.get(k)]
-    from .settings import normalize_backend
+    from ..settings import normalize_backend
 
     if normalize_backend(previous.get("backend")) != normalize_backend(current.get("backend")):
         changed.insert(0, "backend")

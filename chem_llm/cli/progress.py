@@ -23,7 +23,7 @@ import textwrap
 import time
 from pathlib import Path
 
-from .history import run_succeeded
+from ..core.history import run_succeeded
 
 __all__ = ["ProgressPrinter", "describe_call", "describe_result"]
 

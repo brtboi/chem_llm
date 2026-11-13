@@ -28,9 +28,9 @@ from rich.console import Console
 from rich.prompt import Confirm, IntPrompt, Prompt
 from rich.table import Table
 
-from . import local_models
-from .polymorphs import classify_spacegroup, lookup_polymorphs, parse_spacegroup
-from .settings import Settings, normalize_backend
+from ..llm import local_models
+from ..dft.polymorphs import classify_spacegroup, lookup_polymorphs, parse_spacegroup
+from ..settings import Settings, normalize_backend
 
 MAX_LISTED = 12
 
@@ -76,7 +76,7 @@ def equivalent_command(args: argparse.Namespace) -> str:
 class Wizard:
     def __init__(self, args, settings: Settings, console: Console | None = None, stream=None,
                  lookup=lookup_polymorphs, models=None, served=None, find_vllm=None, downloader=None):
-        from . import vllm_server
+        from ..llm import vllm_server
 
         self.args, self.settings = args, settings
         self.console = console or Console()

@@ -1,5 +1,5 @@
-from chem_llm.state import AgentState
-from chem_llm.telemetry import format_timing, run_metrics
+from chem_llm.core.state import AgentState
+from chem_llm.records.telemetry import format_timing, run_metrics
 
 TASK = "STEP 1: Fetch the base structure. STEP 2: Write and run generate_structures.py. STEP 3: Fetch pseudopotentials."
 
@@ -40,7 +40,7 @@ def test_operations_phases_and_tool_counts():
 
 
 def test_notes_name_their_workflow_step():
-    from chem_llm.telemetry import assign_phases
+    from chem_llm.records.telemetry import assign_phases
 
     s = _state([("note", {"text": "STEP 4 decisions: ecutwfc ..."}, "noted"), ("read_file", {"path": "x.txt"}, {}),
                 ("write_file", {"path": "plot_bands.py"}, {})],

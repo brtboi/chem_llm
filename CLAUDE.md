@@ -8,19 +8,19 @@ ESPRESSO, and plot a band structure. See README.md for the package API.
 - Public API: `DFTAgent` / `DocumentationIndex` in `chem_llm/agent.py`, `Settings` in
   `chem_llm/settings.py`. Each agent owns its Settings; tools read the running agent's
   settings via `settings.active_settings()` — there is no global configuration.
-- The agent's behavior is driven by `SYSTEM_PROMPT_TEMPLATE` in `chem_llm/agent_core.py`
-  (AGENT PROTOCOL / INVARIANTS / DECISION RULES) plus the task text in `chem_llm/tasks.py`.
+- The agent's behavior is driven by `SYSTEM_PROMPT_TEMPLATE` in `chem_llm/core/agent_core.py`
+  (AGENT PROTOCOL / INVARIANTS / DECISION RULES) plus the task text in `chem_llm/core/tasks.py`.
   Most physics fixes are prompt fixes: an invariant that says "derive X from the actual
   structure/output in code, never from memory".
-- `chem_llm/config.py` is legacy module constants, still used by the `sandbox/run_test*.py`
+- `chem_llm/core/config.py` is legacy module constants, still used by the `sandbox/run_test*.py`
   drivers and as defaults for `agent_core` functions called directly.
 
 ## Backends and run records
 - `model.backend: vllm` runs the same Qwen weights on a vLLM server (`scripts/serve_vllm.sh`,
   own venv at `$PSCRATCH/venvs/vllm`): ~5 s/step vs ~50 s in-process; rutile TiO2 end to end
   in ~6 min. The server must be started on the node the runs use.
-- The loop is a LangGraph graph (`chem_llm/graph.py`); backends are LangChain chat models
-  (`chem_llm/llm.py`). Each run logs `metrics` (time per phase), `prompt` (version hash +
+- The loop is a LangGraph graph (`chem_llm/core/graph.py`); backends are LangChain chat models
+  (`chem_llm/llm/models.py`). Each run logs `metrics` (time per phase), `prompt` (version hash +
   system prompt) and `outcome`; `trace.jsonl` is written per step. `chem-llm --diff-runs A B`.
 - `pytest` (no GPU/network; `chem_llm.testing` scripts the model and mocks QE) after any change.
 - Benchmark: `chem-llm-bench run everything --parallel 8 --label "why"` (suites in

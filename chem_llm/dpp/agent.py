@@ -6,7 +6,7 @@ lookups, pseudopotential choice, k-path, QE debugging) is irrelevant here,
 and starting clean keeps the prompt small and the rules specific.
 
     from chem_llm import DFTAgent
-    from chem_llm.dpp_agent import DeePseudopotAgent
+    from chem_llm.dpp.agent import DeePseudopotAgent
 
     dft = DFTAgent(backend="vllm")
     result = dft.run("TiO2", "P4_2/mnm")                       # -> work_dir/calculations/000
@@ -19,7 +19,7 @@ and starting clean keeps the prompt small and the rules specific.
 Input: one chem_llm QE run directory (pw.in, pw.out, kpath.json, the bands.x
 filband, the UPF files). It is copied into the work dir as qe_run/.
 The deterministic parts (reading QE output, writing and validating the
-bundle, scoring the fit) are chem_llm.dpp_io; the agent decides the band
+bundle, scoring the fit) are chem_llm.dpp.io; the agent decides the band
 window, k-points, weights, basis and training settings, and checks the fit.
 """
 from __future__ import annotations
@@ -30,7 +30,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import REPO_ROOT
+from .. import REPO_ROOT
 
 TOOL_NAMES = ("read_file", "write_file", "run_python", "make_dir", "train_deepseudopot", "note", "done")
 DOCS_DIR = REPO_ROOT / "chem_llm" / "DeePseudopot" / "docs"
@@ -38,7 +38,7 @@ EXAMPLE_DIR = REPO_ROOT / "deepseudopot_example" / "tio2_rutile"
 
 
 def _tools():
-    from .tools import REGISTRY
+    from ..tools import REGISTRY
 
     missing = [n for n in TOOL_NAMES if n not in REGISTRY]
     if missing:
@@ -77,13 +77,13 @@ SYSTEM_PROMPT_BASE = (
     "=== INVARIANTS ===\n"
     "INVARIANT 1: every number about the DFT run -- cell, atoms, electron count, occupied bands, band "
     "energies, VBM/CBM, k-points, spin-orbit -- is read from the run's files in code with "
-    "chem_llm.dpp_io.read_qe_run, never typed in from memory or from the task text.\n\n"
+    "chem_llm.dpp.io.read_qe_run, never typed in from memory or from the task text.\n\n"
     "INVARIANT 2 (band alignment): DeePseudopot fits its LOWEST nBands eigenvalues, in order, to the "
     "columns of expBandStruct_0.par. An empirical pseudopotential in a small plane-wave basis describes "
     "only the valence shell and the lowest conduction bands -- not the semicore states (filled shells "
     "below the outermost valence shell, e.g. Ti 3s/3p, Ga 3d, Pb 5d, Cs 5s/5p) that the DFT "
     "pseudopotentials include. So first_band (the first DFT band fitted) = the number of DFT bands "
-    "holding semicore electrons: from chem_llm.dpp_io.pseudo_orbitals(upf) of each element, decide which "
+    "holding semicore electrons: from chem_llm.dpp.io.pseudo_orbitals(upf) of each element, decide which "
     "orbitals are semicore, sum their occupations over EVERY atom of the cell, and divide by 2 (by 1 with "
     "spin-orbit, where each band holds one electron). In the script, print and assert that the dropped "
     "and the kept bands are separated by a clear gap: run['energies'][:, first_band - 1].max() is several "
@@ -94,7 +94,7 @@ SYSTEM_PROMPT_BASE = (
     "(>= 1 crashes every epoch and runs out of memory). write_bundle rejects both mistakes.\n\n"
     "INVARIANT 5 (units): maxKE is DeePseudopot's own plane-wave cutoff in Hartree -- not QE's ecutwfc. "
     "Energies are eV. write_bundle converts the cell from Angstrom to Bohr itself.\n\n"
-    "INVARIANT 6: the fit is judged from DeePseudopot's output files with chem_llm.dpp_io.read_fit "
+    "INVARIANT 6: the fit is judged from DeePseudopot's output files with chem_llm.dpp.io.read_fit "
     "(RMS error, gap of the fit vs the DFT gap), never from training stdout or from a plot alone, and "
     "reported as it is, including when it is poor.\n\n"
     "=== DECISION RULES ===\n"
@@ -119,8 +119,8 @@ SYSTEM_PROMPT_BASE = (
     "  First a short run (the task gives the epoch budget) to confirm the loss falls; check read_fit. "
     "If it is falling and time remains, train once more, longer, into a new results folder. Use "
     "plotEvery so that the last epoch is a multiple of it (read_fit needs an epoch_<N>_BS_sys0.dat).\n\n"
-    "=== HELPERS (chem_llm.dpp_io; use them, do not re-parse QE files by hand) ===\n"
-    "    from chem_llm.dpp_io import read_qe_run, pseudo_orbitals, write_bundle, read_fit\n"
+    "=== HELPERS (chem_llm.dpp.io; use them, do not re-parse QE files by hand) ===\n"
+    "    from chem_llm.dpp.io import read_qe_run, pseudo_orbitals, write_bundle, read_fit\n"
     "    run = read_qe_run('qe_run')     # dict: symbols, cell_angstrom, energies (nk, nbnd) eV, n_occupied,\n"
     "                                    # spin_orbit, kpoints, high_symmetry [(idx, label)], vbm, cbm, gap,\n"
     "                                    # pseudopotentials {element: upf path}\n"
@@ -200,7 +200,7 @@ class FitResult:
 
 def _latest_fit(work_dir: Path) -> tuple[Path | None, dict | None]:
     """The best-scoring results folder the run trained (read_fit), if any."""
-    from .dpp_io import read_fit
+    from .io import read_fit
 
     best = (None, None)
     for res in sorted(work_dir.glob("dpp_results*")):
@@ -221,7 +221,7 @@ class DeePseudopotAgent:
     shared with DFT runs), or of a new DFTAgent built from `**kwargs`."""
 
     def __init__(self, agent=None, **kwargs):
-        from .agent import DFTAgent
+        from ..agent import DFTAgent
 
         self.agent = agent if agent is not None else DFTAgent(**kwargs)
 
@@ -232,9 +232,9 @@ class DeePseudopotAgent:
     def run(self, qe_run: str | Path, work_dir: str | Path | None = None, *, name: str | None = None,
             max_steps: int = 40, first_epochs: int = 100, long_epochs: int = 600, clear_dir: bool = True,
             template: str | Path | None = None, verbose: bool = True, on_step=None) -> FitResult:
-        from .agent_core import run_agent
-        from .dpp_io import read_qe_run
-        from .settings import activated
+        from ..core.agent_core import run_agent
+        from .io import read_qe_run
+        from ..settings import activated
 
         qe_run = Path(qe_run).expanduser().resolve()
         run = read_qe_run(qe_run)  # fail before loading anything if the input is unusable
@@ -288,8 +288,8 @@ def main(argv=None) -> int:
     """chem-llm-dpp QE_RUN [--work-dir D] [--backend vllm] ..."""
     import argparse
 
-    from .progress import ProgressPrinter
-    from .settings import Settings
+    from ..cli.progress import ProgressPrinter
+    from ..settings import Settings
 
     p = argparse.ArgumentParser(prog="chem-llm-dpp", description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)

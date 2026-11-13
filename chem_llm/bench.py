@@ -86,7 +86,7 @@ def _read(path: Path) -> str | None:
 
 def calc_facts(work_dir: Path, job: str = "000") -> dict:
     """Physics facts from the QE files a run left in calculations/<job>."""
-    from .pipeline import _inspect_outputs
+    from .core.pipeline import _inspect_outputs
 
     calc = Path(work_dir) / "calculations" / job
     facts = dict(_inspect_outputs(Path(work_dir), job=job))
@@ -110,7 +110,7 @@ def band_fingerprint(work_dir: Path, metal: bool = False, n_around: int = 4, job
     above the gap. None if the run has no kpath.json / bands output."""
     import numpy as np
 
-    from .kpath import plot_axis
+    from .dft.kpath import plot_axis
 
     calc = Path(work_dir) / "calculations" / job
     facts = calc_facts(work_dir, job)
@@ -177,7 +177,7 @@ def evaluate_case(name: str, case: dict, work_dir: Path, record: dict | None = N
         checks.append(compare_to_reference(json.loads(ref.read_text()), band_fingerprint(work_dir, metal)))
     plot_script = _plot_script(work_dir)
     checks.append(_check("plot_uses_kpath_tool", bool(plot_script and "plot_axis" in plot_script),
-                         "plot script reads chem_llm.kpath.plot_axis" if plot_script and "plot_axis" in plot_script
+                         "plot script reads chem_llm.dft.kpath.plot_axis" if plot_script and "plot_axis" in plot_script
                          else "plot script does not use plot_axis (risk: wrong ticks or lines across breaks)",
                          hard=False))
     hard = [c for c in checks if c["hard"]]
@@ -218,7 +218,7 @@ def compare_to_reference(ref: dict, fp: dict | None, tol: float | None = None) -
 
 def promote(run_dir: Path, tolerance: float = 0.15) -> Path:
     """Make a validated run the golden reference for its case."""
-    from .archive import read_index
+    from .records.archive import read_index
 
     run_dir = Path(run_dir).resolve()
     record = json.loads((run_dir / "record.json").read_text())
@@ -335,9 +335,9 @@ def run_langsmith(names: list[str], *, suite: str, label: str | None, backend: s
                          "trace the agent runs themselves); add them to .env or the environment")
     from langsmith import Client, evaluate
 
-    from .agent_core import SYSTEM_PROMPT_TEMPLATE
-    from .archive import code_version
-    from .rundiff import _sha
+    from .core.agent_core import SYSTEM_PROMPT_TEMPLATE
+    from .records.archive import code_version
+    from .records.rundiff import _sha
 
     client = Client()
     dataset = f"chem_llm-{suite}"
@@ -366,7 +366,7 @@ def run_langsmith(names: list[str], *, suite: str, label: str | None, backend: s
 # ----------------------------------------------------------------------
 # report
 def write_report(path: Path = BENCH / "RESULTS.md") -> Path:
-    from .archive import read_index
+    from .records.archive import read_index
 
     suites, cases = load_suites()
     index = [e for e in read_index(BENCH) if e.get("case") in cases]
@@ -429,8 +429,8 @@ def import_history(entries: list[tuple[str, Path, Path | None]], label: str) -> 
     """Record runs made before the benchmark existed (e.g. sandbox/test34)
     in the index, scored by today's checks, so the first new run has
     something to compare against. entries: (case, work_dir, progress_log)."""
-    from .archive import RunArchive, commit_at
-    from .report import load_log_entry, summarize_log
+    from .records.archive import RunArchive, commit_at
+    from .records.report import load_log_entry, summarize_log
 
     _, cases = load_suites()
     for name, work_dir, progress in entries:
@@ -442,7 +442,7 @@ def import_history(entries: list[tuple[str, Path, Path | None]], label: str) -> 
             run.progress_stream.write(Path(progress).read_text())
         ev = evaluate_case(name, cases[name], Path(work_dir), record)
         (run.dir / "checks.json").write_text(json.dumps(ev, indent=1, default=str))
-        from .pipeline import _inspect_outputs
+        from .core.pipeline import _inspect_outputs
         found = _inspect_outputs(Path(work_dir))
         record["outcome"] = {"band_gap": found.get("band_gap"), "dft_finished": found.get("dft_finished")}
         run.finish(record, summarize_log(work_dir), {"passed": ev["passed"], "time": record["timestamp"],

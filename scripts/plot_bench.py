@@ -5,7 +5,7 @@
     python scripts/plot_bench.py --sweep "sweep 8"
 
 Writes PDFs and a README to bench/visualizations/. Reads bench/index.jsonl and
-each run's record.json (format 2, chem_llm/runlog.py).
+each run's record.json (format 2, chem_llm/records/runlog.py).
 
 Last week's runs (test34 rerun, 2026-10-07, in-process transformers) predate
 per-step timing and token logging, so their numbers are reconstructed and
@@ -36,9 +36,9 @@ import numpy as np
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
-from chem_llm.archive import read_index  # noqa: E402
-from chem_llm.runlog import history_of, upgrade  # noqa: E402
-from chem_llm.telemetry import OPERATION_LABELS, PHASE_LABELS, PHASES, run_metrics  # noqa: E402
+from chem_llm.records.archive import read_index  # noqa: E402
+from chem_llm.records.runlog import history_of, upgrade  # noqa: E402
+from chem_llm.records.telemetry import OPERATION_LABELS, PHASE_LABELS, PHASES, run_metrics  # noqa: E402
 
 BENCH = REPO / "bench"
 OUT = BENCH / "visualizations"
@@ -97,7 +97,7 @@ def _old_system_prompt(commit: str) -> str:
     with tempfile.TemporaryDirectory() as tmp:
         archive = subprocess.run(["git", "-C", str(REPO), "archive", commit, "chem_llm"], capture_output=True, check=True)
         subprocess.run(["tar", "-x", "-C", tmp], input=archive.stdout, check=True)
-        code = "import sys; sys.path.insert(0, '.'); import chem_llm.agent_core as a; sys.stdout.write(a.SYSTEM_PROMPT_TEMPLATE)"
+        code = "import sys; sys.path.insert(0, '.'); import chem_llm.core.agent_core as a; sys.stdout.write(a.SYSTEM_PROMPT_TEMPLATE)"
         return subprocess.run([sys.executable, "-c", code], cwd=tmp, capture_output=True, text=True, check=True).stdout
 
 
@@ -108,7 +108,7 @@ def _reconstruct_tokens(record: dict, system: str) -> list[tuple[int, int]]:
     from transformers import AutoTokenizer
 
     from chem_llm.settings import Settings
-    from chem_llm.state import AgentState
+    from chem_llm.core.state import AgentState
 
     s = Settings.discover(REPO)
     tok = AutoTokenizer.from_pretrained(record.get("model") or "Qwen/Qwen3.8-27B", cache_dir=s.hf_cache_dir)

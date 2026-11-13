@@ -4,11 +4,11 @@ from types import SimpleNamespace
 import pytest
 from rich.console import Console
 
-import chem_llm.main as cli
+import chem_llm.cli.main as cli
 from chem_llm import vllm_server
-from chem_llm.interactive import equivalent_command, wizard
-from chem_llm.polymorphs import classify_spacegroup, group_by_spacegroup, parse_spacegroup
-from chem_llm.tasks import build_task
+from chem_llm.cli.interactive import equivalent_command, wizard
+from chem_llm.dft.polymorphs import classify_spacegroup, group_by_spacegroup, parse_spacegroup
+from chem_llm.core.tasks import build_task
 
 QWEN = "Qwen/Qwen3.8-27B"
 CACHED = [{"id": QWEN, "gb": 55.6, "path": "/x"}, {"id": "Qwen/Qwen3-30B-A3B-Instruct-2507", "gb": 61.1, "path": "/y"}]
@@ -102,7 +102,7 @@ def test_huggingface_serving_and_other_model(settings, tmp_path):
 
 
 def test_default_model_offered_for_download(settings, tmp_path, monkeypatch):
-    monkeypatch.setattr("chem_llm.local_models.free_gb", lambda s: 500.0)
+    monkeypatch.setattr("chem_llm.llm.local_models.free_gb", lambda s: 500.0)
     got = []
     args, out = run_wizard(settings, ["136", "", "1", "y", "2", str(tmp_path / "w"), "1", "y", "n", "y"],
                            compound="TiO2", models=[], downloads=got)
@@ -194,7 +194,7 @@ def test_cli_without_a_terminal_does_not_prompt(fake_agent, capsys):
 
 
 def test_cli_interactive_cancel(fake_agent, monkeypatch):
-    monkeypatch.setattr("chem_llm.interactive.wizard", lambda args, s: None)
+    monkeypatch.setattr("chem_llm.cli.interactive.wizard", lambda args, s: None)
     assert cli.main(["-i"]) == 1
 
 

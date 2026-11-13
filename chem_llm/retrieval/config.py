@@ -44,7 +44,7 @@ MAX_CHUNKS_PER_DOCUMENT = int(os.environ.get("DOC_MAX_CHUNKS_PER_DOCUMENT", 2))
 
 # --- Index location ---
 # DOC_INDEX_DIR may override with either a path relative to REPO_ROOT or an
-# absolute path -- see the WORK_DIR comment in chem_llm/config.py for why a
+# absolute path -- see the WORK_DIR comment in chem_llm/core/config.py for why a
 # single `/` handles both cases.
 def _index_dir():
     """Default index location for callers that do not name one. An agent

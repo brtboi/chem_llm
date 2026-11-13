@@ -35,7 +35,7 @@ OPERATIONS = ("llm", "tools", "qe", "code", "total")
 OPERATION_LABELS = {"llm": "model generation", "tools": "tool calls (databases, docs, files)",
                     "qe": "Quantum ESPRESSO", "code": "running the agent's scripts", "total": "total"}
 
-# Phases: the task's workflow STEPs (chem_llm.tasks).
+# Phases: the task's workflow STEPs (chem_llm.core.tasks).
 PHASES = ("1_structure", "2_perturbed_structures", "3_pseudopotentials", "4_qe_settings",
           "5_qe_inputs", "6_run_qe", "7_plot")
 PHASE_LABELS = {"1_structure": "1 fetch + reduce structure", "2_perturbed_structures": "2 perturbed structures",
@@ -83,7 +83,7 @@ class StepRecorder:
         rec["history"] = [e["step"] for e in new]
         self.state.steps.append(rec)
         if self.trace_file is not None:
-            # the same step fields as a format-2 record's steps (chem_llm.runlog)
+            # the same step fields as a format-2 record's steps (chem_llm.records.runlog)
             main = new[-1] if new else {}
             line = {"format_version": 2, "run_id": self.run_id, "step": rec["step"], "tool": rec["tool"],
                     "args": main.get("args"), "result": main.get("result"),

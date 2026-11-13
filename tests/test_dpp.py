@@ -6,8 +6,8 @@ import numpy as np
 import pytest
 
 from chem_llm import DFTAgent
-from chem_llm.dpp_agent import DeePseudopotAgent, system_prompt
-from chem_llm.dpp_io import pseudo_orbitals, read_fit, read_qe_run, write_bundle
+from chem_llm.dpp.agent import DeePseudopotAgent, system_prompt
+from chem_llm.dpp.io import pseudo_orbitals, read_fit, read_qe_run, write_bundle
 from chem_llm.testing import ScriptedChatModel
 from conftest import records
 
@@ -82,7 +82,7 @@ def fake_training(offset=0.1):
 
 
 BUILD = f"""
-from chem_llm.dpp_io import read_qe_run, write_bundle
+from chem_llm.dpp.io import read_qe_run, write_bundle
 run = read_qe_run('qe_run')
 write_bundle('nn_inputs', run, first_band=8, n_bands=26, kpoint_indices=[0, 26, 52], band_weights=[1.0] * 26,
              input_params={INPUT!r}, nn_config={NN_CONFIG!r}, init_params={{'Ti': [0.0] * 9, 'O': [0.0] * 9}},

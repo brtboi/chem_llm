@@ -5,7 +5,7 @@ import json
 import shutil
 from pathlib import Path
 
-from .settings import Settings
+from ..settings import Settings
 
 DEFAULT_MODEL = "Qwen/Qwen3.8-27B"
 DEFAULT_MODEL_GB = 56  # bf16 weights, as downloaded

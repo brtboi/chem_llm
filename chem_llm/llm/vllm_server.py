@@ -24,7 +24,7 @@ import time
 from pathlib import Path
 from urllib.parse import urlparse
 
-from .settings import Settings
+from ..settings import Settings
 
 MAX_MODEL_LEN = 131072  # agent prompts have reached ~71K tokens
 
@@ -108,7 +108,7 @@ def command(settings: Settings, model: str, model_config: dict | None = None) ->
 
 def served_at(url: str) -> list[str] | None:
     """Models the server at `url` serves, or None if nothing answers."""
-    from .llm import check_server
+    from .models import check_server
 
     try:
         return check_server(url, timeout=3)

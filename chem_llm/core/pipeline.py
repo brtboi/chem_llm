@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .settings import Settings
+from ..settings import Settings
 from .tasks import build_task
 
 
@@ -43,13 +43,13 @@ class RunResult:
     state: Any = None              # the full AgentState
     config: dict | None = None     # DFTAgent.run_config() for this run
     metrics: dict | None = None    # telemetry.run_metrics(): time per phase, tokens
-    archive_dir: Path | None = None  # this run's permanent record (chem_llm.archive)
+    archive_dir: Path | None = None  # this run's permanent record (chem_llm.records.archive)
     evaluation: dict | None = None   # benchmark checks, when run with evaluate=
 
     def report(self) -> str:
         """A readable summary of the run: what the agent did, its results and
-        key choices in order, and where it struggled (chem_llm.report)."""
-        from .report import summarize_run
+        key choices in order, and where it struggled (chem_llm.records.report)."""
+        from ..records.report import summarize_run
 
         return summarize_run(
             self.state.history if self.state is not None else [],
@@ -82,7 +82,7 @@ class RunResult:
 def _hide_tools(names) -> None:
     """Drop tools from the registry before agent_core snapshots it into the
     system prompt (which happens once, at import time)."""
-    from . import tools as tools_module
+    from .. import tools as tools_module
 
     names = set(names or ())
     if not names:
@@ -225,7 +225,7 @@ def run_dft_agent(
         for compound, spacegroup in jobs:
             agent.run(compound, spacegroup)
     """
-    from .agent import DFTAgent
+    from ..agent import DFTAgent
 
     agent = DFTAgent(settings)
     return agent.run(

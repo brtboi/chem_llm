@@ -5,6 +5,23 @@ first. Commit hashes link the work to `git log`. Per-run detail, including resul
 changed since the previous run of each compound, is in [`bench/RESULTS.md`](bench/RESULTS.md)
 and `bench/runs/`.
 
+## Week of 2026-11-09
+
+- **Package split into subpackages:** `core/` (the loop), `llm/` (backends, vLLM server),
+  `dft/` (k-path, pw.out, phases), `dpp/` (DeePseudopot agent), `records/` (run records,
+  reports, replay), `cli/`. `agent.py`, `settings.py`, `bench.py` and `testing.py` stay at the
+  top. The prompts name the new paths (`chem_llm.dft.kpath`, ...), so the prompt version
+  changes. The old paths still import (`chem_llm.MOVED_MODULES`), because the scripts in
+  `bench/runs/` and `sandbox/` use them and `chem-llm-replay` re-runs them.
+
+## Week of 2026-11-02
+
+- **Phase names resolve in code** (e250f25). Given only "rutile", the agent picked I4_1/amd
+  (anatase, the PBE ground state, first in Materials Project's unnamed list) and called it
+  rutile. Common structure-type names now map to a space group in
+  `polymorphs.PHASE_SPACEGROUPS`; only unknown names go to the agent. Rerun from the name
+  alone: P4_2/mnm, gap 1.847 eV, every high-symmetry point within 0.009 eV of the reference.
+
 ## Week of 2026-10-26
 
 - **Guided setup in the terminal:** `chem-llm` with no arguments (or `-i`) walks through:

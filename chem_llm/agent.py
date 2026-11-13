@@ -30,9 +30,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from .pipeline import RunResult, _hide_tools, _inspect_outputs
+from .core.pipeline import RunResult, _hide_tools, _inspect_outputs
 from .settings import Settings, activated, normalize_backend
-from .tasks import build_task
+from .core.tasks import build_task
 
 
 class DocumentationIndex:
@@ -274,7 +274,7 @@ class DFTAgent:
         return time.perf_counter() - started
 
     def _load(self) -> None:
-        from .agent_core import make_chat_step_source, retry_on_error
+        from .core.agent_core import make_chat_step_source, retry_on_error
 
         s = self.settings
         backend = normalize_backend(s.model.backend)
@@ -290,7 +290,7 @@ class DFTAgent:
             self._loaded = _LoadedModel(factory, _llm_name(llm), "custom")
 
         elif backend == "vllm":
-            from .llm import check_server, vllm_chat_model
+            from .llm.models import check_server, vllm_chat_model
 
             served = check_server(s.model.vllm_url)
             name = s.model.qwen_model
@@ -312,7 +312,7 @@ class DFTAgent:
             import torch
             from transformers import AutoModelForCausalLM, AutoTokenizer
 
-            from .llm import TransformersChatModel
+            from .llm.models import TransformersChatModel
 
             name = s.model.qwen_model
             # token=None downloads anonymously, which is all a public
@@ -338,7 +338,7 @@ class DFTAgent:
         elif backend == "claude":
             s.require("anthropic_api_key")
             try:
-                from .claude_backend import ClaudeModel, make_claude_step_source
+                from .llm.claude_backend import ClaudeModel, make_claude_step_source
             except ModuleNotFoundError as e:
                 if e.name != "anthropic":
                     raise
@@ -402,10 +402,10 @@ class DFTAgent:
 
         verbose prints the raw stream (each step's model output, tool call
         and full result). on_step is an observer told about each step as it
-        happens -- e.g. chem_llm.progress.ProgressPrinter() for one readable
+        happens -- e.g. chem_llm.cli.progress.ProgressPrinter() for one readable
         line per action; pass verbose=False with it.
 
-        Every run is archived (chem_llm.archive, settings.archive_root):
+        Every run is archived (chem_llm.records.archive, settings.archive_root):
         progress.txt, summary.txt, what changed since the previous run of the
         same `case` (default: the compound), and the run's metrics. `label`
         says why the run was made; `meta` is extra fields for the index (the
@@ -420,7 +420,7 @@ class DFTAgent:
         if not (spacegroup or spacegroup_number or spacegroup_name.strip() or task):
             raise ValueError("give a space group (symbol or number) or a phase name (spacegroup_name)")
         if not (spacegroup or spacegroup_number or task):
-            from .polymorphs import phase_spacegroup
+            from .dft.polymorphs import phase_spacegroup
 
             known = phase_spacegroup(spacegroup_name)
             if known:
@@ -428,7 +428,7 @@ class DFTAgent:
         _hide_tools(hide_tools)
         load_s = self.load()
 
-        from .agent_core import run_agent
+        from .core.agent_core import run_agent
 
         s = self.settings
         work_dir = Path(work_dir).expanduser().resolve() if work_dir else (s.work_root / compound).resolve()
@@ -443,8 +443,8 @@ class DFTAgent:
             functional=functional,
         )
 
-        from .archive import RunArchive
-        from .progress import Observers, ProgressPrinter
+        from .records.archive import RunArchive
+        from .cli.progress import Observers, ProgressPrinter
 
         config = self.run_config(prompt)
         given = {"compound": compound, "spacegroup": spacegroup,
@@ -521,7 +521,7 @@ class DFTAgent:
         """What this agent runs with, as recorded with each run (no
         credentials): model and sampling, loop and history settings, how
         Quantum ESPRESSO is launched, and the git commit the code ran from."""
-        from .archive import code_version
+        from .records.archive import code_version
         from .tools import TOOLS
 
         s = self.settings
