@@ -30,9 +30,12 @@ built or run. The first build on GCP is the test; check the items under "Verify 
    documentation index, and runs. Without it, every new VM re-downloads the model.
 4. **Secrets:** `MP_API_KEY` (Materials Project) and `HF_TOKEN` (Hugging Face), from Secret
    Manager or the VM's environment. Never put them in the image or in `chem_llm.yaml`.
-5. **Outbound internet** at run time: Materials Project lookups, pseudopotential downloads
+5. Optional, **LangSmith tracing:** `LANGSMITH_API_KEY` and `LANGSMITH_TRACING=true`. The agent
+   container traces to agent `chem-llm`, environment `gcp` by default (`compose.yaml`), so cloud
+   runs stay apart from local ones.
+6. **Outbound internet** at run time: Materials Project lookups, pseudopotential downloads
    (pseudohub), and the first model/embedding-model download.
-6. Optional: **Artifact Registry** to push the built `chem-llm-agent` image if more than one VM
+7. Optional: **Artifact Registry** to push the built `chem-llm-agent` image if more than one VM
    will use it.
 
 ### In the agent image (what `Dockerfile` does)

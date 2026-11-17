@@ -7,6 +7,14 @@ and `bench/runs/`.
 
 ## Week of 2026-11-16
 
+- **LangSmith tracing**: `.env` turns it on (`LANGSMITH_TRACING`, `LANGSMITH_ENDPOINT`), and runs
+  go to agent `chem-llm`, environment `local` (`LANGSMITH_AGENT_ID` / `_ENVIRONMENT`, LangSmith's
+  beta addressing). Each trace is named `chem_llm <workflow>: <compound>` with the compound, model,
+  backend and `run_id` as metadata; tool calls are their own runs. Needed langsmith >= 0.14.9 and
+  langchain-core >= 1.6.11 (now 0.14.17 / 1.8.1): 0.14.7 sent the address with the default
+  project and every upload was rejected (400). The tests keep tracing off. The LangSmith skills
+  (langchain-ai/langsmith-skills) are installed in `.claude/skills/`. Checked with a scripted run:
+  trace received with 19 runs (graph nodes, 3 model calls, 3 tool calls).
 - **Docker deployment of the DFT agent** (`deploy/docker/`): a `chem-llm-agent` image on NVIDIA's
   NGC Quantum ESPRESSO base (GPU QE 7.3.1) with the locked dependencies, run next to a stock
   `vllm/vllm-openai` container by `compose.yaml` (model on GPU 0, QE on GPU 1), and the README of

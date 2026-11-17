@@ -237,10 +237,32 @@ server running, with its log under `<work_root>/_vllm/`.
 
 ### Tracing
 
-LangChain can send every run (the graph, each step, each model call with its prompt) to
-[LangSmith](https://smith.langchain.com): `export LANGSMITH_TRACING=true
-LANGSMITH_API_KEY=...`. It is off unless both are set. Without it, each run already logs its
-own timings and prompt version (see [Run records](#run-records)).
+The agent loop is a LangGraph graph and every backend is a LangChain chat model, so each run
+can be traced to [LangSmith](https://smith.langchain.com) with environment variables alone
+(`.env` works):
+
+```bash
+LANGSMITH_TRACING=true
+LANGSMITH_API_KEY=lsv2_...
+LANGSMITH_ENDPOINT=https://api.smith.langchain.com
+LANGSMITH_AGENT_ID=chem-llm          # traces go to this agent's environment
+LANGSMITH_AGENT_ENVIRONMENT=local    # e.g. local, gcp
+```
+
+A trace is named `chem_llm <workflow>: <compound>` (`dft` or `deepseudopot`), tagged with the
+workflow, and carries the compound, space group, model, backend and the run's `run_id` (the same
+id as in its `log.jsonl`) as metadata. Inside it: each step's model call with its full prompt,
+and each tool call as its own run named after the tool, with its arguments and result.
+
+- `LANGSMITH_AGENT_ID` / `LANGSMITH_AGENT_ENVIRONMENT` use LangSmith's (beta) agent addressing.
+  Do not also set `LANGSMITH_PROJECT`: with both, the SDK leaves runs untraced. Without the
+  agent variables, `LANGSMITH_PROJECT` names the project as usual.
+- Needs `langsmith >= 0.14.9` and `langchain-core >= 1.6.11`; older versions send the address
+  together with the default project, which the server rejects (400).
+- The tests switch tracing off (`tests/conftest.py`), so `pytest` stays offline.
+
+Tracing is off unless `LANGSMITH_TRACING` and `LANGSMITH_API_KEY` are set. Without it, each run
+already logs its own timings and prompt version (see [Run records](#run-records)).
 
 ## Command line
 

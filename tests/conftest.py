@@ -1,9 +1,15 @@
 import json
+import os
 from pathlib import Path
 
 import pytest
 
-from chem_llm import DFTAgent, Settings
+# The tests need no network: keep scripted runs out of LangSmith even when .env turns
+# tracing on (chem_llm.settings loads .env on import, but never overrides a set variable).
+os.environ["LANGSMITH_TRACING"] = "false"
+os.environ["LANGCHAIN_TRACING_V2"] = "false"
+
+from chem_llm import DFTAgent, Settings  # noqa: E402
 from chem_llm.testing import ScriptedChatModel, fake_qe_workflow, mock_tools
 
 

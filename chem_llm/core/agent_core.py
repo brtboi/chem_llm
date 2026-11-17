@@ -585,7 +585,8 @@ def make_llm_step_source(
 
 
 def run_step_loop(state: AgentState, next_tool_call, max_steps: int, verbose: bool = True, observer=None,
-                  recorder=None) -> str | None:
+                  recorder=None, run_name: str = "chem_llm agent", tags: list[str] | None = None,
+                  metadata: dict | None = None) -> str | None:
     """Drive `state` through up to `max_steps` tool calls, one per step,
     obtained from `next_tool_call(state, step)`. Mutates `state` in place
     and returns why the loop stopped ("done", "max_steps",
@@ -604,12 +605,15 @@ def run_step_loop(state: AgentState, next_tool_call, max_steps: int, verbose: bo
 
     `recorder`, a telemetry.StepRecorder, times each step (one is made if
     not given, so state.steps is always filled).
+
+    `run_name`, `tags`, `metadata` label the run's trace in LangSmith (with
+    LANGSMITH_TRACING=true; see chem_llm.core.graph).
     """
     from .graph import run_graph
     from ..records.telemetry import StepRecorder
 
     stop = run_graph(state, next_tool_call, max_steps, verbose=verbose, observer=observer,
-                     recorder=recorder or StepRecorder(state))
+                     recorder=recorder or StepRecorder(state), run_name=run_name, tags=tags, metadata=metadata)
     if stop == "max_steps" and not state.done:
         state.add_note("Max steps reached without explicit 'done' call.")
     return stop
@@ -815,7 +819,16 @@ def run_agent(
     recorder = StepRecorder(state, trace_file=trace_file, run_id=state.run_id)
 
     source = step_source or make_llm_step_source(model, tokenizer, verbose)
-    run_step_loop(state, source, max_steps, verbose, observer=observer, recorder=recorder)
+    # What the run's LangSmith trace is named and searchable by; run_id links it to log.jsonl.
+    extra = log_extra or {}
+    workflow = extra.get("workflow", "dft")
+    trace_metadata = {k: extra[k] for k in ("compound", "spacegroup", "spacegroup_number") if extra.get(k)}
+    trace_metadata.update(run_id=state.run_id, model=model_name, workflow=workflow)
+    if isinstance(extra.get("config"), dict) and extra["config"].get("backend"):
+        trace_metadata["backend"] = extra["config"]["backend"]
+    run_name = f"chem_llm {workflow}" + (f": {extra['compound']}" if extra.get("compound") else "")
+    run_step_loop(state, source, max_steps, verbose, observer=observer, recorder=recorder,
+                  run_name=run_name, tags=["chem_llm", workflow], metadata=trace_metadata)
 
     if log_file:
         print("logging to...", log_file)

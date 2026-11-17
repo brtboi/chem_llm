@@ -344,7 +344,10 @@ def run_langsmith(names: list[str], *, suite: str, label: str | None, backend: s
     if not client.has_dataset(dataset_name=dataset):
         ds = client.create_dataset(dataset, description=f"chem_llm benchmark suite {suite!r} (bench/suites.yaml)")
         client.create_examples(dataset_id=ds.id, examples=langsmith_examples(names))
-    os.environ.setdefault("LANGSMITH_PROJECT", f"chem_llm-{suite}")
+    # A project beside the LANGSMITH_AGENT_* address would leave the agent runs untraced
+    # (langsmith 0.14 drops calls that inherit both); with an address, traces follow the agent.
+    if not os.environ.get("LANGSMITH_AGENT_ID"):
+        os.environ.setdefault("LANGSMITH_PROJECT", f"chem_llm-{suite}")
 
     def target(inputs: dict) -> dict:
         return _subprocess_case(inputs["case"], suite, label, backend, max_steps)

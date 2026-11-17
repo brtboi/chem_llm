@@ -24,6 +24,7 @@ import time
 from typing import TypedDict
 
 from langgraph.graph import END, START, StateGraph
+from langsmith import trace
 
 
 class LoopState(TypedDict, total=False):
@@ -78,11 +79,15 @@ def build_graph(state, next_tool_call, *, max_steps: int, verbose: bool = True, 
         if observer is not None:
             observer.start(step, call)
         t = time.perf_counter()
-        try:
-            result = execute_tool(call, state)
-        except Exception as e:
-            result = f"ERROR executing {call.get('tool')}: {e}"
-            state.log(call.get("tool", "unknown"), call.get("args", {}), result)
+        tool = call.get("tool", "unknown")
+        # one LangSmith run per tool call, named after the tool (a no-op when tracing is off)
+        with trace(name=tool, run_type="tool", inputs={"args": call.get("args", {})}) as tool_run:
+            try:
+                result = execute_tool(call, state)
+            except Exception as e:
+                result = f"ERROR executing {tool}: {e}"
+                state.log(tool, call.get("args", {}), result)
+            tool_run.end(outputs={"result": result})
         if recorder is not None:
             recorder.tool_done(call.get("tool", "unknown"), time.perf_counter() - t)
         if verbose:
@@ -109,7 +114,8 @@ def build_graph(state, next_tool_call, *, max_steps: int, verbose: bool = True, 
 
 
 def run_graph(state, next_tool_call, max_steps: int, verbose: bool = True, observer=None, recorder=None,
-              run_name: str = "chem_llm agent", tags: list[str] | None = None) -> str | None:
+              run_name: str = "chem_llm agent", tags: list[str] | None = None,
+              metadata: dict | None = None) -> str | None:
     """Run the loop to completion; returns why it stopped."""
     if max_steps < 1:
         return "max_steps"
@@ -118,6 +124,7 @@ def run_graph(state, next_tool_call, max_steps: int, verbose: bool = True, obser
     final = graph.invoke(
         {"step": 0},
         # two node visits per step, plus slack
-        config={"recursion_limit": 2 * max_steps + 10, "run_name": run_name, "tags": tags or []},
+        config={"recursion_limit": 2 * max_steps + 10, "run_name": run_name, "tags": tags or [],
+                "metadata": metadata or {}},
     )
     return final.get("stop")
