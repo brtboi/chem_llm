@@ -1,0 +1,52 @@
+# Two containers on one 2-GPU machine: vLLM serves Qwen on GPU 0, the agent runs
+# QE on GPU 1. QE must never share vLLM's GPU (time-slicing made jobs >10x slower).
+#
+#   export MP_API_KEY=... HF_TOKEN=...
+#   docker compose -f deploy/docker/compose.yaml up -d vllm        # ~5-10 min to load
+#   docker compose -f deploy/docker/compose.yaml run --rm agent TiO2 rutile --pretty-progress
+
+services:
+  vllm:
+    image: vllm/vllm-openai:v0.31.0          # the version Perlmutter runs; pin it
+    command: >
+      --model Qwen/Qwen3.8-27B
+      --gpu-memory-utilization 0.90
+      --max-model-len 65536
+      --enable-prefix-caching
+      --limit-mm-per-prompt '{"image": 0, "video": 0}'
+    environment:
+      HF_TOKEN: ${HF_TOKEN}
+      HF_HOME: /data/hf
+    volumes:
+      - data:/data
+    ipc: host
+    deploy:
+      resources:
+        reservations:
+          devices: [{driver: nvidia, device_ids: ["0"], capabilities: [gpu]}]
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/v1/models')"]
+      interval: 30s
+      timeout: 5s
+      retries: 60
+
+  agent:
+    image: chem-llm-agent
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    depends_on:
+      vllm: {condition: service_healthy}
+    environment:
+      MP_API_KEY: ${MP_API_KEY}
+      HF_TOKEN: ${HF_TOKEN}
+    volumes:
+      - data:/data
+    ipc: host
+    deploy:
+      resources:
+        reservations:
+          devices: [{driver: nvidia, device_ids: ["1"], capabilities: [gpu]}]
+
+volumes:
+  data:     # model weights, doc index, runs; on GCP back it with a persistent disk

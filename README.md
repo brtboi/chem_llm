@@ -551,6 +551,7 @@ config.example.yaml  every setting, documented
 bench/               suites.yaml, golden references, run archive, index.jsonl, RESULTS.md
 CHANGELOG.md         weekly progress log
 tests/               pytest suite (scripted model, QE mocked; a live vLLM test is skipped without a server)
+deploy/docker/        Dockerfile + compose.yaml for the DFT agent with GPU QE next to a vLLM container (GCP)
 scripts/             serve_vllm.sh, build_doc_index.py, build_qe_namelists.py (regenerates tools/qe_namelists.py),
                      plot_bench.py (bench/visualizations/)
 sandbox/             past experiment runs and their run_test*.py drivers

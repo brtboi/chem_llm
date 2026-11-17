@@ -1,0 +1,33 @@
+# chem-llm settings inside the agent container (deploy/docker/Dockerfile).
+# Credentials are NOT here: pass MP_API_KEY and HF_TOKEN as environment variables.
+
+paths:
+  work_root: /data/runs           # a mounted volume: runs survive the container
+  hf_home: /data/hf               # tokenizer/embedding-model cache, also a volume
+  doc_index_dir: /data/retrieval_index
+  archive_dir: /data/runs/_archive
+
+quantum_espresso:
+  pw_x: pw.x                      # on PATH in the NGC image
+  bands_x: bands.x
+  module: null                    # no Lmod in a container
+  mpi_prefix: ""                  # one GPU for QE: run pw.x serially on it
+  pw_args: ""
+  omp_num_threads: 8
+  max_concurrent: 1
+  gpu_ids: [0]                    # the one GPU this container is given (compose.yaml)
+  timeout_seconds: 7200
+
+model:
+  backend: vllm
+  qwen_model: Qwen/Qwen3.8-27B    # must match the model the vLLM container serves
+  vllm_url: http://vllm:8000/v1   # the compose service name
+  max_new_tokens: 5000
+  temperature: 0.3
+  do_sample: true
+
+agent:
+  max_steps: 80
+  max_history: 32
+  trim_history: true
+  read_max_chars: 10000

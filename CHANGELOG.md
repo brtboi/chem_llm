@@ -5,6 +5,13 @@ first. Commit hashes link the work to `git log`. Per-run detail, including resul
 changed since the previous run of each compound, is in [`bench/RESULTS.md`](bench/RESULTS.md)
 and `bench/runs/`.
 
+## Week of 2026-11-16
+
+- **Docker deployment of the DFT agent** (`deploy/docker/`): a `chem-llm-agent` image on NVIDIA's
+  NGC Quantum ESPRESSO base (GPU QE 7.3.1) with the locked dependencies, run next to a stock
+  `vllm/vllm-openai` container by `compose.yaml` (model on GPU 0, QE on GPU 1), and the README of
+  what Google Cloud needs. Not yet built or run: no Docker on Perlmutter.
+
 ## Week of 2026-11-09
 
 - **Package split into subpackages:** `core/` (the loop), `llm/` (backends, vLLM server),
