@@ -175,7 +175,9 @@ def evaluate_case(name: str, case: dict, work_dir: Path, record: dict | None = N
         checks.append(_check("magnetization", m is not None and lo <= m <= hi,
                              f"{m} muB/atom, expected {lo}-{hi}" if m is not None else "not spin-polarized"))
     ref = REFERENCES / f"{name}.json"
-    if ref.exists():
+    # golden references come from earlier runs of the agent's own workflow; when
+    # Materials Project's bands are the reference (match_mp suites), they don't apply
+    if ref.exists() and not exp.get("materials_project"):
         checks.append(compare_to_reference(json.loads(ref.read_text()), band_fingerprint(work_dir, metal)))
     mp = ((record or {}).get("outcome") or {}).get("materials_project") if record else None
     if mp is None:

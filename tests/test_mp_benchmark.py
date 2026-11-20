@@ -211,3 +211,21 @@ def test_mp_suite_runs_in_its_own_work_root():
     assert work_dir_of("gaas", cases["gaas"], suites["mp"]) == BENCH / "work" / "mp" / "gaas"
     assert "sandbox" in str(work_dir_of("gaas", cases["gaas"]))  # the core suite's own dir is unchanged
     assert suites["mp"]["workflow"] == {"mode": "match_mp"}
+
+
+def test_sidecar_is_found_from_a_directory_or_a_structure(tmp_path):
+    from chem_llm.dft.materials_project import sidecar
+
+    (tmp_path / "structures").mkdir()
+    (tmp_path / "structures" / "materials_project.json").write_text('{"material_id": "mp-149"}')
+    assert sidecar(tmp_path / "structures")["material_id"] == "mp-149"
+    assert sidecar(tmp_path / "structures" / "structure_000.cif")["material_id"] == "mp-149"
+    assert sidecar(tmp_path) == {}
+
+
+def test_kmesh_copies_keep_a_missing_pseudo_dir_missing(tmp_path):
+    from chem_llm.dft.kmesh import pseudo_dir_of
+
+    no_dir = PW_IN.replace("   pseudo_dir = './'\n", "")
+    assert pseudo_dir_of(no_dir, tmp_path) is None   # pw.x would use $ESPRESSO_PSEUDO: so must the copies
+    assert pseudo_dir_of(PW_IN, tmp_path) == tmp_path.resolve()

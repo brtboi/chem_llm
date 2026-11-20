@@ -335,7 +335,10 @@ def compare_bands(kp: dict, energies, ref: dict, *, n_occupied: int | None = Non
 def sidecar(path: str | Path) -> dict:
     """The materials_project.json generate_cif writes beside a structure."""
     p = Path(path)
-    p = p if p.name == "materials_project.json" else p.parent / "materials_project.json"
+    if p.is_dir():
+        p = p / "materials_project.json"
+    elif p.name != "materials_project.json":  # a structure file: look beside it
+        p = p.parent / "materials_project.json"
     return json.loads(p.read_text()) if p.exists() else {}
 
 

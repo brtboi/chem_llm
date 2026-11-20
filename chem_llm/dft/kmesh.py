@@ -94,7 +94,9 @@ def with_kmesh(pw_in: str, mesh: list[int], shift: list[int] | None = None, *,
     return text
 
 
-def pseudo_dir_of(pw_in: str, directory: Path) -> Path:
-    """The pseudo_dir pw.in names, resolved from the directory pw.x runs in."""
+def pseudo_dir_of(pw_in: str, directory: Path) -> Path | None:
+    """The pseudo_dir pw.in names, resolved from the directory pw.x runs in;
+    None when it names none (pw.x then uses $ESPRESSO_PSEUDO or its default,
+    so a copy run elsewhere must not get one either)."""
     m = re.search(r"(?im)^\s*pseudo_dir\s*=\s*['\"]([^'\"]*)['\"]", pw_in)
-    return (Path(directory) / (m.group(1) if m else ".")).resolve()
+    return (Path(directory) / m.group(1)).resolve() if m else None

@@ -492,7 +492,8 @@ def converge_kmesh(directory: str, pw_input: str = "pw.in"):
     for spacing, mesh in meshes:
         run_dir = root / "k{}x{}x{}".format(*mesh)
         run_dir.mkdir(exist_ok=True)
-        (run_dir / "pw.in").write_text(with_kmesh(text, mesh, outdir="./tmp", pseudo_dir=str(pseudo_dir)))
+        (run_dir / "pw.in").write_text(with_kmesh(text, mesh, outdir="./tmp",
+                                                  pseudo_dir=str(pseudo_dir) if pseudo_dir else None))
         run = _launch_qe(run_dir, [("scf", qe.pw_x, qe.pw_args, "pw.in", "pw.out")])
         shutil.rmtree(run_dir / "tmp", ignore_errors=True)  # wavefunctions: GBs at fine meshes
         pw = read_pw_out(run_dir / "pw.out") if (run_dir / "pw.out").exists() else {}
