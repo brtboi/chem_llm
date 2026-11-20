@@ -229,3 +229,12 @@ def test_kmesh_copies_keep_a_missing_pseudo_dir_missing(tmp_path):
     no_dir = PW_IN.replace("   pseudo_dir = './'\n", "")
     assert pseudo_dir_of(no_dir, tmp_path) is None   # pw.x would use $ESPRESSO_PSEUDO: so must the copies
     assert pseudo_dir_of(PW_IN, tmp_path) == tmp_path.resolve()
+
+
+def test_metals_align_to_mps_uniform_mesh_fermi_level():
+    ref = _fake_reference()
+    ref.update(is_metal=True, efermi=-1.0, efermi_uniform=-0.2)   # the line-mode value is 0.8 eV off
+    R = np.asarray(ref["energies"]["up"])
+    r = compare_bands(mp_kpath(ref), R + 3.0, ref, n_occupied=None, fermi_eV=-0.2 + 3.0)
+    assert r["aligned_to"] == "fermi" and r["mp_fermi_source"] == "uniform mesh"
+    assert r["rms_eV"] == pytest.approx(0, abs=1e-9) and r["band_offset"] == 0

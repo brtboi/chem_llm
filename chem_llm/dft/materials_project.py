@@ -25,7 +25,7 @@ import numpy as np
 
 __all__ = ["fetch_reference", "mp_kpath", "compare_bands", "potcar_valence_note", "calculation_summary"]
 
-REFERENCE_VERSION = 1
+REFERENCE_VERSION = 2  # 2: efermi_uniform
 
 # VASP POTCAR suffixes -> which states are treated as valence
 _POTCAR_SUFFIX = {
@@ -86,10 +86,17 @@ def fetch_reference(material_id: str, path_type: str = "setyawan_curtarolo", *, 
             raise LookupError(f"Materials Project has no {path_type} band structure for {material_id}: {e}") from e
         if bs is None:
             raise LookupError(f"Materials Project has no {path_type} band structure for {material_id}")
-        task_id = None
+        task_id, efermi_uniform = None, None
         try:
             es = mpr.materials.electronic_structure.search(material_ids=[material_id])[0]
             task_id = str(getattr(es.bandstructure, path_type).task_id)
+            # A line-mode NSCF run's own Fermi level comes from its path k-points
+            # only, and for a metal it can be ~1 eV off (Al, mp-134: 7.06 vs 8.05
+            # eV). The uniform-mesh DOS run's is the one to align metals to.
+            dos_total = getattr(getattr(es, "dos", None), "total", None) or {}
+            efermi_uniform = next((float(v.efermi) for v in dos_total.values() if getattr(v, "efermi", None)), None)
+            if efermi_uniform is None and getattr(es, "efermi", None) is not None:
+                efermi_uniform = float(es.efermi)
         except Exception:
             pass
         calc = {}
@@ -129,7 +136,8 @@ def fetch_reference(material_id: str, path_type: str = "setyawan_curtarolo", *, 
         "branches": [{"start": b["start_index"], "end": b["end_index"],
                       "name": "-".join(_label(x) for x in b["name"].split("-"))} for b in bs.branches],
         "energies": energies,               # {"up": (nk, nb) eV, "down": ...}, absolute (VASP)
-        "efermi": float(bs.efermi),
+        "efermi": float(bs.efermi),         # the line-mode run's own (unreliable for metals)
+        "efermi_uniform": efermi_uniform,   # from MP's uniform-mesh run: align metals to this
         "is_metal": metal,
         "is_spin_polarized": bool(bs.is_spin_polarized),
         "band_gap_eV": 0.0 if metal else float(bs.get_band_gap()["energy"]),
@@ -296,7 +304,9 @@ def compare_bands(kp: dict, energies, ref: dict, *, n_occupied: int | None = Non
         if fermi_eV is None:
             out["detail"] = "metal (per MP) but the run has no Fermi energy to align to: no band RMS"
             return out
-        zero_a, zero_r, top_r = float(fermi_eV), float(ref["efermi"]), 0.0
+        zero_r = ref.get("efermi_uniform")
+        out["mp_fermi_source"] = "uniform mesh" if zero_r is not None else "line mode (may be off for a metal)"
+        zero_a, zero_r, top_r = float(fermi_eV), float(zero_r if zero_r is not None else ref["efermi"]), 0.0
         offsets = list(range(-12, 13))
     Ra, Aa = Rr - zero_r, Ea - zero_a
     bands = [j for j in range(R.shape[1]) if Ra[:, j].max() >= -below_eV and Ra[:, j].min() <= top_r + above_eV]
