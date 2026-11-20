@@ -42,8 +42,8 @@ def run_wizard(settings, answers, *, compound=None, models=CACHED, served=(QWEN,
     return result, out.getvalue()
 
 
-def tail(path):  # model, serving, work dir, output, summary, advanced, start
-    return ["1", "1", str(path), "1", "y", "n", "y"]
+def tail(path):  # model, serving, method, work dir, output, summary, advanced, start
+    return ["1", "1", "1", str(path), "1", "y", "n", "y"]
 
 
 def test_typed_symbol_number_and_name(settings, tmp_path):
@@ -114,7 +114,7 @@ def test_claude_needs_confirmation(settings, tmp_path):
     args, out = run_wizard(settings, ["136", "", "3", "n", "1", "2", str(tmp_path / "w"), "1", "y", "n", "y"],
                            compound="TiO2")
     assert args.backend == "huggingface" and "bills your Anthropic API credits" in out
-    args, _ = run_wizard(settings, ["136", "", "3", "y", str(tmp_path / "w"), "1", "y", "n", "y"], compound="TiO2")
+    args, _ = run_wizard(settings, ["136", "", "3", "y", "1", str(tmp_path / "w"), "1", "y", "n", "y"], compound="TiO2")
     assert args.backend == "claude"
 
 
@@ -122,7 +122,7 @@ def test_existing_work_dir_advanced_and_cancel(settings, tmp_path):
     work = tmp_path / "w"
     work.mkdir()
     (work / "old.txt").write_text("x")
-    args, _ = run_wizard(settings, ["136", "", "1", "1", str(work), "n", "3", "n", "y", "40", "10", "y"],
+    args, _ = run_wizard(settings, ["136", "", "1", "1", "1", str(work), "n", "3", "n", "y", "40", "10", "y"],
                          compound="TiO2")
     assert args.keep and args.quiet and (args.max_steps, args.structures) == (40, 10)
     assert "--keep --max-steps 40 --structures 10 --quiet" in equivalent_command(args)
@@ -216,3 +216,13 @@ def test_vllm_gpu_plan_and_command(settings, monkeypatch):
     monkeypatch.setattr(vllm_server, "find_vllm", lambda s: None)
     with pytest.raises(vllm_server.VLLMError, match="vLLM not found"):
         vllm_server.command(settings, QWEN)
+
+
+def test_method_match_materials_project(settings, tmp_path):
+    answers = ["136", "", "1", "1", "2", str(tmp_path / "w"), "1", "y", "n", "y"]
+    args, out = run_wizard(settings, answers, compound="TiO2")
+    assert args.mode == "match_mp" and "--mode match_mp" in equivalent_command(args)
+    assert "Matching Materials Project" in out
+    # choosing what config.yaml already says adds no flag
+    args, _ = run_wizard(settings, ["136", ""] + tail(tmp_path / "w"), compound="TiO2")
+    assert args.mode is None and "--mode" not in equivalent_command(args)

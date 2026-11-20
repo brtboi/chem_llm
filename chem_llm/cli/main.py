@@ -59,6 +59,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--qe-module", default=None, help="Lmod module to load before running QE.")
     parser.add_argument("--max-steps", type=int, default=None)
     parser.add_argument("--structures", type=int, default=51, help="Size of the perturbed ensemble.")
+    parser.add_argument("--mode", choices=["agent", "match_mp"], default=None,
+                        help="agent: the agent decides everything itself. match_mp: copy Materials Project's "
+                             "calculation (its cell and k-path, PBE PAW pseudopotentials matched to its POTCARs, "
+                             "no spin-orbit) so the bands can be scored against MP's. Default: workflow.mode in "
+                             "config.yaml (agent).")
     parser.add_argument("--quiet", action="store_true")
 
     parser.add_argument("--pretty-progress", action="store_true",
@@ -130,6 +135,10 @@ def main(argv=None) -> int:
         print(f"note: {args.name!r} is not a space group symbol pymatgen knows; passing it to the agent as a "
               "phase name", file=sys.stderr)
 
+    if args.mode:
+        import dataclasses
+
+        settings.workflow = dataclasses.replace(settings.workflow, mode=args.mode)
     agent = DFTAgent(
         settings,
         model=args.model,
@@ -189,6 +198,10 @@ def main(argv=None) -> int:
     print("work dir:", result.work_dir)
     if result.plot:
         print("plot    :", result.plot)
+    mp = getattr(result, "materials_project", None) or {}
+    if mp.get("detail"):
+        print("vs MP   :", f"{mp.get('material_id')}: {mp['detail']}"
+              + (f"; gap {mp['run_gap_eV']:.3f} vs {mp['mp_gap_eV']:.3f} eV" if mp.get("gap_error_eV") is not None else ""))
     return 0 if result.ok else 1
 
 

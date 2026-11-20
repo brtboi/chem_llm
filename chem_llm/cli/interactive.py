@@ -9,7 +9,9 @@
 3. Serving, for a local model: in-process with Hugging Face transformers, or
    a vLLM server -- reused if one is up, else started after the last screen.
    No vLLM installed -> chem-llm stops with an error.
-4. Work dir, output, and optionally max steps / ensemble size.
+4. Method: the agent decides everything itself, or it copies Materials
+   Project's calculation so its bands can be scored against MP's.
+5. Work dir, output, and optionally max steps / ensemble size.
 
 It fills in the same argparse namespace the flags do, so the run is
 identical, and prints the equivalent command line before starting.
@@ -67,6 +69,8 @@ def equivalent_command(args: argparse.Namespace) -> str:
         parts += ["--max-steps", str(args.max_steps)]
     if args.structures != 51:
         parts += ["--structures", str(args.structures)]
+    if getattr(args, "mode", None):
+        parts += ["--mode", args.mode]
     for flag in ("pretty_progress", "summarize", "quiet"):
         if getattr(args, flag):
             parts.append("--" + flag.replace("_", "-"))
@@ -272,7 +276,22 @@ class Wizard:
                              "Hugging Face transformers.")
         a.backend, a.start_vllm = "vllm", served is None
 
-    # --- 4. where to run, output
+    # --- 4. method
+    def method(self):
+        a, wf = self.args, self.settings.workflow
+        current = a.mode or wf.mode
+        km = (f"converges the SCF k-mesh to {wf.kmesh_threshold_meV_per_atom:g} meV/atom first"
+              if wf.kmesh_convergence else "SCF k-mesh from a fixed spacing (convergence off in config.yaml)")
+        options = ["Agent decides: it picks the pseudopotentials, spin-orbit, functional (PBEsol) and uses the "
+                   "standard (seekpath) k-path -- the original pipeline",
+                   "Match Materials Project: MP's cell and k-path, PBE PAW pseudopotentials matched to MP's POTCARs, "
+                   "no spin-orbit -- the bands are scored against MP's (RMS and gap)"]
+        self.console.print(f"Either way the run {km}; config.yaml's workflow: section can override single choices.")
+        i = self.choose(options, default=2 if current == "match_mp" else 1)
+        chosen = ("agent", "match_mp")[i]
+        a.mode = chosen if chosen != wf.mode else None
+
+    # --- 5. where to run, output
     def workdir(self):
         a = self.args
         default = str(a.work_dir or (self.settings.work_root / a.compound))
@@ -299,24 +318,28 @@ class Wizard:
         a = self.args
         self.console.rule("[bold]chem-llm: band structure with Quantum ESPRESSO")
         self.console.print("Flags skip this: chem-llm TiO2 P4_2/mnm --backend vllm ...  (chem-llm --help)")
-        self.screen(1, 4, "compound and structure")
+        self.screen(1, 5, "compound and structure")
         self.compound()
         self.structure()
-        self.screen(2, 4, "model")
+        self.screen(2, 5, "model")
         local = self.model() == "local"
         if local:
             self.console.print()
             self.console.print("[bold]How should it run?[/bold]")
             self.serving()
-        self.screen(3, 4, "where to run")
+        self.screen(3, 5, "method")
+        self.method()
+        self.screen(4, 5, "where to run")
         self.workdir()
-        self.screen(4, 4, "output")
+        self.screen(5, 5, "output")
         self.output()
         self.console.print()
         self.console.rule("[bold]Ready", align="left")
         what = (f"{a.spacegroup} (#{a.spacegroup_number})" + (f", {a.name}" if a.name else "")
                 if a.spacegroup else f"the {a.name} phase (the agent picks its space group)")
         self.console.print(f"{a.compound}, {what}  ->  {a.work_dir}")
+        if (a.mode or self.settings.workflow.mode) == "match_mp":
+            self.console.print("Matching Materials Project's calculation; bands scored against MP's.")
         self.console.print("Equivalent command:")
         self.console.print("  " + equivalent_command(a), markup=False, highlight=False, soft_wrap=True)
         if not self.confirm("Start the run?", default=True):
