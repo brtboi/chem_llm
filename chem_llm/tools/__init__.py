@@ -202,9 +202,16 @@ def get_kpath(structure_path: str, output_path: str):
 
     from ..dft.kpath import kp_atoms, kp_save, standard_kpath
 
+    settings = active_settings()
+    wf = settings.workflow.resolved()
+    source_note = ""
     try:
         atoms = read(structure_path)
-        kp = standard_kpath(atoms)
+        kp = None
+        if wf["kpath"] == "materials_project":
+            kp, source_note = _mp_kpath_for(structure_path, wf["mp_path_type"])
+        if kp is None:
+            kp = standard_kpath(atoms)
     except Exception as e:
         return {"success": False, "stderr": f"{type(e).__name__}: {e}"}
     kp_save(kp, output_path)
@@ -221,10 +228,35 @@ def get_kpath(structure_path: str, output_path: str):
         "primitive_cell": {"formula": prim.get_chemical_formula(), "n_atoms": len(prim),
                            "abc": [round(v, 4) for v in (a, b, c)], "angles": [round(v, 2) for v in (al, be, ga)]},
         "input_cell_is_this_cell": bool(same),
+        "source": kp.get("source") or "seekpath (Hinuma et al.)",
         "note": ("Run pw.x and bands.x on kp_atoms(kp), not on the input file's cell"
                  + ("" if same else " (they differ here)") + "; write bands.in with kpts=kp_kpts(kp); "
-                 "plot with chem_llm.dft.kpath.plot_axis."),
+                 "plot with chem_llm.dft.kpath.plot_axis." + source_note),
     }
+
+
+def _mp_kpath_for(structure_path: str, path_type: str) -> tuple[dict | None, str]:
+    """Materials Project's band-structure path for the entry generate_cif
+    fetched (structures/materials_project.json), or (None, why not)."""
+    from ..dft.materials_project import fetch_reference, mp_kpath, sidecar
+
+    found = sidecar(structure_path)
+    material_id = found.get("material_id")
+    if not material_id:
+        return None, (" Falling back to seekpath: no materials_project.json (from generate_cif) next to "
+                      f"{structure_path} names the Materials Project entry.")
+    try:
+        ref = fetch_reference(material_id, path_type, api_key=active_settings().mp_api_key,
+                              cache_dir=_mp_cache_dir())
+    except Exception as e:
+        return None, f" Falling back to seekpath: {e}."
+    kp = mp_kpath(ref)
+    sg = found.get("space_group") or {}
+    kp["spacegroup"] = f"{sg['symbol']} (#{sg['number']})" if sg else None
+    return kp, (f" This is Materials Project's {path_type} path for {material_id}, on the cell MP "
+                           "computed its band structure on: load it in setup_jobs.py with "
+                           "load_kpath(<this output_path>) -- not standard_kpath(atoms), which would give "
+                           "seekpath's path instead.")
 
 
 @register_tool(
@@ -292,6 +324,14 @@ def run_espresso_workflow(
         ("bands_scf", qe.pw_x, qe.pw_args, bands_input, "bands_pw.out"),
         ("bands_post", qe.bands_x, "", bands_post_input, "bands_post.out"),
     ]
+    return _launch_qe(work_dir, steps)
+
+
+def _launch_qe(work_dir: Path, steps: list) -> dict:
+    """Run QE `steps` [(name, exe, args, in_file, out_file)] in work_dir,
+    holding one of the node's QE slots (a whole GPU when gpu_ids is set)."""
+    settings = active_settings()
+    qe = settings.qe
     _release_cached_gpu_memory()
 
     timings = {}  # seconds per stage, for the run's timing breakdown
@@ -398,6 +438,93 @@ def _run_qe_steps(work_dir: Path, qe, settings, steps, timings: dict, extra_env:
         "outputs": outputs,
         "timings_s": timings,
     }
+
+
+@register_tool(
+    "converge_kmesh",
+    (
+        "Converge the SCF Monkhorst-Pack k-mesh of one calculation directory by total energy. "
+        "Runs pw.x SCF on a sequence of finer and finer meshes (from scf_kmesh spacings, each a "
+        "copy of `pw_input` in <directory>/kmesh_convergence/kAxBxC/), until the total energy per "
+        "atom changes by less than the configured threshold over the configured number of further "
+        "refinements; the harness sets the start spacing, threshold and limits. Then rewrites the "
+        "K_POINTS card of <directory>/<pw_input> to the converged mesh (nothing else in it changes) "
+        "and saves the table to <directory>/kmesh_convergence.json. Returns `mesh`, `spacing` (pass "
+        "it as scf_kmesh(prim, spacing=...) in setup_jobs.py so every structure gets this mesh), "
+        "`converged`, and the energy of every mesh tried. Check `success` and `converged`."
+    ),
+    {
+        "directory": "string. Calculation directory holding the SCF input, e.g. calculations/000.",
+        "pw_input": "string (optional, default 'pw.in'). SCF input filename, relative to directory.",
+    },
+    remember_on=("directory",),
+)
+def converge_kmesh(directory: str, pw_input: str = "pw.in"):
+    import json
+    import shutil
+
+    from ase.io import read
+
+    from ..dft.kmesh import RY_TO_EV, converged_index, mesh_sequence, pseudo_dir_of, read_kmesh, with_kmesh
+    from ..dft.qe_output import read_pw_out
+
+    settings = active_settings()
+    w, qe = settings.workflow, settings.qe
+    work_dir = Path(directory).resolve()
+    pw_path = work_dir / pw_input
+    if not pw_path.is_file():
+        return {"success": False, "stderr": f"{pw_path} not found: write the SCF input (setup_jobs.py) first"}
+    text = pw_path.read_text()
+    if read_kmesh(text) is None:
+        return {"success": False, "stderr": f"{pw_path} has no 'K_POINTS automatic' card to converge"}
+    try:
+        atoms = read(pw_path, format="espresso-in")
+    except Exception as e:
+        return {"success": False, "stderr": f"could not read the cell from {pw_path}: {type(e).__name__}: {e}"}
+    nat = len(atoms)
+    meshes = mesh_sequence(atoms.cell[:], w.kmesh_start_spacing, w.kmesh_refine_factor, w.kmesh_max_scf)
+    pseudo_dir = pseudo_dir_of(text, work_dir)
+    root = work_dir / "kmesh_convergence"
+    root.mkdir(exist_ok=True)
+    threshold_eV = w.kmesh_threshold_meV_per_atom / 1000
+    rows: list[dict] = []
+    found = None
+    for spacing, mesh in meshes:
+        run_dir = root / "k{}x{}x{}".format(*mesh)
+        run_dir.mkdir(exist_ok=True)
+        (run_dir / "pw.in").write_text(with_kmesh(text, mesh, outdir="./tmp", pseudo_dir=str(pseudo_dir)))
+        run = _launch_qe(run_dir, [("scf", qe.pw_x, qe.pw_args, "pw.in", "pw.out")])
+        shutil.rmtree(run_dir / "tmp", ignore_errors=True)  # wavefunctions: GBs at fine meshes
+        pw = read_pw_out(run_dir / "pw.out") if (run_dir / "pw.out").exists() else {}
+        if not run.get("success") or pw.get("total_energy_Ry") is None or not pw.get("converged"):
+            return {"success": False, "stderr": (f"pw.x SCF on the {mesh} mesh failed or did not converge "
+                                                 f"(see {run_dir / 'pw.out'}); fix pw.in and call again"),
+                    "output_tail": run.get("output_tail") or (run_dir / "pw.out").read_text(errors="replace")[-1500:]
+                    if (run_dir / "pw.out").exists() else "", "meshes_done": rows}
+        e = pw["total_energy_Ry"] * RY_TO_EV / nat
+        rows.append({"mesh": mesh, "spacing": spacing, "n_kpoints_irreducible": pw.get("n_kpoints"),
+                     "energy_eV_per_atom": round(e, 6), "scf_s": run.get("timings_s", {}).get("scf")})
+        found = converged_index([r["energy_eV_per_atom"] for r in rows], threshold_eV, w.kmesh_confirmations)
+        if found is not None:
+            break
+    if not rows:
+        return {"success": False, "stderr": "no meshes to try: check workflow.kmesh_start_spacing"}
+    finest = rows[-1]["energy_eV_per_atom"]
+    for r in rows:
+        r["dE_vs_finest_meV_per_atom"] = round((r["energy_eV_per_atom"] - finest) * 1000, 3)
+    chosen = rows[found if found is not None else -1]
+    pw_path.write_text(with_kmesh(text, chosen["mesh"]))
+    summary = {
+        "converged": found is not None, "mesh": chosen["mesh"], "spacing": chosen["spacing"],
+        "threshold_meV_per_atom": w.kmesh_threshold_meV_per_atom, "confirmations": w.kmesh_confirmations,
+        "start_spacing": w.kmesh_start_spacing, "n_atoms": nat, "meshes": rows,
+    }
+    (work_dir / "kmesh_convergence.json").write_text(json.dumps(summary, indent=1))
+    note = (f"{pw_input} now uses the {chosen['mesh']} mesh. Use scf_kmesh(prim, spacing={chosen['spacing']}) in "
+            "setup_jobs.py and rerun it, so every structure's pw.in has this mesh.")
+    if found is None:
+        note = (f"NOT converged within {len(rows)} meshes (max_scf); {pw_input} uses the finest one tried. " + note)
+    return {"success": True, **summary, "pw_input": str(pw_path), "note": note}
 
 @register_tool(
     "generate_cif",
@@ -539,12 +666,25 @@ def generate_cif(
             str(d.material_id) for d in docs
         ]
 
+        material_id = str(selected_doc.material_id)
         atoms = AseAtomsAdaptor.get_atoms(selected_doc.structure)
+        extra = _materials_project_extras(material_id)
+        band_structure_atoms = extra.pop("_band_structure_atoms", None)
+        if band_structure_atoms is not None:
+            # the cell MP computed its band structure on (its k-path refers to it)
+            atoms = band_structure_atoms
         ase_write(str(output_path), atoms, format="cif")
+        _write_sidecar(output_path.parent, {
+            "material_id": material_id, "formula": composition,
+            "space_group": {"symbol": selected_doc.symmetry.symbol, "number": selected_doc.symmetry.number},
+            "band_gap_eV": selected_doc.band_gap, "structure_file": output_path.name,
+            "structure_is_band_structure_cell": "structure_note" in extra,
+        })
 
         return {
+            **extra,
             "success": True,
-            "selected_material_id": str(selected_doc.material_id),
+            "selected_material_id": material_id,
             "energy_above_hull_eV_per_atom": selected_doc.energy_above_hull,
             # Materials Project's PBE gap: a hint for occupations (near 0 ->
             # metal or semimetal -> smearing), not a target to reproduce
@@ -569,6 +709,45 @@ def generate_cif(
             "success": False,
             "stderr": str(e),
         }
+
+
+def _mp_cache_dir() -> Path:
+    return active_settings().archive_root / "materials_project"
+
+
+def _write_sidecar(directory: Path, data: dict) -> None:
+    """structures/materials_project.json: which MP entry the structure came
+    from (get_kpath and the benchmark read it)."""
+    import json
+
+    (Path(directory) / "materials_project.json").write_text(json.dumps(data, indent=1))
+
+
+def _materials_project_extras(material_id: str) -> dict:
+    """What generate_cif adds in the workflow modes that copy Materials
+    Project: its band-structure cell (k-path from MP) and how MP set up the
+    calculation (pseudopotentials matched to MP). {} in agent mode."""
+    from ..dft.kpath import kp_atoms
+    from ..dft.materials_project import calculation_summary, fetch_reference, mp_kpath
+
+    settings = active_settings()
+    wf = settings.workflow.resolved()
+    if wf["kpath"] != "materials_project" and wf["pseudopotentials"] != "match_mp":
+        return {}
+    try:
+        ref = fetch_reference(material_id, wf["mp_path_type"], api_key=settings.mp_api_key, cache_dir=_mp_cache_dir())
+    except Exception as e:
+        return {"materials_project_band_structure": f"unavailable ({type(e).__name__}: {e}); the k-path falls "
+                                                    "back to seekpath and pseudopotentials are your choice"}
+    out: dict = {}
+    if wf["kpath"] == "materials_project":
+        out["_band_structure_atoms"] = kp_atoms(mp_kpath(ref))
+        out["structure_note"] = ("This CIF is the primitive cell Materials Project computed its band structure on; "
+                                 "its k-path (get_kpath) refers to this exact cell, so use it as is -- do not "
+                                 "re-standardise or rotate it.")
+    if wf["pseudopotentials"] == "match_mp":
+        out["materials_project_calculation"] = calculation_summary(ref)
+    return out
 
 
 @register_tool(

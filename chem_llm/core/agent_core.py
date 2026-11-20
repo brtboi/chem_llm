@@ -743,7 +743,7 @@ def build_log_entry(state: AgentState, start_time: float, work_dir: Path, clear_
         completed=state.done, runtime=time.perf_counter() - start_time, model=model_name, work_dir=work_dir,
         config=extra.pop("config", None), compound=extra.pop("compound", None),
         spacegroup=extra.pop("spacegroup", None), spacegroup_number=extra.pop("spacegroup_number", None),
-        model_load_s=extra.pop("model_load_s", None),
+        model_load_s=extra.pop("model_load_s", None), trace_id=getattr(state, "trace_id", None),
     )
     record.update(extra)
     return record

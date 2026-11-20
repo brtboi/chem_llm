@@ -4,13 +4,16 @@ Format version 2 (2026-10-16), field by field:
 
     format_version     2
     run_id             links the record to its trace.jsonl lines and the index
+    trace_id           the run's root LangSmith trace (added 2026-11-19; scores
+                       are attached to it as feedback)
     timestamp          when the run finished
     compound, spacegroup, spacegroup_number (only when given)
     model, work_dir, completed
     total_steps        agent steps (one tool call each)
     runtime            wall-clock seconds
     total_tokens       prompt + completion tokens over the whole run
-    outcome            what the run left on disk: band gap, convergence, plot
+    outcome            what the run left on disk: band gap, convergence, plot,
+                       and "materials_project" (bands vs MP's, when scorable)
     prompt             {"system": raw system prompt, "task": raw task text}
     steps              [{step, phase, tool, args, result, llm_time, tool_time,
                          tokens}] -- every tool call in order, with its full
@@ -85,7 +88,7 @@ def _steps(history: list[dict], timing: list[dict]) -> list[dict]:
 
 def build_record(*, run_id, timestamp, history, timing, task, system_prompt, completed, runtime, model,
                  work_dir, config, metrics=None, outcome=None, compound=None, spacegroup=None,
-                 spacegroup_number=None, model_load_s=None) -> dict:
+                 spacegroup_number=None, model_load_s=None, trace_id=None) -> dict:
     """A format-2 record from a run's raw history and per-step timing."""
     from .telemetry import run_metrics
 
@@ -94,7 +97,8 @@ def build_record(*, run_id, timestamp, history, timing, task, system_prompt, com
             if timing else {}
     metrics = {k: metrics[k] for k in ("operations", "phases", "n_tools", "qe_stages") if k in metrics}
     cif = next((e.get("args") or {} for e in history if e.get("tool") == "generate_cif"), {})
-    record = {"format_version": FORMAT_VERSION, "run_id": run_id, "timestamp": timestamp,
+    record = {"format_version": FORMAT_VERSION, "run_id": run_id, **({"trace_id": trace_id} if trace_id else {}),
+              "timestamp": timestamp,
               "compound": compound or cif.get("composition"),
               "spacegroup": spacegroup or cif.get("spacegroup_symbol")}
     number = spacegroup_number or cif.get("spacegroup_number")

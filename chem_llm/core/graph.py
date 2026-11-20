@@ -21,6 +21,7 @@ LangSmith. Off unless those are set.
 from __future__ import annotations
 
 import time
+import uuid
 from typing import TypedDict
 
 from langgraph.graph import END, START, StateGraph
@@ -125,6 +126,7 @@ def run_graph(state, next_tool_call, max_steps: int, verbose: bool = True, obser
         {"step": 0},
         # two node visits per step, plus slack
         config={"recursion_limit": 2 * max_steps + 10, "run_name": run_name, "tags": tags or [],
-                "metadata": metadata or {}},
+                "metadata": metadata or {},
+                **({"run_id": uuid.UUID(state.trace_id)} if getattr(state, "trace_id", None) else {})},
     )
     return final.get("stop")

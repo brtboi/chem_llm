@@ -14,7 +14,7 @@ def test_every_run_is_archived(run_scripted, settings):
     assert (d / "summary.txt").read_text().startswith("chem_llm run summary")
     assert "First recorded run of Si" in (d / "changes.txt").read_text()
     record = json.loads((d / "record.json").read_text())
-    assert list(record) == ["format_version", "run_id", "timestamp", "compound", "spacegroup", "model", "work_dir",
+    assert list(record) == ["format_version", "run_id", "trace_id", "timestamp", "compound", "spacegroup", "model", "work_dir",
                             "completed", "total_steps", "runtime", "total_tokens", "outcome", "prompt", "steps",
                             "config", "metrics"]
     assert (record["compound"], record["spacegroup"], record["total_steps"]) == ("Si", "Fd-3m", 4)

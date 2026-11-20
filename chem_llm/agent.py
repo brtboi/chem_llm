@@ -380,7 +380,7 @@ class DFTAgent:
         log_file: str | Path | None = None,
         max_steps: int | None = None,
         n_structures: int = 51,
-        functional: str = "pbesol",
+        functional: str | None = None,
         task: str | None = None,
         hide_tools=("train_deepseudopot",),
         verbose: bool = True,
@@ -425,6 +425,9 @@ class DFTAgent:
             known = phase_spacegroup(spacegroup_name)
             if known:
                 spacegroup, spacegroup_number = known
+        wf = self.settings.workflow.resolved()
+        if not wf["kmesh"]["converge"]:
+            hide_tools = (*hide_tools, "converge_kmesh")
         _hide_tools(hide_tools)
         load_s = self.load()
 
@@ -440,7 +443,8 @@ class DFTAgent:
             spacegroup_number=spacegroup_number,
             spacegroup_name=spacegroup_name,
             n_structures=n_structures,
-            functional=functional,
+            functional=functional or wf["functional"],
+            workflow=wf,
         )
 
         from .records.archive import RunArchive
@@ -493,6 +497,7 @@ class DFTAgent:
                 got = h.get("result") if h.get("tool") == "generate_cif" else None
                 if isinstance(got, dict) and got.get("space_group"):
                     spacegroup = got["space_group"]["symbol"]
+        trace_id = getattr(state, "trace_id", None)
         result = RunResult(
             compound=compound,
             spacegroup=spacegroup or "",
@@ -511,10 +516,13 @@ class DFTAgent:
             state=state,
             config=config,
             metrics=record.get("metrics"),
+            materials_project=(record.get("outcome") or {}).get("materials_project"),
+            trace_id=trace_id,
         )
         if run_archive is not None:
             result.archive_dir = run_archive.dir
             result.evaluation = _finish_archive(run_archive, result, record, work_dir, evaluate)
+        _send_trace_feedback(trace_id, result)
         return result
 
     def run_config(self, task: str | None = None) -> dict:
@@ -546,6 +554,7 @@ class DFTAgent:
             "tools": [t["name"] for t in TOOLS],
             "qe_command": s.qe.shell_command(s.qe.pw_x, "pw.in", "pw.out"),
             "qe_omp_threads": s.qe.omp_num_threads,
+            "workflow": s.workflow.resolved(),
             "chem_llm_version": __import__("chem_llm").__version__,
             "code_commit": code.get("commit"),
             "uncommitted_changes": code.get("uncommitted_changes", []),
@@ -587,10 +596,86 @@ def _llm_name(llm) -> str:
 
 
 def _outcome(work_dir: Path) -> dict:
-    """What the run left on disk, for its log record (see RunResult)."""
+    """What the run left on disk, for its log record (see RunResult), with
+    its bands scored against Materials Project's when it has them."""
     found = _inspect_outputs(work_dir)
     keys = ("band_gap", "scf_converged", "dft_finished", "n_atoms", "n_electrons", "plot")
-    return {k: (str(found[k]) if k == "plot" and found.get(k) else found.get(k)) for k in keys}
+    out = {k: (str(found[k]) if k == "plot" and found.get(k) else found.get(k)) for k in keys}
+    mp = materials_project_score(work_dir)
+    if mp is not None:
+        out["materials_project"] = mp
+    return out
+
+
+def materials_project_score(work_dir: Path, settings: Settings | None = None) -> dict | None:
+    """The run's bands against Materials Project's (chem_llm.dft.materials_project.score_run),
+    never raising: an MP outage must not lose the run record."""
+    from .dft.materials_project import score_run
+    from .settings import active_settings
+
+    s = settings or active_settings()
+    try:
+        return score_run(work_dir, path_type=s.workflow.mp_path_type, api_key=s.mp_api_key,
+                         cache_dir=s.archive_root / "materials_project")
+    except Exception as e:
+        return {"rms_eV": None, "detail": f"could not score against Materials Project: {type(e).__name__}: {e}"}
+
+
+def trace_scores(result: RunResult) -> list[dict]:
+    """The numbers worth plotting across runs in LangSmith, as feedback
+    {key, score, comment}: gap, MP comparison, k-mesh, benchmark checks."""
+    out = [{"key": "completed", "score": int(bool(result.completed))},
+           {"key": "dft_finished", "score": int(bool(result.dft_finished))},
+           {"key": "steps", "score": result.num_steps}]
+    if result.band_gap is not None:
+        out.append({"key": "gap_eV", "score": round(result.band_gap, 4)})
+    mp = result.materials_project or {}
+    if mp.get("mp_gap_eV") is not None:
+        out.append({"key": "mp_gap_eV", "score": round(mp["mp_gap_eV"], 4), "comment": mp.get("material_id")})
+    for key in ("gap_error_eV", "rms_eV", "mae_eV", "max_abs_eV"):
+        if mp.get(key) is not None:
+            out.append({"key": "mp_band_" + key if key != "gap_error_eV" else "mp_gap_error_eV", "score": mp[key],
+                        "comment": mp.get("detail")})
+    km = mp.get("kmesh") or {}
+    if km.get("mesh"):
+        out.append({"key": "kmesh_points", "score": int(km["mesh"][0] * km["mesh"][1] * km["mesh"][2]),
+                    "comment": "x".join(map(str, km["mesh"])) + ("" if km.get("converged") else " (NOT converged)")})
+        out.append({"key": "kmesh_scf_runs", "score": km.get("n_scf")})
+    ev = result.evaluation or {}
+    if ev:
+        out.append({"key": "passed", "score": int(bool(ev.get("passed")))})
+        for c in ev.get("checks", []):
+            if c.get("ok") is not None:
+                out.append({"key": "check_" + c["name"], "score": int(bool(c["ok"])), "comment": c.get("detail")})
+    return out
+
+
+def _send_trace_feedback(trace_id: str | None, result: RunResult) -> None:
+    """Attach trace_scores to the run's LangSmith trace (tracing on only)."""
+    if not trace_id or os.environ.get("LANGSMITH_TRACING", "").lower() not in ("true", "1"):
+        return
+    if not os.environ.get("LANGSMITH_API_KEY"):
+        return
+    try:
+        from langsmith import Client
+        from langsmith.run_trees import get_cached_client
+
+        try:
+            client = get_cached_client()
+        except Exception:
+            client = Client()
+        try:  # traces go to the LANGSMITH_AGENT_* address when set; feedback must name it too
+            from langsmith.address import address_from_env
+
+            address = address_from_env()
+        except Exception:
+            address = None
+        for f in trace_scores(result):
+            client.create_feedback(trace_id=trace_id, key=f["key"], score=f["score"], comment=f.get("comment"),
+                                   **({"address": address} if address else {}))
+        client.flush()
+    except Exception as e:  # tracing trouble never fails a run
+        print(f"chem_llm: could not send LangSmith feedback: {type(e).__name__}: {e}")
 
 
 def _last_record(log_file: Path) -> dict:

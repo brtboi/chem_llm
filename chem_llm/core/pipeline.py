@@ -45,6 +45,8 @@ class RunResult:
     metrics: dict | None = None    # telemetry.run_metrics(): time per phase, tokens
     archive_dir: Path | None = None  # this run's permanent record (chem_llm.records.archive)
     evaluation: dict | None = None   # benchmark checks, when run with evaluate=
+    materials_project: dict | None = None  # bands vs Materials Project's (dft.materials_project.score_run)
+    trace_id: str | None = None      # the run's root LangSmith trace
 
     def report(self) -> str:
         """A readable summary of the run: what the agent did, its results and

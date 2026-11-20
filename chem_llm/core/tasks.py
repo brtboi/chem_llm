@@ -50,6 +50,7 @@ def build_task(
     n_structures: int = 51,
     functional: str = "pbesol",
     template: str = BAND_STRUCTURE_TASK,
+    workflow: dict | None = None,
 ) -> str:
     """Render the workflow prompt for one compound.
 
@@ -57,6 +58,9 @@ def build_task(
     (underscores for subscripts, dashes for inversion bars: 'P4_2/mnm',
     'Fd-3m'). `spacegroup_name` is an optional human label that reads
     naturally in front of the formula, e.g. 'rutile ' or 'cubic '.
+    `workflow` is Settings.workflow.resolved(): it switches in the k-mesh
+    convergence step, Materials Project's k-path and pseudopotential match,
+    and a fixed spin-orbit choice (apply_workflow). None = the agent decides.
     """
     if spacegroup_name and not spacegroup_name.endswith(" "):
         spacegroup_name += " "
@@ -74,7 +78,7 @@ def build_task(
                   f"Before choosing, write in a note which space group the {name} structure has and how you know, then "
                   f"the entry with that space group; if none matches, or you are not sure, say so in the note and in the "
                   f"done summary. Then call generate_cif again with its space group symbol and number")
-    return template.format(
+    text = template.format(
         compound=compound,
         spacegroup=spacegroup,
         spacegroup_clause=clause,
@@ -84,3 +88,87 @@ def build_task(
         last_index=n_structures - 1,
         functional=functional,
     )
+    return apply_workflow(text, workflow) if workflow and template is BAND_STRUCTURE_TASK else text
+
+
+def _swap(text: str, old: str, new: str) -> str:
+    if old not in text:  # the template changed: fail loudly rather than silently drop a rule
+        raise ValueError(f"task template no longer contains {old[:60]!r}")
+    return text.replace(old, new, 1)
+
+
+def apply_workflow(text: str, wf: dict) -> str:
+    """The band-structure task with the workflow choices written in."""
+    mp_path = wf.get("kpath") == "materials_project"
+    if mp_path:
+        text = _swap(
+            text,
+            "Then reduce it to its primitive cell per the unit-cell-choice DECISION RULE before anything downstream "
+            "uses it -- `kp_atoms(standard_kpath(atoms))` from chem_llm.dft.kpath IS that primitive cell (and the one "
+            "the k-path refers to), so use it rather than calling seekpath yourself -- and note the atom count before "
+            "and after.",
+            "This run compares its bands with Materials Project's point by point, so generate_cif writes the primitive "
+            "cell MP computed its band structure on (its structure_note says so): use that cell as is -- do not reduce, "
+            "re-standardise or rotate it. Call get_kpath on the CIF with output_path structures/kpath.json: it writes "
+            "MP's k-path for that exact cell. Note the atom count (before and after are the same here).")
+        text = _swap(
+            text,
+            "STEP 5: First call get_kpath on structures/structure_000.cif to see the standard path. Then write and run "
+            "setup_jobs.py.",
+            "STEP 5: The k-path is Materials Project's, in structures/kpath.json (get_kpath, STEP 1). Write and run "
+            "setup_jobs.py.")
+        text = _swap(
+            text,
+            "kpath.json from chem_llm.dft.kpath (kp = standard_kpath(atoms); kp_save(kp, ...));",
+            "kpath.json from chem_llm.dft.kpath -- for structure 000, kp = load_kpath('structures/kpath.json') "
+            "(MP's path, which belongs to the unperturbed cell only), for the perturbed ones kp = "
+            "standard_kpath(atoms) -- then kp_save(kp, ...);")
+    if wf.get("pseudopotentials") == "match_mp":
+        text = _swap(
+            text,
+            _step3_fetch(text),
+            "STEP 3: Fetch pseudopotentials for every element with get_pseudopotential into template/, as close to "
+            "Materials Project's calculation as Quantum ESPRESSO allows -- PAW (kind 'paw'), generator 'pbe', "
+            "stringent, UPF; norm-conserving 'nc' only for an element with no PAW file, said in a note. MP ran VASP: "
+            "generate_cif returned `materials_project_calculation` with its POTCARs, what each puts in valence, the "
+            "valence electrons per cell, any Hubbard U, and its cutoff. QE cannot read POTCARs, so match them: compare "
+            "each file.z_valence with the POTCAR's valence (semicore states), and the cell's total with "
+            "valence_electrons_per_cell, and write in a note where they differ and by how much. If hubbard_U_eV is not "
+            "empty, put the same U values on the same elements' d (or f) states in pw.in and bands.in. PAW needs "
+            "ecutrho about 8 x ecutwfc, not the 4 x of norm-conserving.")
+    soc = wf.get("spin_orbit", "agent")
+    if soc in ("on", "off"):
+        why = ("this run is compared with Materials Project, whose band structures have no spin-orbit"
+               if soc == "off" and wf.get("mode") == "match_mp" else "the run's configuration fixes it")
+        rule = ("OFF: scalar-relativistic ('sr') pseudopotentials, and no lspinorb / noncolin"
+                if soc == "off" else
+                "ON: fully-relativistic ('fr') pseudopotentials, with lspinorb = .true. and noncolin = .true.")
+        text = _swap(text, "decide the relativity (scalar or fully relativistic) yourself from the pseudopotential "
+                           "DECISION RULE,",
+                     f"the relativity is NOT yours to decide here -- spin-orbit is {rule}, whatever the relativistic "
+                     f"DECISION RULE would say ({why}) --")
+    km = wf.get("kmesh") or {}
+    if km.get("converge"):
+        text = _swap(
+            text,
+            "STEP 6: Run run_espresso_workflow on calculations/000 ONLY.",
+            "STEP 6: First converge the SCF k-mesh: call converge_kmesh on calculations/000. It runs pw.x SCFs on "
+            "finer and finer meshes until the total energy per atom stops changing (threshold "
+            f"{km.get('threshold_meV_per_atom')} meV/atom over {km.get('confirmations')} further refinements), then "
+            "rewrites the K_POINTS of calculations/000/pw.in to the converged mesh. Put the `spacing` it returns into "
+            "setup_jobs.py (kpts = scf_kmesh(prim, spacing=<that value>)), rerun setup_jobs.py so every structure "
+            "gets that mesh, and read calculations/000/pw.in to confirm it has the returned mesh. Then run "
+            "run_espresso_workflow on calculations/000 ONLY.")
+        text = _swap(text, "- run_espresso_workflow returned success: true for calculations/000.",
+                     "- converge_kmesh returned success: true, and calculations/000/pw.in uses the mesh it returned.\n"
+                     "- run_espresso_workflow returned success: true for calculations/000.")
+    return text
+
+
+def _step3_fetch(text: str) -> str:
+    """The template's STEP 3 opening sentence, as rendered (compound, functional)."""
+    import re
+
+    m = re.search(r"STEP 3: Fetch pseudopotentials for every element in \S+ with get_pseudopotential -- norm "
+                  r"conserving, \S+, stringent, UPF -- into template/\.", text)
+    return m.group(0) if m else "STEP 3: (template changed)"

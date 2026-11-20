@@ -5,12 +5,23 @@ import uuid
 from .history import progress_ledger, run_succeeded, trimmed_view
 from ..tools import REMEMBER_FIELDS
 
+def _trace_id() -> str:
+    try:
+        from langsmith import uuid7  # LangSmith's preferred, time-ordered run ids
+    except ImportError:  # pragma: no cover
+        return str(uuid.uuid4())
+    return str(uuid7())
+
+
 class AgentState:
     def __init__(self, task: str):
         self.task = task
         self.created_at = datetime.datetime.now().isoformat()
         # sortable and unique: links this run's log record to its trace lines
         self.run_id = datetime.datetime.now().strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:6]
+        # the id of this run's root LangSmith trace (unused when tracing is off):
+        # scores computed after the run are attached to it as feedback
+        self.trace_id = _trace_id()
         self.history: list[dict] = []           # full tool call/result log
         self.files: dict[str, str] = {}         # path -> last known status
         self.last_errors: dict[str, str] = {}   # path -> last stderr/exception
