@@ -34,6 +34,8 @@ def read_pw_out(path: str | Path) -> dict:
     fermi_energy_eV    smearing runs (None for fixed occupations)
     highest_occupied_eV, lowest_unoccupied_eV   fixed-occupation runs
     total_magnetization  Bohr magnetons per cell (spin-polarized runs)
+    total_energy_Ry    the converged SCF total energy ('!    total energy')
+    n_kpoints          irreducible k-points the run used
     converged, job_done, n_atoms, alat_bohr
     """
     text = Path(path).read_text(errors="replace")
@@ -56,6 +58,8 @@ def read_pw_out(path: str | Path) -> dict:
         "highest_occupied_eV": None,
         "lowest_unoccupied_eV": None,
         "total_magnetization": _last(rf"total magnetization\s*=\s*({_F})", text),
+        "total_energy_Ry": _last(rf"!\s+total energy\s*=\s*({_F})\s*Ry", text),
+        "n_kpoints": _last(r"number of k points=\s*(\d+)", text, int),
         "converged": "convergence has been achieved" in text,
         "job_done": "JOB DONE" in text,
     }

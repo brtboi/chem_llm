@@ -256,6 +256,86 @@ class AgentSettings:
     read_max_chars: int = 10000
 
 
+WORKFLOW_MODES = ("agent", "match_mp")
+KPATH_SOURCES = ("seekpath", "materials_project")
+PSEUDO_CHOICES = ("agent", "match_mp")
+SPIN_ORBIT_CHOICES = ("agent", "on", "off")
+MP_PATH_TYPES = ("setyawan_curtarolo", "hinuma", "latimer_munro")
+
+# What each mode fills in for the choices left unset (None).
+_MODE_DEFAULTS = {
+    # the agent decides everything itself (the original pipeline)
+    "agent": {"kpath": "seekpath", "pseudopotentials": "agent", "spin_orbit": "agent", "functional": "pbesol"},
+    # reproduce Materials Project's calculation so the bands can be compared
+    # point by point: its k-path, PBE, PAW pseudopotentials with its valence
+    # choice, and no spin-orbit (MP band structures have none)
+    "match_mp": {"kpath": "materials_project", "pseudopotentials": "match_mp", "spin_orbit": "off",
+                 "functional": "pbe"},
+}
+
+
+@dataclass
+class WorkflowSettings:
+    """How the band-structure run is set up (yaml section `workflow:`).
+
+    `mode` is the overall choice -- "agent" (the agent decides everything) or
+    "match_mp" (copy Materials Project's calculation). The individual choices
+    below default to None, meaning "whatever the mode says"; set one to
+    override the mode for that choice only. `resolved()` gives the result.
+    """
+    mode: str = "agent"
+    # k-path for the bands: "seekpath" (standard_kpath, Hinuma et al.) or
+    # "materials_project" (the path MP's band structure was computed on)
+    kpath: str | None = None
+    # which of MP's band structures (and so which path convention) to use
+    mp_path_type: str = "setyawan_curtarolo"
+    # "agent" (the agent picks from Pseudo-Dojo) or "match_mp" (PBE PAW, with the
+    # valence/semicore states of MP's VASP POTCARs as close as Pseudo-Dojo allows)
+    pseudopotentials: str | None = None
+    # "agent" (the relativistic DECISION RULE), "on" or "off"
+    spin_orbit: str | None = None
+    # exchange-correlation functional of the pseudopotentials (e.g. pbesol, pbe)
+    functional: str | None = None
+
+    # SCF k-mesh convergence (the converge_kmesh tool): start at
+    # kmesh_start_spacing (1/A, incl. 2*pi; scf_kmesh's spacing) and refine by
+    # kmesh_refine_factor until the total energy changes by less than
+    # kmesh_threshold_meV_per_atom over kmesh_confirmations further refinements.
+    kmesh_convergence: bool = True
+    kmesh_start_spacing: float = 0.25
+    kmesh_threshold_meV_per_atom: float = 1.0
+    kmesh_confirmations: int = 2
+    kmesh_refine_factor: float = 0.8
+    kmesh_max_scf: int = 8
+
+    def __post_init__(self):
+        checks = (("mode", WORKFLOW_MODES), ("kpath", KPATH_SOURCES), ("pseudopotentials", PSEUDO_CHOICES),
+                  ("spin_orbit", SPIN_ORBIT_CHOICES), ("mp_path_type", MP_PATH_TYPES))
+        for name, allowed in checks:
+            value = getattr(self, name)
+            if isinstance(value, bool) and name == "spin_orbit":  # yaml reads on/off as booleans
+                value = self.spin_orbit = "on" if value else "off"
+            if value is not None and value not in allowed:
+                raise ValueError(f"workflow.{name} = {value!r}; expected one of {', '.join(allowed)}")
+        if not 0 < self.kmesh_refine_factor < 1:
+            raise ValueError("workflow.kmesh_refine_factor must be between 0 and 1")
+
+    def resolved(self) -> dict:
+        """Every choice, with the unset ones filled in from the mode."""
+        out = dict(_MODE_DEFAULTS[self.mode])
+        for key in out:
+            if getattr(self, key) is not None:
+                out[key] = getattr(self, key)
+        out.update(mode=self.mode, mp_path_type=self.mp_path_type)
+        out["kmesh"] = {
+            "converge": self.kmesh_convergence, "start_spacing": self.kmesh_start_spacing,
+            "threshold_meV_per_atom": self.kmesh_threshold_meV_per_atom,
+            "confirmations": self.kmesh_confirmations, "refine_factor": self.kmesh_refine_factor,
+            "max_scf": self.kmesh_max_scf,
+        }
+        return out
+
+
 @dataclass
 class Settings:
     # --- credentials (None -> environment / .env) ---
@@ -279,6 +359,7 @@ class Settings:
     qe: QESettings = field(default_factory=QESettings)
     model: ModelSettings = field(default_factory=ModelSettings)
     agent: AgentSettings = field(default_factory=AgentSettings)
+    workflow: WorkflowSettings = field(default_factory=WorkflowSettings)
 
     source: Path | None = None  # config.yaml this came from, if any
 
@@ -314,6 +395,7 @@ class Settings:
             qe=QESettings(**(data.get("quantum_espresso") or {})),
             model=ModelSettings(**(data.get("model") or {})),
             agent=AgentSettings(**(data.get("agent") or {})),
+            workflow=WorkflowSettings(**(data.get("workflow") or {})),
             source=source,
         )
         # Left out rather than passed as None so the dataclass defaults
@@ -402,7 +484,8 @@ class Settings:
         return (
             f"Settings(source={str(self.source) if self.source else None!r}, keys={keys}, "
             f"work_root={str(self.work_root)!r}, hf_home={str(self.hf_home) if self.hf_home else None!r}, "
-            f"doc_index_dir={str(self.doc_index_dir)!r}, qe={self.qe}, model={self.model}, agent={self.agent})"
+            f"doc_index_dir={str(self.doc_index_dir)!r}, qe={self.qe}, model={self.model}, agent={self.agent}, "
+            f"workflow={self.workflow})"
         )
 
 
