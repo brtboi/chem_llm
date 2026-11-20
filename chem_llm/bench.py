@@ -71,7 +71,9 @@ def resolve(names: list[str], path: Path = SUITES) -> list[str]:
     return out
 
 
-def work_dir_of(name: str, case: dict) -> Path:
+def work_dir_of(name: str, case: dict, suite: dict | None = None) -> Path:
+    if suite and suite.get("work_root"):
+        return REPO_ROOT / suite["work_root"] / name
     return (REPO_ROOT / case["work_dir"]) if case.get("work_dir") else BENCH / "work" / name
 
 
@@ -175,6 +177,14 @@ def evaluate_case(name: str, case: dict, work_dir: Path, record: dict | None = N
     ref = REFERENCES / f"{name}.json"
     if ref.exists():
         checks.append(compare_to_reference(json.loads(ref.read_text()), band_fingerprint(work_dir, metal)))
+    mp = ((record or {}).get("outcome") or {}).get("materials_project") if record else None
+    if mp is None:
+        from .agent import materials_project_score
+        from .settings import Settings
+
+        mp = materials_project_score(Path(work_dir), Settings.discover(REPO_ROOT))
+    checks += mp_checks(mp, exp.get("materials_project"))
+    checks += kmesh_checks(Path(work_dir), exp.get("kmesh_converged", False))
     plot_script = _plot_script(work_dir)
     checks.append(_check("plot_uses_kpath_tool", bool(plot_script and "plot_axis" in plot_script),
                          "plot script reads chem_llm.dft.kpath.plot_axis" if plot_script and "plot_axis" in plot_script
@@ -182,7 +192,56 @@ def evaluate_case(name: str, case: dict, work_dir: Path, record: dict | None = N
                          hard=False))
     hard = [c for c in checks if c["hard"]]
     return {"case": name, "passed": all(c["ok"] for c in hard), "checks": checks,
+            "scores": run_scores(facts, mp), "materials_project": mp,
             "facts": {k: (str(v) if isinstance(v, Path) else v) for k, v in facts.items()}}
+
+
+def mp_checks(mp: dict | None, expect: dict | None) -> list[dict]:
+    """Band RMS and gap against Materials Project's. Hard only for a case
+    whose expect has `materials_project: {rms_eV, gap_eV}` tolerances."""
+    expect = expect or {}
+    hard = bool(expect)
+    if not mp or mp.get("rms_eV") is None:
+        detail = (mp or {}).get("detail") or "no Materials Project entry or bands to compare"
+        return [_check("mp_band_rms", False if hard else None, detail, hard=hard)]
+    rms_tol, gap_tol = expect.get("rms_eV", 0.15), expect.get("gap_eV", 0.15)
+    out = [_check("mp_band_rms", mp["rms_eV"] <= rms_tol, f"{mp['detail']}; max |dE| {mp.get('max_abs_eV')} eV "
+                                                           f"(tolerance {rms_tol})", hard=hard)]
+    if mp.get("gap_error_eV") is not None:
+        out.append(_check("mp_gap", abs(mp["gap_error_eV"]) <= gap_tol,
+                          f"{mp['run_gap_eV']:.3f} eV vs Materials Project {mp['mp_gap_eV']:.3f} eV "
+                          f"({mp['gap_error_eV']:+.3f}; tolerance {gap_tol})", hard=hard))
+    return out
+
+
+def kmesh_checks(work_dir: Path, required: bool = False) -> list[dict]:
+    """If the run converged its k-mesh: did it converge, and does the SCF
+    that made the bands use that mesh?"""
+    from .dft.kmesh import read_kmesh
+
+    calc = Path(work_dir) / "calculations" / "000"
+    path = calc / "kmesh_convergence.json"
+    if not path.exists():
+        return [_check("kmesh_converged", False, "converge_kmesh was not run", hard=True)] if required else []
+    km = json.loads(path.read_text())
+    used = read_kmesh(_read(calc / "pw.in") or "")
+    mesh = "x".join(map(str, km.get("mesh") or []))
+    return [_check("kmesh_converged", bool(km.get("converged")) and used is not None and used[0] == km.get("mesh"),
+                   f"{mesh} after {len(km.get('meshes', []))} SCFs (converged: {km.get('converged')}); pw.in uses "
+                   f"{'x'.join(map(str, used[0])) if used else 'no automatic mesh'}", hard=required)]
+
+
+def run_scores(facts: dict, mp: dict | None) -> dict:
+    """Numbers to track across runs (LangSmith feedback, the index)."""
+    mp = mp or {}
+    out = {"gap_eV": facts.get("band_gap"), "mp_gap_eV": mp.get("mp_gap_eV"),
+           "mp_gap_error_eV": mp.get("gap_error_eV"), "mp_band_rms_eV": mp.get("rms_eV"),
+           "mp_band_mae_eV": mp.get("mae_eV"), "mp_band_max_abs_eV": mp.get("max_abs_eV")}
+    km = mp.get("kmesh") or {}
+    if km.get("mesh"):
+        out["kmesh_points"] = km["mesh"][0] * km["mesh"][1] * km["mesh"][2]
+        out["kmesh_scf_runs"] = km.get("n_scf")
+    return {k: v for k, v in out.items() if v is not None}
 
 
 def _plot_script(work_dir: Path) -> str | None:
@@ -243,40 +302,57 @@ def promote(run_dir: Path, tolerance: float = 0.15) -> Path:
 # ----------------------------------------------------------------------
 # running
 def run_case(name: str, *, suite: str | None, label: str | None, backend: str | None,
-             max_steps: int | None = None) -> dict:
-    """Run one case in this process (called in a subprocess by `run`)."""
-    import functools
+             max_steps: int | None = None, mode: str | None = None) -> dict:
+    """Run one case in this process (called in a subprocess by `run`).
+    The workflow is config.yaml's, overridden by the suite's `workflow:`
+    and then by `mode`."""
+    import dataclasses
 
     from .agent import DFTAgent
     from .settings import Settings
 
-    _, cases = load_suites()
+    suites, cases = load_suites()
     case = cases[name]
     settings = Settings.discover(REPO_ROOT)
     if settings.archive_dir is None:
         settings.archive_dir = BENCH
+    overrides = dict((suites.get(suite) or {}).get("workflow") or {})
+    if mode:
+        overrides["mode"] = mode
+    if overrides:
+        settings.workflow = dataclasses.replace(settings.workflow, **overrides)
+    # the suite's Materials Project tolerances (and, with convergence on, a
+    # converged mesh) become hard checks for its cases
+    scored_as = dict(case)
+    tol = (suites.get(suite) or {}).get("materials_project")
+    if tol:
+        scored_as["expect"] = {"materials_project": tol, **(case.get("expect") or {}),
+                               "kmesh_converged": settings.workflow.kmesh_convergence}
     agent = DFTAgent(settings, backend=backend, max_steps=max_steps)
     result = agent.run(
         case["compound"], case["spacegroup"],
         spacegroup_number=case.get("spacegroup_number"), spacegroup_name=case.get("name", ""),
-        work_dir=work_dir_of(name, case), clear_dir=True, verbose=False,
-        case=name, label=label, meta={"suite": suite, "purpose": case.get("purpose")},
-        evaluate=lambda wd, rec: evaluate_case(name, case, wd, rec),
+        work_dir=work_dir_of(name, case, suites.get(suite)), clear_dir=True, verbose=False,
+        case=name, label=label, meta={"suite": suite, "purpose": case.get("purpose"),
+                                      "workflow_mode": settings.workflow.mode},
+        evaluate=lambda wd, rec: evaluate_case(name, scored_as, wd, rec),
     )
     ev = result.evaluation or {}
     return {"case": name, "passed": ev.get("passed"), "failed": [c["name"] for c in ev.get("checks", [])
                                                                  if c.get("ok") is False and c.get("hard")],
             "gap": result.band_gap, "steps": result.num_steps, "wall_min": round(result.runtime_seconds / 60, 1),
-            "archive": str(result.archive_dir), "outcome": {"checks": ev.get("checks", [])}}
+            "archive": str(result.archive_dir), "outcome": {"checks": ev.get("checks", [])},
+            "scores": ev.get("scores") or {}, "trace_id": result.trace_id,
+            "materials_project": (ev.get("materials_project") or {}).get("detail")}
 
 
 def _subprocess_case(name: str, suite: str | None, label: str | None, backend: str | None,
-                     max_steps: int | None) -> dict:
+                     max_steps: int | None, mode: str | None = None) -> dict:
     logs = BENCH / "work" / "_logs"
     logs.mkdir(parents=True, exist_ok=True)
     cmd = [sys.executable, "-m", "chem_llm.bench", "_run-case", name]
     for flag, value in (("--suite", suite), ("--label", label), ("--backend", backend),
-                        ("--max-steps", max_steps)):
+                        ("--max-steps", max_steps), ("--mode", mode)):
         if value is not None:
             cmd += [flag, str(value)]
     started = time.time()
@@ -291,16 +367,18 @@ def _subprocess_case(name: str, suite: str | None, label: str | None, backend: s
 
 
 def run_many(names: list[str], *, suite: str | None, label: str | None, backend: str | None,
-             parallel: int = 1, max_steps: int | None = None) -> list[dict]:
+             parallel: int = 1, max_steps: int | None = None, mode: str | None = None) -> list[dict]:
     results = []
     with futures.ThreadPoolExecutor(max_workers=max(1, parallel)) as pool:
-        jobs = {pool.submit(_subprocess_case, n, suite, label, backend, max_steps): n for n in names}
+        jobs = {pool.submit(_subprocess_case, n, suite, label, backend, max_steps, mode): n for n in names}
         for job in futures.as_completed(jobs):
             r = job.result()
             results.append(r)
             status = "PASS" if r.get("passed") else "FAIL"
             gap = f"{r['gap']:.3f} eV" if r.get("gap") is not None else "no gap"
-            print(f"[{datetime.now():%H:%M}] {status} {r['case']:<10} {gap:>10}  {r.get('steps', '-')} steps  "
+            rms = (r.get("scores") or {}).get("mp_band_rms_eV")
+            vs_mp = f"MP rms {rms:.3f} eV" if rms is not None else "MP rms -"
+            print(f"[{datetime.now():%H:%M}] {status} {r['case']:<10} {gap:>10}  {vs_mp}  {r.get('steps', '-')} steps  "
                   f"{r.get('wall_min', '-')} min  {', '.join(r.get('failed') or []) or r.get('error', '')}", flush=True)
     write_report()
     return results
@@ -325,11 +403,14 @@ def langsmith_scores(outputs: dict) -> dict:
     for key in ("steps", "wall_min"):
         if outputs.get(key) is not None:
             results.append({"key": key, "score": outputs[key]})
+    for key, value in (outputs.get("scores") or {}).items():
+        if isinstance(value, (int, float)):
+            results.append({"key": key, "score": value})
     return {"results": results}
 
 
 def run_langsmith(names: list[str], *, suite: str, label: str | None, backend: str | None, parallel: int,
-                  max_steps: int | None = None):
+                  max_steps: int | None = None, mode: str | None = None):
     if not os.environ.get("LANGSMITH_API_KEY"):
         raise SystemExit("chem-llm-bench: --langsmith needs LANGSMITH_API_KEY (and LANGSMITH_TRACING=true to "
                          "trace the agent runs themselves); add them to .env or the environment")
@@ -350,7 +431,7 @@ def run_langsmith(names: list[str], *, suite: str, label: str | None, backend: s
         os.environ.setdefault("LANGSMITH_PROJECT", f"chem_llm-{suite}")
 
     def target(inputs: dict) -> dict:
-        return _subprocess_case(inputs["case"], suite, label, backend, max_steps)
+        return _subprocess_case(inputs["case"], suite, label, backend, max_steps, mode)
 
     def scores(outputs: dict) -> dict:
         return langsmith_scores(outputs)
@@ -360,7 +441,9 @@ def run_langsmith(names: list[str], *, suite: str, label: str | None, backend: s
         target, data=dataset, evaluators=[scores], max_concurrency=parallel,
         experiment_prefix=(label or "run").replace(" ", "-")[:40],
         metadata={"commit": code.get("commit"), "uncommitted_changes": bool(code.get("uncommitted_changes")), "backend": backend,
-                  "system_prompt_sha": _sha(SYSTEM_PROMPT_TEMPLATE)},
+                  "system_prompt_sha": _sha(SYSTEM_PROMPT_TEMPLATE),
+                  "workflow_mode": mode or ((load_suites()[0].get(suite) or {}).get("workflow") or {}).get("mode")
+                  or "config"},
     )
     write_report()
     return results
@@ -387,6 +470,13 @@ def write_report(path: Path = BENCH / "RESULTS.md") -> Path:
         exp = c.get("expect") or {}
         return "metal" if exp.get("metal") else ("{}-{}".format(*exp["gap_eV"]) if "gap_eV" in exp else "-")
 
+    def vs_mp(e):
+        mp = e.get("mp") or {}
+        if mp.get("rms_eV") is None:
+            return "-"
+        g = mp.get("gap_error_eV")
+        return f"{mp['rms_eV']:.3f} / " + (f"{g:+.3f}" if g is not None else "metal")
+
     def link(e, name):
         return f"[{name}](runs/{Path(e['dir']).name}/{name}.txt)" if e.get("dir") else "-"
 
@@ -396,17 +486,18 @@ def write_report(path: Path = BENCH / "RESULTS.md") -> Path:
              "what changed since the previous run of that compound.", ""]
     for sname, suite in suites.items():
         lines += [f"## Suite `{sname}`", "", suite.get("description", ""), "",
-                  "| case | what it tests | last run | result | failed checks | gap eV (expected) | steps | wall min | prompt | commit | records |",
-                  "|---|---|---|---|---|---|---|---|---|---|---|"]
+                  "| case | what it tests | last run | mode | result | failed checks | gap eV (expected) | vs MP: band RMS / gap error eV | steps | wall min | prompt | commit | records |",
+                  "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
         for name in suite["cases"]:
             c, runs = cases[name], by_case.get(name, [])
             if not runs:
-                lines.append(f"| {name} | {c.get('purpose', '')} | never | - | - | - ({expected(c)}) | - | - | - | - | - |")
+                lines.append(f"| {name} | {c.get('purpose', '')} | never | - | - | - | - ({expected(c)}) | - | - | - | - | - | - |")
                 continue
             e = runs[-1]
             lines.append(
-                f"| {name} | {c.get('purpose', '')} | {(e.get('time') or '')[:16]} | {mark(e)} | "
-                f"{', '.join(e.get('failed_checks') or []) or '-'} | {gap(e)} ({expected(c)}) | {e.get('steps', '-')} | "
+                f"| {name} | {c.get('purpose', '')} | {(e.get('time') or '')[:16]} | {e.get('workflow_mode') or '-'} | "
+                f"{mark(e)} | {', '.join(e.get('failed_checks') or []) or '-'} | {gap(e)} ({expected(c)}) | {vs_mp(e)} | "
+                f"{e.get('steps', '-')} | "
                 f"{e.get('wall_min', '-')} | {(e.get('prompt_version') or '-')[:8]} | "
                 f"{((e.get('code') or {}).get('commit') or '-')[:8]} | "
                 f"{link(e, 'summary')}, {link(e, 'progress')}, {link(e, 'changes')} |")
@@ -414,12 +505,13 @@ def write_report(path: Path = BENCH / "RESULTS.md") -> Path:
     lines += ["## History", ""]
     for name, runs in by_case.items():
         lines += [f"### {name}: {cases[name].get('purpose', '')}", "",
-                  "| date | label | backend | result | failed checks | gap eV | steps | wall min | model min | prompt | commit |",
-                  "|---|---|---|---|---|---|---|---|---|---|---|"]
+                  "| date | label | backend | mode | result | failed checks | gap eV | vs MP eV | steps | wall min | model min | prompt | commit |",
+                  "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
         for e in reversed(runs[-25:]):
             lines.append(
-                f"| {(e.get('time') or '')[:16]} | {e.get('label') or '-'} | {e.get('backend') or '-'} | {mark(e)} | "
-                f"{', '.join(e.get('failed_checks') or []) or '-'} | {gap(e)} | {e.get('steps', '-')} | "
+                f"| {(e.get('time') or '')[:16]} | {e.get('label') or '-'} | {e.get('backend') or '-'} | "
+                f"{e.get('workflow_mode') or '-'} | {mark(e)} | "
+                f"{', '.join(e.get('failed_checks') or []) or '-'} | {gap(e)} | {vs_mp(e)} | {e.get('steps', '-')} | "
                 f"{e.get('wall_min', '-')} | {e.get('llm_min') if e.get('llm_min') is not None else '-'} | "
                 f"{(e.get('prompt_version') or '-')[:8]} | {((e.get('code') or {}).get('commit') or '-')[:8]} |")
         lines.append("")
@@ -465,12 +557,15 @@ def main(argv=None) -> int:
     r.add_argument("--backend", default="vllm", help="qwen | vllm (default) | claude")
     r.add_argument("--max-steps", type=int, default=None)
     r.add_argument("--langsmith", action="store_true", help="also record a LangSmith experiment")
+    r.add_argument("--mode", choices=["agent", "match_mp"], default=None,
+                   help="workflow mode for every case (default: the suite's workflow, else config.yaml)")
     one = sub.add_parser("_run-case")
     one.add_argument("name")
     one.add_argument("--suite")
     one.add_argument("--label")
     one.add_argument("--backend")
     one.add_argument("--max-steps", type=int)
+    one.add_argument("--mode")
     sub.add_parser("report", help="regenerate bench/RESULTS.md")
     pr = sub.add_parser("promote", help="make a validated run its case's golden reference")
     pr.add_argument("run_dir")
@@ -486,7 +581,8 @@ def main(argv=None) -> int:
                 print(f"    {n:<10} {c['compound']:<9} {c['spacegroup']:<10} {c.get('purpose', '')}")
         return 0
     if args.cmd == "_run-case":
-        out = run_case(args.name, suite=args.suite, label=args.label, backend=args.backend, max_steps=args.max_steps)
+        out = run_case(args.name, suite=args.suite, label=args.label, backend=args.backend, max_steps=args.max_steps,
+                       mode=args.mode)
         print(json.dumps(out, default=str))
         return 0
     if args.cmd == "run":
@@ -496,10 +592,10 @@ def main(argv=None) -> int:
         print(f"running {len(names)} case(s), {args.parallel} at a time: {' '.join(names)}", flush=True)
         if args.langsmith:
             run_langsmith(names, suite=suite, label=args.label, backend=args.backend, parallel=args.parallel,
-                          max_steps=args.max_steps)
+                          max_steps=args.max_steps, mode=args.mode)
         else:
             results = run_many(names, suite=suite, label=args.label, backend=args.backend, parallel=args.parallel,
-                               max_steps=args.max_steps)
+                               max_steps=args.max_steps, mode=args.mode)
             print(f"{sum(bool(r.get('passed')) for r in results)}/{len(results)} passed; see bench/RESULTS.md")
         return 0
     if args.cmd == "report":

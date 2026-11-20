@@ -221,6 +221,14 @@ def _index_entry(run: RunArchive, record: dict, extra: dict | None) -> dict:
         "refused": sum(1 for s in steps if s.get("tool") == "refused"),
         "config": {k: cfg.get(k) for k in ("temperature", "do_sample", "max_steps", "max_history", "trim_history")},
     }
+    if (cfg.get("workflow") or {}).get("mode"):
+        entry["workflow_mode"] = cfg["workflow"]["mode"]
+    mp = (record.get("outcome") or {}).get("materials_project") or {}
+    if mp:
+        entry["mp"] = {k: mp.get(k) for k in ("material_id", "path_type", "rms_eV", "max_abs_eV", "gap_error_eV",
+                                              "mp_gap_eV", "n_kpoints", "k_matching", "kmesh") if mp.get(k) is not None}
+    if record.get("trace_id"):
+        entry["trace_id"] = record["trace_id"]
     entry.update(extra or {})
     return entry
 

@@ -778,6 +778,7 @@ def run_agent(
     outcome=None,
     system_prompt: str | None = None,
     dispatch: dict | None = None,
+    trace_metadata: dict | None = None,
 ) -> AgentState:
     """Run the agent live: the model generates each tool call. Executes in
     `work_dir` (defaults to config.WORK_DIR) and logs to `log_file`
@@ -822,13 +823,14 @@ def run_agent(
     # What the run's LangSmith trace is named and searchable by; run_id links it to log.jsonl.
     extra = log_extra or {}
     workflow = extra.get("workflow", "dft")
-    trace_metadata = {k: extra[k] for k in ("compound", "spacegroup", "spacegroup_number") if extra.get(k)}
-    trace_metadata.update(run_id=state.run_id, model=model_name, workflow=workflow)
+    metadata = {k: extra[k] for k in ("compound", "spacegroup", "spacegroup_number") if extra.get(k)}
+    metadata.update(run_id=state.run_id, model=model_name, workflow=workflow)
+    metadata.update({k: v for k, v in (trace_metadata or {}).items() if v is not None})
     if isinstance(extra.get("config"), dict) and extra["config"].get("backend"):
-        trace_metadata["backend"] = extra["config"]["backend"]
+        metadata["backend"] = extra["config"]["backend"]
     run_name = f"chem_llm {workflow}" + (f": {extra['compound']}" if extra.get("compound") else "")
     run_step_loop(state, source, max_steps, verbose, observer=observer, recorder=recorder,
-                  run_name=run_name, tags=["chem_llm", workflow], metadata=trace_metadata)
+                  run_name=run_name, tags=["chem_llm", workflow], metadata=metadata)
 
     if log_file:
         print("logging to...", log_file)

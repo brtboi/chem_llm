@@ -468,6 +468,9 @@ class DFTAgent:
             verbose=verbose,
             clear_dir=clear_dir,
             load_path=None,
+            trace_metadata={"case": case, "label": label, "suite": (meta or {}).get("suite"),
+                            "workflow_mode": wf["mode"], "kpath": wf["kpath"],
+                            "pseudopotentials": wf["pseudopotentials"], "spin_orbit": wf["spin_orbit"]},
         )
         # run_agent's log_file has a sentinel default (work_dir/log.jsonl),
         # and log_file=None there means "do not log at all", so only pass it

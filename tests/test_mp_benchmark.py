@@ -187,3 +187,27 @@ def test_compare_bands_interpolates_a_denser_path_and_sees_a_real_error():
 def test_potcar_names_say_which_semicore_states():
     assert "semicore p" in potcar_valence_note("PAW_PBE Ti_pv 07Sep2000")["meaning"]
     assert potcar_valence_note("PAW_PBE O 08Apr2002")["meaning"].startswith("standard")
+
+
+# ---------------------------------------------------------------- benchmark checks
+def test_mp_checks_are_soft_unless_the_suite_sets_tolerances():
+    from chem_llm.bench import mp_checks, run_scores
+
+    mp = {"rms_eV": 0.2, "max_abs_eV": 0.5, "gap_error_eV": 0.05, "run_gap_eV": 1.83, "mp_gap_eV": 1.78,
+          "detail": "RMS 0.200 eV", "kmesh": {"mesh": [6, 6, 9], "converged": True, "n_scf": 4}}
+    soft = mp_checks(mp, None)
+    assert [c["name"] for c in soft] == ["mp_band_rms", "mp_gap"] and not any(c["hard"] for c in soft)
+    hard = mp_checks(mp, {"rms_eV": 0.15, "gap_eV": 0.15})
+    assert [c["ok"] for c in hard] == [False, True] and all(c["hard"] for c in hard)
+    assert mp_checks(None, {"rms_eV": 0.15})[0]["ok"] is False
+    scores = run_scores({"band_gap": 1.83}, mp)
+    assert scores["mp_band_rms_eV"] == 0.2 and scores["kmesh_points"] == 324 and scores["kmesh_scf_runs"] == 4
+
+
+def test_mp_suite_runs_in_its_own_work_root():
+    from chem_llm.bench import BENCH, load_suites, work_dir_of
+
+    suites, cases = load_suites()
+    assert work_dir_of("gaas", cases["gaas"], suites["mp"]) == BENCH / "work" / "mp" / "gaas"
+    assert "sandbox" in str(work_dir_of("gaas", cases["gaas"]))  # the core suite's own dir is unchanged
+    assert suites["mp"]["workflow"] == {"mode": "match_mp"}
