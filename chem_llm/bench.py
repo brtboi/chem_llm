@@ -236,7 +236,10 @@ def kmesh_checks(work_dir: Path, required: bool = False) -> list[dict]:
 def run_scores(facts: dict, mp: dict | None) -> dict:
     """Numbers to track across runs (LangSmith feedback, the index)."""
     mp = mp or {}
-    out = {"gap_eV": facts.get("band_gap"), "mp_gap_eV": mp.get("mp_gap_eV"),
+    gap = facts.get("band_gap")
+    if mp.get("aligned_to") == "fermi" or (gap is not None and gap < 0):
+        gap = None  # a metal: the run's "gap" is not one
+    out = {"gap_eV": gap, "mp_gap_eV": mp.get("mp_gap_eV"),
            "mp_gap_error_eV": mp.get("gap_error_eV"), "mp_band_rms_eV": mp.get("rms_eV"),
            "mp_band_mae_eV": mp.get("mae_eV"), "mp_band_max_abs_eV": mp.get("max_abs_eV")}
     km = mp.get("kmesh") or {}

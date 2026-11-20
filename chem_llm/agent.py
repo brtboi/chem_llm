@@ -630,9 +630,9 @@ def trace_scores(result: RunResult) -> list[dict]:
     out = [{"key": "completed", "score": int(bool(result.completed))},
            {"key": "dft_finished", "score": int(bool(result.dft_finished))},
            {"key": "steps", "score": result.num_steps}]
-    if result.band_gap is not None:
-        out.append({"key": "gap_eV", "score": round(result.band_gap, 4)})
     mp = result.materials_project or {}
+    if result.band_gap is not None and result.band_gap >= 0 and mp.get("aligned_to") != "fermi":
+        out.append({"key": "gap_eV", "score": round(result.band_gap, 4)})
     if mp.get("mp_gap_eV") is not None:
         out.append({"key": "mp_gap_eV", "score": round(mp["mp_gap_eV"], 4), "comment": mp.get("material_id")})
     for key in ("gap_error_eV", "rms_eV", "mae_eV", "max_abs_eV"):
