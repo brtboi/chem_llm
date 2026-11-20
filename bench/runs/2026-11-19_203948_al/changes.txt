@@ -1,0 +1,86 @@
+Changes since the previous al run (2026-10-14T04:38, runs/2026-10-14_042815_al)
+
+code: 57e180007d -> 444c967c05
+  26 commit(s) in between:
+    0cebfb2 2026-10-14 Spin-orbit: unambiguous rule and a validator check for elements past Xe
+    dadaf6d 2026-10-14 Sweep 8 (repeat): 19/20 finished pass; CsPbBr3 rerun passes after the spin-orbit fix
+    3100a31 2026-10-14 Sweep 8 complete: 20/21 (Bi2Se3 0.127 eV); CsPbBr3 passes on rerun
+    852092e 2026-10-16 record.json: tool calls in every step, total tokens, simpler metrics
+    4209faa 2026-10-16 Run record format 2: one versioned schema for log.jsonl and record.json
+    cf28472 2026-10-16 bench/visualizations: where time and tokens go, last week vs sweep 8
+    7382f85 2026-10-20 README and visualizations: current settings, dedicated QE GPUs, fair CsPbBr3 comparison
+    b2eefb5 2026-10-29 Guided setup in the terminal; phase names; --start-vllm; qwen backend -> huggingface
+    f030966 2026-11-03 DeePseudopot agent: from a finished QE run to a trained NN pseudopotential
+    826356a 2026-11-03 Remove the old DeePseudopot notebook and handoff note
+    e250f25 2026-11-06 Resolve common phase names to a space group in code
+    a2607ce 2026-11-12 Split chem_llm into subpackages: core, llm, dft, dpp, records, cli
+    51571bb 2026-11-12 Benchmark records: TiO2 after the subpackage split, and the 2026-11-06 runs
+    a10cdcc 2026-11-12 DeePseudopot agent: Monte Carlo first, then gradient descent, from a UPF-derived start
+    0fc6c60 2026-11-12 DeePseudopot: TiO2 results of the two-stage pipeline; units of the starting fit
+    c28fe02 2026-11-12 write_bundle: never write a reference energy of exactly 0
+    7f5c612 2026-11-12 DeePseudopot guide for coding agents (chem_llm/dpp/AGENTS.md)
+    f028f02 2026-11-12 DeePseudopot: gradient from the best Monte Carlo minimum reaches gap -0.16 eV
+    affd43e 2026-11-16 Docker deployment of the DFT agent (deploy/docker)
+    e1291d2 2026-11-16 LangSmith tracing: named traces with run metadata, tool calls as runs
+    b037e03 2026-11-16 Upgrade all locked dependencies (uv lock --upgrade)
+    37e4b00 2026-11-19 Workflow settings section and k-mesh convergence helpers
+    2c18b5a 2026-11-19 converge_kmesh tool, Materials Project match mode, and band scoring vs MP
+    875a2ce 2026-11-19 Benchmark: score runs against Materials Project; mp suite; scores to LangSmith
+    93760b1 2026-11-19 Fixes from the first live match_mp run (Si)
+    444c967 2026-11-19 chem-llm --mode and a method screen in the guided setup
+
+prompt: version bef27cd9d722 -> 00a4d3c8cfb0
+  task text changed
+  system prompt: 24 line(s) added, 13 removed:
+    -INVARIANT 2: the number of valence electrons / occupied bands used anywhere in a DFT calculation is a property of the specific pseudopotential used, not the element -- semicore pseudopotentials (e.g.
+    -    from chem_llm.qe_output import read_pw_out, band_edges
+    +INVARIANT 2: the number of valence electrons / occupied bands used anywhere in a DFT calculation is a property of the specific pseudopotential used, not the element -- semicore pseudopotentials (e.g.
+    +    from chem_llm.dft.qe_output import read_pw_out, band_edges
+    -INVARIANT 3: the k-path of a bands calculation, the cell it runs on, and the band plot's x-axis all come from ONE k-path, produced by chem_llm.kpath (the same code as the get_kpath tool) for THIS str
+    -    from chem_llm.kpath import standard_kpath, kp_atoms, kp_kpts, kp_save
+    +INVARIANT 3: the k-path of a bands calculation, the cell it runs on, and the band plot's x-axis all come from ONE k-path, produced by chem_llm.dft.kpath (the same code as the get_kpath tool) for THIS
+    +    from chem_llm.dft.kpath import standard_kpath, kp_atoms, kp_kpts, kp_save
+    -INVARIANT 4: the band plot's x-axis, ticks and line segments come from chem_llm.kpath.plot_axis(kpath.json, NNN.bands.dat), which also refuses to run if bands.x computed a different k-point list than
+    +INVARIANT 4: the band plot's x-axis, ticks and line segments come from chem_llm.dft.kpath.plot_axis(kpath.json, NNN.bands.dat), which also refuses to run if bands.x computed a different k-point list 
+    -  THEN reduce it to its PRIMITIVE cell before writing any QE input. What MP returns is frequently a conventional or doubled cell -- rutile TiO2 comes back as 12 atoms where the primitive cell has 6 -
+    +  THEN reduce it to its PRIMITIVE cell before writing any QE input. What MP returns is frequently a conventional or doubled cell -- rutile TiO2 comes back as 12 atoms where the primitive cell has 6 -
+    -  THEN use chem_llm.kpath / get_kpath per INVARIANT 3 -- never a hand-built path
+    +  THEN use chem_llm.dft.kpath / get_kpath per INVARIANT 3 -- never a hand-built path
+    -  The SCF mesh (pw.in) is NEVER typed by hand: compute it in setup_jobs.py for the cell the SCF runs on, `kpts = scf_kmesh(prim, metal=...)` from chem_llm.kpath (even spacing along every reciprocal v
+    +  The SCF mesh (pw.in) is NEVER typed by hand: compute it in setup_jobs.py for the cell the SCF runs on, `kpts = scf_kmesh(prim, metal=...)` from chem_llm.dft.kpath (even spacing along every reciproc
+    -  IF   any element in the structure has atomic number > 54 (post-Xe), OR the calculation explicitly targets spin-orbit-coupled physics (topological states, heavy-element magnetism, Rashba splitting)
+    +  Two independent conditions -- EITHER one alone is enough:
+    +    (a) any element in the structure has atomic number > 54 (Cs, Ba, the lanthanides, Hf..Pb, Bi, ...), whatever physics the task targets -- for these, spin-orbit changes the bands themselves (CsPbBr
+    +    (b) the calculation explicitly targets spin-orbit-coupled physics (topological states, heavy-element magnetism, Rashba splitting).
+    +  IF   (a) OR (b)
+    -  Use chem_llm.kpath.plot_axis per INVARIANT 4 and chem_llm.qe_output per INVARIANT 2 with plain matplotlib:
+    +  Use chem_llm.dft.kpath.plot_axis per INVARIANT 4 and chem_llm.dft.qe_output per INVARIANT 2 with plain matplotlib:
+    -    "description": "Get the standard band-structure k-path for a structure (seekpath, Hinuma et al. convention -- the same paths the Materials Project offers) and save it as JSON. Returns the path (e
+    +    "description": "Get the standard band-structure k-path for a structure (seekpath, Hinuma et al. convention -- the same paths the Materials Project offers) and save it as JSON. Returns the path (e
+    +    "name": "converge_kmesh",
+    +    "description": "Converge the SCF Monkhorst-Pack k-mesh of one calculation directory by total energy. Runs pw.x SCF on a sequence of finer and finer meshes (from scf_kmesh spacings, each a copy of
+    +    "parameters": {
+    +      "directory": "string. Calculation directory holding the SCF input, e.g. calculations/000.",
+    +      "pw_input": "string (optional, default 'pw.in'). SCF input filename, relative to directory."
+    +    }
+    +  },
+    +  {
+    -    "description": "Download a crystal structure CIF from the Materials Project. If multiple structures match the space group, the most stable one is selected (lowest energy above the convex hull); t
+    +    "description": "Download a crystal structure CIF from the Materials Project. If multiple structures match the space group, the most stable one is selected (lowest energy above the convex hull); t
+    -    "description": "Parse a Quantum ESPRESSO input file (pw.x or bands.x) and check it two ways. (1) Internal consistency: &SYSTEM's nat equals the number of atoms under ATOMIC_POSITIONS, and ntyp eq
+    +    "description": "Parse a Quantum ESPRESSO input file (pw.x or bands.x) and check it two ways. (1) Internal consistency: &SYSTEM's nat equals the number of atoms under ATOMIC_POSITIONS, and ntyp eq
+
+settings:
+  decoding: {'max_new_tokens': 5000, 'do_sample': True, 'temperature': 0.3} -> -
+  do_sample: - -> True
+  temperature: - -> 0.3
+
+result:
+  completed                        True -> True        
+  benchmark checks passed          True -> False          *
+  band gap                   -13.061 eV -> -13.099 eV     *
+  steps                              36 -> 35             *
+  wall time                   10.57 min -> 15.38 min      *
+  model time                    9.7 min -> 11.44 min      *
+  failed script runs                  1 -> 0              *
+  refused calls                       1 -> 0              *

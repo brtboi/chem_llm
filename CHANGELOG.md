@@ -7,6 +7,38 @@ and `bench/runs/`.
 
 ## Week of 2026-11-16
 
+- **Benchmarking against Materials Project's band structures; k-mesh convergence** (37e4b00,
+  2c18b5a, 875a2ce, 93760b1, 444c967, a80b913). New `workflow:` settings section: `mode: agent`
+  (the agent decides everything, as before) or `match_mp` (copy MP's calculation: its
+  band-structure cell and k-path, PBE PAW pseudopotentials matched to its POTCARs' valence, no
+  spin-orbit), with per-choice overrides (`kpath`, `pseudopotentials`, `spin_orbit: agent|on|off`,
+  `functional`, `mp_path_type`). Also `chem-llm --mode` and a "method" screen in the guided setup.
+  A new `converge_kmesh` tool runs SCFs on finer meshes (from 0.25 1/A, x0.8 per step) until the
+  total energy moves < 1 meV/atom over 2 further refinements; the task has the agent call it
+  before the bands. Every run with bands is now scored against MP's band structure (RMS / MAE /
+  max over the bands from 6 eV below the VBM to 3 eV above the CBM, aligned at the VBM, or at the
+  Fermi level for metals; plus the gap error). The score goes in the run record, the index,
+  `RESULTS.md` (new "vs MP" column) and LangSmith: the agent's trace gets a known id and every
+  score/check as feedback, and its metadata names the case, suite and workflow choices. New
+  suite `mp` (Si, diamond, TiO2, MgO, GaAs, Al; `match_mp`, 0.15 eV tolerances, run in
+  `bench/work/mp/`).
+
+  First `mp` sweep (Qwen3.8-27B on vLLM, 6 in parallel, 17.5 min, LangSmith experiment
+  `mp-suite:-match_mp-+-k-mesh-convergence,-e7cddafa`). Band RMS vs MP at all of MP's k-points:
+  diamond 0.004 eV, MgO 0.010, GaAs 0.013, Si 0.023, TiO2 0.035 (max |dE| 0.012-0.088); gap
+  errors -0.030 to +0.044 eV. Converged meshes: Si/GaAs 10^3, MgO 11^3, diamond 13^3, TiO2
+  6x6x9, all within 3-4 SCFs; Al needed 27^3 (7 SCFs). Al scored 0.97 eV RMS: a uniform shift
+  from aligning to the Fermi level of MP's line-mode run (7.06 eV), which comes from the path
+  k-points alone. MP's uniform-mesh Fermi level is 8.05 eV; aligned to it, the same Al bands
+  score 0.016 eV. Rerun after the fix: Al passes, 0.027 eV RMS (max 0.10) at all 1016 k-points, 36 steps, 8.9 min; so 6/6 of the suite are within 0.035 eV RMS of MP.
+  Two bugs found in a Si trial before the sweep and fixed: the MP entry was looked up one
+  directory too high (no run was scored), and the old golden references (PBEsol, seekpath runs)
+  were still checked in `match_mp`. For comparison, the last agent-mode TiO2 run (PBEsol,
+  seekpath, a 1% smaller cell) scores 0.17 eV RMS against MP.
+  Reading traces back: the `langsmith` CLI is not installed on Perlmutter; the SDK's v2 client
+  works (`sessions.resolve` for the agent's project, then `runs.query_v2`), without the
+  deprecated `/runs/query`.
+
 - **LangSmith tracing**: `.env` turns it on (`LANGSMITH_TRACING`, `LANGSMITH_ENDPOINT`), and runs
   go to agent `chem-llm`, environment `local` (`LANGSMITH_AGENT_ID` / `_ENVIRONMENT`, LangSmith's
   beta addressing). Each trace is named `chem_llm <workflow>: <compound>` with the compound, model,

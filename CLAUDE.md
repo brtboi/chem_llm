@@ -14,6 +14,10 @@ ESPRESSO, and plot a band structure. See README.md for the package API.
   structure/output in code, never from memory".
 - DeePseudopot (the second agent, QE run -> neural-network pseudopotential): read
   `chem_llm/dpp/AGENTS.md` first -- options, gotchas, and what was measured.
+- `Settings.workflow` (`workflow:` in yaml, `chem-llm --mode`): `agent` (the original pipeline)
+  or `match_mp` (copy Materials Project's cell, k-path, PBE PAW, no SOC). `converge_kmesh` tool
+  (`chem_llm/dft/kmesh.py`) converges the SCF mesh; `chem_llm/dft/materials_project.py` fetches
+  MP's band structure and scores every run's bands against it (`outcome.materials_project`).
 - `chem_llm/core/config.py` is legacy module constants, still used by the `sandbox/run_test*.py`
   drivers and as defaults for `agent_core` functions called directly.
 

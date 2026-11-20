@@ -1,0 +1,124 @@
+chem_llm run summary -- Al (Fm-3m)
+==================================
+completed in 36 steps, 8.9 min | Qwen/Qwen3.8-27B
+work dir: /pscratch/sd/b/brenthu/chem_llm/bench/work/mp/al
+band gap: -13.151 eV (computed from the bands output)
+plot:     calculations/000/bands_000.pdf
+
+1. What the agent did
+    step  1  fetched the Al structure (Fm-3m) from the Materials Project: mp-134 ->
+             structures/Al_base.cif
+    step  4  wrote generate_structures.py: 1 version, run 1x -> OK at step 5
+    step  7  fetched the Al pseudopotential from Pseudo-Dojo -> Al.upf
+    step 21  wrote setup_jobs.py: 2 versions, run 2x -> OK at step 30
+    step 23  validated calculations/000/pw.in: OK
+    step 24  validated calculations/000/bands.in: OK
+    step 31  ran Quantum ESPRESSO in calculations/000: OK (scf, bands_scf, bands_post)
+    step 33  wrote plot_bands.py: 1 version, run 1x -> OK at step 34
+             9 documentation lookup(s) along the way (where they clustered: section 4)
+
+2. DFT setup (to reproduce the calculation)
+    Structure
+      - source: Materials Project mp-134 (Al, Fm-3m #225)
+      - cell used for DFT: Al, 1 atoms, Fm-3m (#225); a, b, c = 2.8535, 2.8535, 2.8535 A; alpha,
+        beta, gamma = 60.00, 60.00, 60.00 deg; volume 16.429 A^3
+      - fractional positions: Al (0.0000, 0.0000, 0.0000)
+    Pseudopotentials (Pseudo-Dojo)
+      - Al: Al.upf -- PAW, scalar-relativistic, SLA PW PBX PBC, stringent table; z_valence 3;
+        recommended ecutwfc 12.0 Ha (24 Ry)
+    pw.x settings
+      - exchange-correlation: SLA (taken from the pseudopotentials)
+      - spin-orbit coupling: off
+      - cutoffs: ecutwfc = 24.0 Ry, ecutrho = 192.0 Ry (largest recommended: 12 Ha = 24 Ry)
+      - occupations = smearing, smearing = mv, degauss = 0.01 Ry, nspin = 1
+      - SCF k-mesh: 27 x 27 x 27 Monkhorst-Pack, shift 0 0 0 (560 irreducible k-points)
+      - SCF convergence: conv_thr = 1e-08 Ry
+    Band structure
+      - k-path: GAMMA-X-W-K-GAMMA-L-U-W-L-K | U-X (1016 k-points, K_POINTS crystal; points named
+        from their coordinates by symmetry)
+      - nbnd = 8 in the bands calculation
+      - 3 electrons -> 2 occupied bands (two electrons per band)
+      - band gap: -13.151 eV (computed here from the bands output; DFT band gaps are typically
+        underestimated)
+      - SCF converged; all three QE stages (SCF, bands, bands.x) finished
+    Perturbed-structure ensemble
+      - temperature: 600 K (as set in generate_structures.py)
+      - measured over 50 structures: per-axis RMS displacement Al 0.040 A; RMS strain 0.43%
+      - 51 structures; DFT was run on structure_000 (unperturbed) only
+    Software
+      - Quantum ESPRESSO v.7.5 (pw.x, bands.x); 1 MPI process(es) x 1 thread(s), GPU on
+
+3. Agent and harness (for CS / LLM engineers)
+    - base model: Qwen/Qwen3.8-27B (local open-weights model served by vLLM)
+    - sampling: temperature 0.3, do_sample True, max_new_tokens 5000
+    - run: completed in 36 steps of 80 allowed, 8.9 min; 35 tool calls: note 9, search_docs 9,
+      write_file 4, run_python 4, validate_qe_input 2, generate_cif 1, get_kpath 1,
+      get_pseudopotential 1, converge_kmesh 1, read_file 1, run_espresso_workflow 1, done 1
+    - prompt: a fixed system prompt -- agent protocol (one JSON tool call per step), numbered
+      working rules, INVARIANTS the agent's scripts must assert in code (atom/species counts and
+      electron count read from the actual structure and pw.out, never from memory; k-path from
+      seekpath on the cell in use; unit conversions), and DECISION RULES (relativistic treatment,
+      k-path source, primitive cell, plotting) -- plus a task prompt giving a 7-step workflow (fetch
+      structure, perturb, pseudopotentials, decide settings, write inputs, run QE, plot) with done
+      criteria. No examples or templates: the agent writes every script.
+    - tools: deterministic Python functions, each returning JSON -- Materials Project fetch, Pseudo-
+      Dojo fetch (reports z_valence/relativity/functional parsed from the downloaded UPF and the
+      matching recommended cutoff), a k-path tool (seekpath's standard path, shared by the QE input
+      and the plot), file read/write, Python execution (exit code), a QE input validator (namelists,
+      nat/ntyp, k-path), a QE runner, and a documentation search (BM25 + embeddings + reranker over
+      the ASE and QE docs). Facts the model is weak at come from tools, not from its memory.
+    - context: each step re-prompts with the task, notes, files written, unresolved errors and the
+      last 32 tool calls; trim_history on (superseded file versions, resolved failures and duplicate
+      notes dropped, plus a progress ledger)
+    - harness guards: a second consecutive note, a repeated doc search, or rewriting a file with
+      identical content is refused; model output that is not a valid tool call is fed back as an
+      error; results (gap, convergence, outputs) are re-derived from files on disk rather than
+      trusted from the agent's own summary
+    - protocol issues this run: 1 refused call(s)
+    - QE launch command: module load espresso/7.5-libxc-7.0.0-gpu-cu13 && srun --overlap -n 4 -c 32
+      --gpus-per-task=1 --gpu-bind=closest pw.x -in pw.in > pw.out 2>&1
+
+4. Errors, uncertainties and difficulties
+    - documentation lookups, grouped by what the agent did next:
+        setup_jobs.py: 9 lookup(s) (steps 9-19): write_espresso_in ASE function signature parameters
+        input_data kpts; chem_llm.dft.kpath scf_kmesh standard_kpath kp_atoms kp_kpts kp_save l;
+        bands.x input variables filband lsym prefix outdir spin_component; chem_llm dft kpath
+        scf_kmesh standard_kpath kp_atoms kp_kpts kp_save l
+    - harness refused 1 call(s) as loops: step 15 (search_docs)
+    - agent's own scientific assumptions:
+        * Temperature T=600 K: Al is a stable fcc solid up to 933 K (melting point); 600 K is a
+          realistic high-temperature regime where thermal motion is significant but the crystal is
+          far from melting.
+        * Debye-Waller parameter U_Al = 0.0015 A^2 at 600 K: from literature/Debye model estimate
+          for fcc Al.
+        * ecutwfc = 24.0 Ry (12.0 Ha x 2): Pseudo-Dojo normal recommendation for stringent PAW Al.
+          Lower than MP's 520 eV (36.8 Ry) but is the recommended cutoff for this specific
+          pseudopotential file.
+        * ecutrho = 192.0 Ry (8 x ecutwfc): PAW requires ~8x ratio (not 4x as for norm-conserving).
+        * Smearing: Methfessel-Paxton with degauss=0.01 Ry: standard for metals.
+        * No spin-orbit: Al Z=13 < 54, task specifies spin-orbit OFF to match Materials Project.
+        * No Hubbard U: Al has no d/f states requiring U correction.
+    - agent's own items needing expert review:
+        * The ecutwfc (24.0 Ry = 326 eV) is lower than MP's 520 eV. While this is the Pseudo-Dojo
+          recommended cutoff for this stringent PAW file, a higher cutoff might be needed for
+          quantitative agreement with MP's band structure.
+        * The band structure is aligned to the Fermi energy, which is appropriate for a metal, but
+          the absolute energy scale may differ from MP due to the different cutoff.
+
+5. Where the time went
+    wall time 8m57s, 965,359 tokens
+      by operation                            time  share      tokens
+      model generation                       5m36s    63%     965,359
+      tool calls (databases, docs, files)    2m22s    26%     805,367
+      Quantum ESPRESSO                       0m48s     9%      37,119
+      running the agent's scripts            0m10s     2%     122,873
+      by workflow step                        time  share      tokens
+      1 fetch + reduce structure             0m11s     2%      20,948
+      2 perturbed structures                 0m46s     9%      39,460
+      3 pseudopotentials                     0m11s     2%      28,110
+      4 decide QE settings                   0m56s    10%     277,874
+      5 write + validate QE inputs           4m20s    49%     331,317
+      6 run QE                               1m12s    13%     111,438
+      7 plot + done                          1m21s    15%     156,212
+    Quantum ESPRESSO by stage: scf 0m18s, bands_scf 0m26s, bands_post 0m04s
+    tool calls: search_docs 10, note 9, write_file 4, run_python 4, validate_qe_input 2, generate_cif 1, get_kpath 1, get_pseudopotential 1, converge_kmesh 1, read_file 1, run_espresso_workflow 1, done 1

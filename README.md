@@ -250,9 +250,13 @@ LANGSMITH_AGENT_ENVIRONMENT=local    # e.g. local, gcp
 ```
 
 A trace is named `chem_llm <workflow>: <compound>` (`dft` or `deepseudopot`), tagged with the
-workflow, and carries the compound, space group, model, backend and the run's `run_id` (the same
-id as in its `log.jsonl`) as metadata. Inside it: each step's model call with its full prompt,
-and each tool call as its own run named after the tool, with its arguments and result.
+workflow, and carries the compound, space group, model, backend, the workflow choices (mode,
+k-path, pseudopotentials, spin-orbit), the benchmark case/suite/label, and the run's `run_id`
+(the same id as in its `log.jsonl`) as metadata. Inside it: each step's model call with its full
+prompt, and each tool call as its own run named after the tool, with its arguments and result.
+When the run ends, its scores are attached to the trace as feedback: gap, Materials Project gap
+and gap error, band RMS / MAE / max against MP, k-mesh size and SCF count, and (in the
+benchmark) every check. The trace's id is the run record's `trace_id`.
 
 - `LANGSMITH_AGENT_ID` / `LANGSMITH_AGENT_ENVIRONMENT` use LangSmith's (beta) agent addressing.
   Do not also set `LANGSMITH_PROJECT`: with both, the SDK leaves runs untraced. Without the
@@ -451,6 +455,31 @@ under `paths.archive_dir` (default `<work_root>/_archive`; this repo's `config.y
 
 `agent.run(..., case="zno", label="why this run")` groups runs and says why each was made.
 
+### Workflow: agent decides, or match Materials Project
+
+`workflow:` in config.yaml (or `chem-llm --mode`, or the guided setup's "method" screen):
+
+- `mode: agent` (default): the agent picks the pseudopotentials, spin-orbit and functional
+  (PBEsol) and uses seekpath's k-path.
+- `mode: match_mp`: copy Materials Project's calculation so the bands can be compared point
+  by point: MP's band-structure cell and k-path (`mp_path_type`, default `setyawan_curtarolo`),
+  PBE PAW pseudopotentials whose valence matches MP's VASP POTCARs as closely as Pseudo-Dojo
+  allows (QE cannot read POTCARs; the agent is told which semicore states each one has and the
+  valence electron count, and any Hubbard U), and no spin-orbit (MP's band structures have none).
+- `kpath`, `pseudopotentials`, `spin_orbit`, `functional` each override the mode for that one
+  choice (`spin_orbit: agent | on | off`).
+- `kmesh_convergence` (default on): before the bands, the `converge_kmesh` tool runs SCFs on
+  finer and finer meshes from `kmesh_start_spacing` (0.25 1/A) until the total energy moves less
+  than `kmesh_threshold_meV_per_atom` (1 meV/atom) over `kmesh_confirmations` (2) further
+  refinements, and the agent uses that mesh. The table is in `calculations/000/kmesh_convergence.json`.
+
+Every run that has bands is scored against MP's band structure for its entry (named in
+`structures/materials_project.json`): both sides aligned at their VBM (Fermi energy for a metal),
+bands paired by counting from the VBM, RMS over the bands from 6 eV below the VBM to 3 eV above
+the CBM. A run on MP's path is compared point by point; a run on seekpath's path is interpolated
+along its path onto MP's k-points. The score is in the run record (`outcome.materials_project`)
+and is printed at the end of the run. MP references are cached in `<archive>/materials_project/`.
+
 ## Benchmark
 
 `chem-llm-bench` replaces one-off sandbox folders with named suites and a single history:
@@ -477,14 +506,19 @@ python scripts/plot_bench.py                          # charts of time and token
   - the band gap is in range;
   - spin-orbit, smearing and magnetization are as expected;
   - once a validated run has been promoted, the band energies at every high-symmetry point
-    match it within 0.15 eV.
+    match it within 0.15 eV;
+  - the band RMS and gap against Materials Project's (always reported; hard checks in a suite
+    with `materials_project: {rms_eV, gap_eV}`, like `mp`), and that the k-mesh converged.
+- **The `mp` suite** (`chem-llm-bench run mp --parallel 6`) runs Si, diamond, TiO2, MgO, GaAs
+  and Al in `match_mp` mode in `bench/work/mp/`, each held to 0.15 eV band RMS and gap error
+  against MP. A suite's `workflow:` sets the mode for its cases; `--mode` overrides it.
 - **Results.** [`bench/RESULTS.md`](bench/RESULTS.md) shows the latest result per case and
   each case's history, with links to every run's progress, summary and changes.
 
 **LangSmith.** With `LANGSMITH_API_KEY` set, `chem-llm-bench run core --langsmith` also
 records the sweep as an experiment on a LangSmith dataset named after the suite. Every check
-is its own feedback score, so experiments (prompt versions, models, settings) can be
-compared side by side in its UI. Add `LANGSMITH_TRACING=true` to trace every agent step
+is its own feedback score, as are the numbers (gap, MP gap error, band RMS, k-mesh size), so
+experiments (prompt versions, models, settings) can be compared side by side in its UI. Add `LANGSMITH_TRACING=true` to trace every agent step
 inside each run, which shows where a failing run went wrong. The local index and
 `RESULTS.md` work without it.
 
